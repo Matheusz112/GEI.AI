@@ -1,20 +1,36 @@
 {
   "expo": {
     "name": "GEI.AI",
-    "slug": "gei-ai",
+    "slug": "cordeiro",
     "version": "4.5.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/snack-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#F0F4FF"
     },
+    "extra": {
+      "eas": {
+        "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
+      }
+    },
     "android": {
       "package": "com.geiai.app",
-      "versionCode": 45
+      "versionCode": 45,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
-    "plugins": ["expo-camera"]
+    "plugins": [
+      "expo-camera"
+    ],
+    "sdkVersion": "54.0.0",
+    "platforms": [
+      "ios",
+      "android"
+    ]
   }
 }
