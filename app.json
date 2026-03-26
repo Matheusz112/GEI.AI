@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "GEI.AI",
+    "slug": "gei-ai",
+    "version": "4.5.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F0F4FF"
+    },
+    "android": {
+      "package": "com.geiai.app",
+      "versionCode": 45
+    },
+    "plugins": ["expo-camera"]
+  }
+}
