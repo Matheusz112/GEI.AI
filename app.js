@@ -3,9 +3,8 @@ import {
   StyleSheet, Text, View, TouchableOpacity,
   StatusBar, Animated, ActivityIndicator,
   Dimensions, TextInput, FlatList, ScrollView, KeyboardAvoidingView,
-  Platform, Modal, AppState, Switch, Easing, Keyboard
+  Platform, Modal, AppState, Switch, Easing, Keyboard, Image, Linking
 } from 'react-native';
-
 import * as NavigationBar from 'expo-navigation-bar';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -250,25 +249,22 @@ const callIA = async (prompt, retries = 2) => {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 20000);
+      const tid = setTimeout(() => controller.abort(), 22000);
       const r = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IA}:generateContent?key=${API_KEY_IA}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-          signal: controller.signal,
-        }
+        { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({contents:[{parts:[{text:prompt}]}]}),
+          signal: controller.signal }
       );
-      clearTimeout(timeout);
+      clearTimeout(tid);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
-      const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      if (!text && attempt < retries) continue;
-      return text;
-    } catch (e) {
+      const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!txt && attempt < retries) { await new Promise(res=>setTimeout(res,1500)); continue; }
+      return txt;
+    } catch(e) {
       if (attempt === retries) throw e;
-      await new Promise(res => setTimeout(res, 1200 * (attempt + 1)));
+      await new Promise(res => setTimeout(res, 1500 * (attempt + 1)));
     }
   }
   return '';
@@ -955,70 +951,166 @@ const TabBtn=({icon,label,active,onPress,T,fontScale})=>{
   const po=()=>Animated.spring(scale,{toValue:1,tension:250,friction:10,useNativeDriver:false}).start();
   return(<TouchableOpacity activeOpacity={1} onPressIn={pi} onPressOut={po} style={{flex:1,alignItems:'center',justifyContent:'center',gap:4}}><Animated.View style={{transform:[{scale}],alignItems:'center'}}><View style={[{width:44,height:32,borderRadius:12,justifyContent:'center',alignItems:'center'},active&&{backgroundColor:T.blueMid}]}><Feather name={icon} size={20} color={active?T.blue:T.textMuted}/></View><Text style={{fontSize:10*fontScale,fontWeight:active?'900':'700',color:active?T.blue:T.textMuted,marginTop:2}}>{label}</Text></Animated.View></TouchableOpacity>);
 };
-const ConfigScreen=({T,currentTheme,onThemeChange,fontScale,setFontScale,notifOn,setNotifOn,TAB_SAFE})=>{
-  const { Linking } = require('react-native');
-  return (
-  <ScrollView contentContainerStyle={{padding:20,paddingBottom:TAB_SAFE+20}} showsVerticalScrollIndicator={false}>
+const ConfigScreen=({T,currentTheme,onThemeChange,fontScale,setFontScale,notifOn,setNotifOn,TAB_SAFE})=>(
+  <ScrollView contentContainerStyle={{padding:20,paddingBottom:TAB_SAFE+40}} showsVerticalScrollIndicator={false}>
     <Text style={{fontSize:26*fontScale,fontWeight:'900',color:T.text,letterSpacing:-0.5,marginBottom:24}}>Configurações</Text>
-    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:20}}>
-      <Text style={{fontSize:14*fontScale,fontWeight:'800',color:T.textSub,textTransform:'uppercase',marginBottom:16}}>Aparência e Tema</Text>
-      <View style={{flexDirection:'row',gap:10}}>{Object.keys(THEMES).map(k=>{const th=THEMES[k];const on=currentTheme===k;return(<TouchableOpacity key={k} onPress={()=>onThemeChange(k)} style={{flex:1,height:80,borderRadius:16,backgroundColor:on?T.blueMid:T.bgInput,borderWidth:2,borderColor:on?T.blue:T.border,justifyContent:'center',alignItems:'center',gap:6}}><Feather name={th.icon} size={20} color={on?T.blue:T.textSub}/><Text style={{fontSize:12*fontScale,fontWeight:on?'900':'700',color:on?T.blue:T.textSub}}>{th.name}</Text></TouchableOpacity>);})}</View>
+
+    {/* ── APARÊNCIA ── */}
+    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:16}}>
+      <Text style={{fontSize:14*fontScale,fontWeight:'800',color:T.textSub,textTransform:'uppercase',marginBottom:16,letterSpacing:0.8}}>Aparência e Tema</Text>
+      <View style={{flexDirection:'row',gap:10}}>
+        {Object.keys(THEMES).map(k=>{
+          const th=THEMES[k];const on=currentTheme===k;
+          return(
+            <TouchableOpacity key={k} onPress={()=>onThemeChange(k)}
+              style={{flex:1,height:80,borderRadius:16,backgroundColor:on?T.blueMid:T.bgInput,borderWidth:2,borderColor:on?T.blue:T.border,justifyContent:'center',alignItems:'center',gap:6}}>
+              <Feather name={th.icon} size={20} color={on?T.blue:T.textSub}/>
+              <Text style={{fontSize:12*fontScale,fontWeight:on?'900':'700',color:on?T.blue:T.textSub}}>{th.name}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </View>
-    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:20}}>
-      <Text style={{fontSize:14*fontScale,fontWeight:'800',color:T.textSub,textTransform:'uppercase',marginBottom:16}}>Acessibilidade</Text>
-      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><Text style={{fontSize:15*fontScale,fontWeight:'700',color:T.text}}>Tamanho da Fonte</Text><Text style={{fontSize:14*fontScale,fontWeight:'900',color:T.blue}}>{Math.round(fontScale*100)}%</Text></View>
-      <View style={{flexDirection:'row',gap:10}}>{[0.85,1,1.15].map(s=>(<TouchableOpacity key={s} onPress={()=>setFontScale(s)} style={{flex:1,height:50,borderRadius:12,backgroundColor:fontScale===s?T.blueMid:T.bgInput,borderWidth:1.5,borderColor:fontScale===s?T.blue:T.border,justifyContent:'center',alignItems:'center'}}><Text style={{fontSize:14*s,fontWeight:'900',color:fontScale===s?T.blue:T.textSub}}>Aa</Text></TouchableOpacity>))}</View>
+
+    {/* ── ACESSIBILIDADE ── */}
+    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:16}}>
+      <Text style={{fontSize:14*fontScale,fontWeight:'800',color:T.textSub,textTransform:'uppercase',marginBottom:16,letterSpacing:0.8}}>Acessibilidade</Text>
+      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+        <Text style={{fontSize:15*fontScale,fontWeight:'700',color:T.text}}>Tamanho da Fonte</Text>
+        <Text style={{fontSize:14*fontScale,fontWeight:'900',color:T.blue}}>{Math.round(fontScale*100)}%</Text>
+      </View>
+      <View style={{flexDirection:'row',gap:10}}>
+        {[0.85,1,1.15].map(s=>(
+          <TouchableOpacity key={s} onPress={()=>setFontScale(s)}
+            style={{flex:1,height:50,borderRadius:12,backgroundColor:fontScale===s?T.blueMid:T.bgInput,borderWidth:1.5,borderColor:fontScale===s?T.blue:T.border,justifyContent:'center',alignItems:'center'}}>
+            <Text style={{fontSize:14*s,fontWeight:'900',color:fontScale===s?T.blue:T.textSub}}>Aa</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </View>
-    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:20}}>
-      <Text style={{fontSize:14*fontScale,fontWeight:'800',color:T.textSub,textTransform:'uppercase',marginBottom:16}}>Automação e Dados</Text>
-      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1,paddingRight:10}}><Text style={{fontSize:15*fontScale,fontWeight:'700',color:T.text}}>Notificações de Ruptura</Text><Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:2}}>Alertar quando um produto estiver próximo de acabar.</Text></View><Switch value={notifOn} onValueChange={setNotifOn} trackColor={{false:T.border,true:T.blue+'80'}} thumbColor={notifOn?T.blue:T.textMuted}/></View>
+
+    {/* ── AUTOMAÇÃO ── */}
+    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:16}}>
+      <Text style={{fontSize:14*fontScale,fontWeight:'800',color:T.textSub,textTransform:'uppercase',marginBottom:16,letterSpacing:0.8}}>Automação e Dados</Text>
+      <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}>
+        <View style={{flex:1,paddingRight:10}}>
+          <Text style={{fontSize:15*fontScale,fontWeight:'700',color:T.text}}>Notificações de Ruptura</Text>
+          <Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:2}}>Alertar quando um produto estiver próximo de acabar.</Text>
+        </View>
+        <Switch value={notifOn} onValueChange={setNotifOn} trackColor={{false:T.border,true:T.blue+'80'}} thumbColor={notifOn?T.blue:T.textMuted}/>
+      </View>
+    </View>
+
+    {/* ── BAIXAR APLICATIVO (QR CODE) ── */}
+    <View style={{
+      backgroundColor:T.bgCard,borderRadius:24,padding:20,
+      borderWidth:1.5,borderColor:T.blue+'40',marginBottom:16,
+      shadowColor:T.blue,shadowOpacity:0.08,shadowRadius:16,elevation:4,
+    }}>
+      <View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:16}}>
+        <View style={{width:44,height:44,borderRadius:14,backgroundColor:T.blueGlow,justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:T.blue+'50'}}>
+          <Feather name="smartphone" size={22} color={T.blue}/>
+        </View>
+        <View style={{flex:1}}>
+          <Text style={{fontSize:16*fontScale,fontWeight:'900',color:T.text}}>Baixar o App</Text>
+          <Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:1}}>Escaneie o QR Code para instalar</Text>
+        </View>
+      </View>
+
+      {/* QR Code centralizado com borda decorativa */}
+      <View style={{alignItems:'center',marginBottom:16}}>
+        <View style={{
+          padding:12,borderRadius:22,
+          backgroundColor:'#FFFFFF',
+          borderWidth:2,borderColor:T.blue+'30',
+          shadowColor:T.blue,shadowOpacity:0.15,shadowRadius:12,elevation:6,
+        }}>
+          <Image
+            source={require('/assets/qr.png')}
+            style={{width:180,height:180,borderRadius:10}}
+            resizeMode="contain"
+          />
+        </View>
+        <View style={{flexDirection:'row',alignItems:'center',gap:6,marginTop:12}}>
+          <View style={{width:8,height:8,borderRadius:4,backgroundColor:T.green}}/>
+          <Text style={{fontSize:12*fontScale,fontWeight:'800',color:T.textSub}}>Aponte a câmera para instalar</Text>
+        </View>
+      </View>
+
+      {/* Botão alternativo Play Store */}
+      <TouchableOpacity
+        onPress={()=>Linking.openURL('https://play.google.com/store/apps/details?id=com.discord&pcampaignid=web_share')}
+        activeOpacity={0.85}
+        style={{
+          flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,
+          backgroundColor:T.blueGlow,borderRadius:14,paddingVertical:13,
+          borderWidth:1.5,borderColor:T.blue+'40',
+        }}
+      >
+        <Feather name="download" size={16} color={T.blue}/>
+        <Text style={{fontSize:13*fontScale,fontWeight:'800',color:T.blue}}>Abrir na Play Store</Text>
+        <Feather name="external-link" size={13} color={T.blue+'90'}/>
+      </TouchableOpacity>
     </View>
 
     {/* ── DISCORD ── */}
-    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1.5,borderColor:'#5865F2'+'50',marginBottom:20}}>
-      <View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:6}}>
+    <View style={{
+      backgroundColor:T.bgCard,borderRadius:24,padding:20,
+      borderWidth:1.5,borderColor:'#5865F2'+'50',marginBottom:16,
+      shadowColor:'#5865F2',shadowOpacity:0.1,shadowRadius:16,elevation:4,
+    }}>
+      {/* Header Discord */}
+      <View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:14}}>
         <View style={{width:44,height:44,borderRadius:14,backgroundColor:'#5865F2'+'20',justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:'#5865F2'+'50'}}>
           <MaterialCommunityIcons name="message-text" size={24} color="#5865F2"/>
         </View>
         <View style={{flex:1}}>
           <Text style={{fontSize:16*fontScale,fontWeight:'900',color:T.text}}>Comunidade Discord</Text>
-          <Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:2}}>Suporte, novidades e dicas do GEI</Text>
+          <Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:1}}>Suporte, novidades e dicas do GEI</Text>
+        </View>
+        <View style={{paddingHorizontal:10,paddingVertical:5,borderRadius:20,backgroundColor:'#5865F2'+'20',borderWidth:1,borderColor:'#5865F2'+'40'}}>
+          <Text style={{fontSize:10*fontScale,fontWeight:'900',color:'#5865F2'}}>ONLINE</Text>
         </View>
       </View>
-      <Text style={{fontSize:13*fontScale,color:T.textSub,fontWeight:'600',marginBottom:16,lineHeight:19}}>
-        Entre no nosso servidor para tirar dúvidas, receber atualizações e conversar com a equipe! 🚀
+
+      <Text style={{fontSize:13*fontScale,color:T.textSub,fontWeight:'600',marginBottom:16,lineHeight:19*fontScale}}>
+        Junte-se ao nosso servidor para tirar dúvidas, receber atualizações e conversar com a equipe! 🚀
       </Text>
-      {/* Botão entrar no servidor */}
+
+      {/* Botão principal — Entrar no Servidor */}
       <TouchableOpacity
-        onPress={() => Linking.openURL('https://discord.gg/e6UEjdFHMS')}
+        onPress={()=>Linking.openURL('https://discord.gg/e6UEjdFHMS')}
         activeOpacity={0.85}
         style={{
-          flexDirection:'row', alignItems:'center', justifyContent:'center', gap:10,
-          backgroundColor:'#5865F2', borderRadius:16, paddingVertical:16, marginBottom:10,
-          shadowColor:'#5865F2', shadowOpacity:0.45, shadowRadius:12, elevation:6,
+          flexDirection:'row',alignItems:'center',justifyContent:'center',gap:10,
+          backgroundColor:'#5865F2',borderRadius:16,paddingVertical:16,marginBottom:10,
+          shadowColor:'#5865F2',shadowOpacity:0.45,shadowRadius:14,elevation:8,
         }}
       >
-        <MaterialCommunityIcons name="bell" size={22} color="#FFF"/>
-        <Text style={{fontSize:15*fontScale,fontWeight:'900',color:'#FFF',letterSpacing:0.3}}>Entrar no Servidor</Text>
-        <Feather name="external-link" size={16} color="rgba(255,255,255,0.75)"/>
+        <MaterialCommunityIcons name="bell-badge" size={22} color="#FFF"/>
+        <Text style={{fontSize:15*fontScale,fontWeight:'900',color:'#FFF',letterSpacing:0.2}}>Entrar no Servidor</Text>
+        <Feather name="external-link" size={15} color="rgba(255,255,255,0.7)"/>
       </TouchableOpacity>
-      {/* Botão baixar Discord */}
+
+      {/* Botão secundário — Baixar Discord */}
       <TouchableOpacity
-        onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.discord&pcampaignid=web_share')}
+        onPress={()=>Linking.openURL('https://play.google.com/store/apps/details?id=com.discord&pcampaignid=web_share')}
         activeOpacity={0.85}
         style={{
-          flexDirection:'row', alignItems:'center', justifyContent:'center', gap:10,
-          backgroundColor:'#5865F2'+'18', borderRadius:16, paddingVertical:14,
-          borderWidth:1.5, borderColor:'#5865F2'+'50',
+          flexDirection:'row',alignItems:'center',justifyContent:'center',gap:10,
+          backgroundColor:'#5865F2'+'15',borderRadius:16,paddingVertical:14,
+          borderWidth:1.5,borderColor:'#5865F2'+'45',
         }}
       >
         <Feather name="download" size={18} color="#5865F2"/>
-        <Text style={{fontSize:14*fontScale,fontWeight:'800',color:'#5865F2'}}>Baixar Discord (Play Store)</Text>
+        <Text style={{fontSize:14*fontScale,fontWeight:'800',color:'#5865F2'}}>Baixar Discord — Play Store</Text>
       </TouchableOpacity>
     </View>
+
+    {/* Versão */}
+    <Text style={{textAlign:'center',color:T.textMuted,fontSize:11*fontScale,fontWeight:'700',marginTop:4}}>GEI.AI v4.6 Premium · 2026</Text>
   </ScrollView>
-  );
-};
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CHAT SCREEN — CORRIGIDO (sem toast que compete com scroll)
@@ -1763,10 +1855,10 @@ export default function App() {
       const expired  = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').map(i => i.produto).join(', ');
       const prompt = `Você é assistente de gestão de estoque (GEI.AI). Usuário: ${userData?.NOME||'Usuário'}, Prateleira: ${shlabel(activeShelf)}, Itens: ${sample||'vazio'}, Vencendo em 7 dias: ${expiring||'nenhum'}, Vencidos: ${expired||'nenhum'}. Responda de forma clara, objetiva e em português. Pergunta: "${txt}"`;
       const r = await callIA(prompt);
-      setMsgs(p => [...p, { id: Date.now() + 1, text: r?.trim() || 'Não consegui gerar uma resposta agora. Verifique sua conexão e tente novamente.', isAi: true }]);
+      setMsgs(p => [...p, { id: Date.now() + 1, text: r?.trim() || 'A IA não retornou resposta desta vez. Tente reformular sua pergunta.', isAi: true }]);
     } catch (ex) {
-      const isTimeout = ex?.name === 'AbortError';
-      setMsgs(p => [...p, { id: Date.now() + 1, text: isTimeout ? 'A IA demorou demais para responder. Verifique sua conexão e tente novamente.' : 'Erro de comunicação com a IA. Verifique sua internet e tente novamente.', isAi: true }]);
+      const isAbort = ex?.name === 'AbortError';
+      setMsgs(p => [...p, { id: Date.now() + 1, text: isAbort ? '⏱️ A IA demorou demais para responder. Verifique sua conexão e tente novamente.' : '⚠️ Erro de conexão com a IA. Verifique sua internet e tente novamente.', isAi: true }]);
     } finally { setChatBusy(false); }
   };
 
