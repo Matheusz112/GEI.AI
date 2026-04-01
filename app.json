@@ -5,6 +5,7 @@
     "version": "4.5.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "icon": "./assets/logo.png",               // ← Ícone principal adicionado aqui
     "extra": {
       "eas": {
         "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
@@ -16,7 +17,11 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
-      ]
+      ],
+      "adaptiveIcon": {                        // ← Recomendado para Android (melhor visual)
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#FFFFFF"
+      }
     },
     "plugins": [
       "expo-camera"
