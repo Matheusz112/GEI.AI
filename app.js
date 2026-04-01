@@ -5,6 +5,7 @@ import {
   Dimensions, TextInput, FlatList, ScrollView, KeyboardAvoidingView,
   Platform, Modal, AppState, Switch, Easing, Keyboard
 } from 'react-native';
+
 import * as NavigationBar from 'expo-navigation-bar';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -245,11 +246,32 @@ const stateColor=(step,T)=>{
   return T.green;
 };
 
-const callIA = async prompt => {
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IA}:generateContent?key=${API_KEY_IA}`,
-    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})});
-  const d=await r.json();
-  return d.candidates?.[0]?.content?.parts?.[0]?.text||'';
+const callIA = async (prompt, retries = 2) => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IA}:generateContent?key=${API_KEY_IA}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeout);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      const text = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!text && attempt < retries) continue;
+      return text;
+    } catch (e) {
+      if (attempt === retries) throw e;
+      await new Promise(res => setTimeout(res, 1200 * (attempt + 1)));
+    }
+  }
+  return '';
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -302,7 +324,7 @@ const AutoCleanToast = ({data, onClose, T, fontScale}) => {
       ]).start();
     });
     if (!data.cleaning && data.deleted?.length === 0) {
-      const t = setTimeout(dismiss, 5000);
+      const t = setTimeout(dismiss, 4000);
       return () => clearTimeout(t);
     }
   }, []);
@@ -933,7 +955,9 @@ const TabBtn=({icon,label,active,onPress,T,fontScale})=>{
   const po=()=>Animated.spring(scale,{toValue:1,tension:250,friction:10,useNativeDriver:false}).start();
   return(<TouchableOpacity activeOpacity={1} onPressIn={pi} onPressOut={po} style={{flex:1,alignItems:'center',justifyContent:'center',gap:4}}><Animated.View style={{transform:[{scale}],alignItems:'center'}}><View style={[{width:44,height:32,borderRadius:12,justifyContent:'center',alignItems:'center'},active&&{backgroundColor:T.blueMid}]}><Feather name={icon} size={20} color={active?T.blue:T.textMuted}/></View><Text style={{fontSize:10*fontScale,fontWeight:active?'900':'700',color:active?T.blue:T.textMuted,marginTop:2}}>{label}</Text></Animated.View></TouchableOpacity>);
 };
-const ConfigScreen=({T,currentTheme,onThemeChange,fontScale,setFontScale,notifOn,setNotifOn,TAB_SAFE})=>(
+const ConfigScreen=({T,currentTheme,onThemeChange,fontScale,setFontScale,notifOn,setNotifOn,TAB_SAFE})=>{
+  const { Linking } = require('react-native');
+  return (
   <ScrollView contentContainerStyle={{padding:20,paddingBottom:TAB_SAFE+20}} showsVerticalScrollIndicator={false}>
     <Text style={{fontSize:26*fontScale,fontWeight:'900',color:T.text,letterSpacing:-0.5,marginBottom:24}}>Configurações</Text>
     <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:20}}>
@@ -945,12 +969,56 @@ const ConfigScreen=({T,currentTheme,onThemeChange,fontScale,setFontScale,notifOn
       <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:10}}><Text style={{fontSize:15*fontScale,fontWeight:'700',color:T.text}}>Tamanho da Fonte</Text><Text style={{fontSize:14*fontScale,fontWeight:'900',color:T.blue}}>{Math.round(fontScale*100)}%</Text></View>
       <View style={{flexDirection:'row',gap:10}}>{[0.85,1,1.15].map(s=>(<TouchableOpacity key={s} onPress={()=>setFontScale(s)} style={{flex:1,height:50,borderRadius:12,backgroundColor:fontScale===s?T.blueMid:T.bgInput,borderWidth:1.5,borderColor:fontScale===s?T.blue:T.border,justifyContent:'center',alignItems:'center'}}><Text style={{fontSize:14*s,fontWeight:'900',color:fontScale===s?T.blue:T.textSub}}>Aa</Text></TouchableOpacity>))}</View>
     </View>
-    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border}}>
+    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1,borderColor:T.border,marginBottom:20}}>
       <Text style={{fontSize:14*fontScale,fontWeight:'800',color:T.textSub,textTransform:'uppercase',marginBottom:16}}>Automação e Dados</Text>
       <View style={{flexDirection:'row',alignItems:'center',justifyContent:'space-between'}}><View style={{flex:1,paddingRight:10}}><Text style={{fontSize:15*fontScale,fontWeight:'700',color:T.text}}>Notificações de Ruptura</Text><Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:2}}>Alertar quando um produto estiver próximo de acabar.</Text></View><Switch value={notifOn} onValueChange={setNotifOn} trackColor={{false:T.border,true:T.blue+'80'}} thumbColor={notifOn?T.blue:T.textMuted}/></View>
     </View>
+
+    {/* ── DISCORD ── */}
+    <View style={{backgroundColor:T.bgCard,borderRadius:24,padding:20,borderWidth:1.5,borderColor:'#5865F2'+'50',marginBottom:20}}>
+      <View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:6}}>
+        <View style={{width:44,height:44,borderRadius:14,backgroundColor:'#5865F2'+'20',justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:'#5865F2'+'50'}}>
+          <MaterialCommunityIcons name="message-text" size={24} color="#5865F2"/>
+        </View>
+        <View style={{flex:1}}>
+          <Text style={{fontSize:16*fontScale,fontWeight:'900',color:T.text}}>Comunidade Discord</Text>
+          <Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:2}}>Suporte, novidades e dicas do GEI</Text>
+        </View>
+      </View>
+      <Text style={{fontSize:13*fontScale,color:T.textSub,fontWeight:'600',marginBottom:16,lineHeight:19}}>
+        Entre no nosso servidor para tirar dúvidas, receber atualizações e conversar com a equipe! 🚀
+      </Text>
+      {/* Botão entrar no servidor */}
+      <TouchableOpacity
+        onPress={() => Linking.openURL('https://discord.gg/e6UEjdFHMS')}
+        activeOpacity={0.85}
+        style={{
+          flexDirection:'row', alignItems:'center', justifyContent:'center', gap:10,
+          backgroundColor:'#5865F2', borderRadius:16, paddingVertical:16, marginBottom:10,
+          shadowColor:'#5865F2', shadowOpacity:0.45, shadowRadius:12, elevation:6,
+        }}
+      >
+        <MaterialCommunityIcons name="bell" size={22} color="#FFF"/>
+        <Text style={{fontSize:15*fontScale,fontWeight:'900',color:'#FFF',letterSpacing:0.3}}>Entrar no Servidor</Text>
+        <Feather name="external-link" size={16} color="rgba(255,255,255,0.75)"/>
+      </TouchableOpacity>
+      {/* Botão baixar Discord */}
+      <TouchableOpacity
+        onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.discord&pcampaignid=web_share')}
+        activeOpacity={0.85}
+        style={{
+          flexDirection:'row', alignItems:'center', justifyContent:'center', gap:10,
+          backgroundColor:'#5865F2'+'18', borderRadius:16, paddingVertical:14,
+          borderWidth:1.5, borderColor:'#5865F2'+'50',
+        }}
+      >
+        <Feather name="download" size={18} color="#5865F2"/>
+        <Text style={{fontSize:14*fontScale,fontWeight:'800',color:'#5865F2'}}>Baixar Discord (Play Store)</Text>
+      </TouchableOpacity>
+    </View>
   </ScrollView>
-);
+  );
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CHAT SCREEN — CORRIGIDO (sem toast que compete com scroll)
@@ -1695,9 +1763,10 @@ export default function App() {
       const expired  = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').map(i => i.produto).join(', ');
       const prompt = `Você é assistente de gestão de estoque (GEI.AI). Usuário: ${userData?.NOME||'Usuário'}, Prateleira: ${shlabel(activeShelf)}, Itens: ${sample||'vazio'}, Vencendo em 7 dias: ${expiring||'nenhum'}, Vencidos: ${expired||'nenhum'}. Responda de forma clara, objetiva e em português. Pergunta: "${txt}"`;
       const r = await callIA(prompt);
-      setMsgs(p => [...p, { id: Date.now() + 1, text: r || 'Não foi possível obter resposta.', isAi: true }]);
+      setMsgs(p => [...p, { id: Date.now() + 1, text: r?.trim() || 'Não consegui gerar uma resposta agora. Verifique sua conexão e tente novamente.', isAi: true }]);
     } catch (ex) {
-      setMsgs(p => [...p, { id: Date.now() + 1, text: 'Desculpe, houve um erro na comunicação com a IA. Tente novamente.', isAi: true }]);
+      const isTimeout = ex?.name === 'AbortError';
+      setMsgs(p => [...p, { id: Date.now() + 1, text: isTimeout ? 'A IA demorou demais para responder. Verifique sua conexão e tente novamente.' : 'Erro de comunicação com a IA. Verifique sua internet e tente novamente.', isAi: true }]);
     } finally { setChatBusy(false); }
   };
 
