@@ -1026,7 +1026,7 @@ const ConfigScreen=({T,currentTheme,onThemeChange,fontScale,setFontScale,notifOn
           shadowColor:T.blue,shadowOpacity:0.15,shadowRadius:12,elevation:6,
         }}>
           <Image
-            source={require('/assets/qr.png')}
+            source={require('./assets/qr.png')}
             style={{width:180,height:180,borderRadius:10}}
             resizeMode="contain"
           />
