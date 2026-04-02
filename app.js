@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity,
   StatusBar, Animated, ActivityIndicator,
   Dimensions, TextInput, FlatList, ScrollView, KeyboardAvoidingView,
-  Platform, Modal, AppState, Switch, Easing, Keyboard, Image, Linking
+  Platform, Modal, AppState, Switch, Easing, Keyboard, Image, Linking,Appearance
 } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
@@ -18,8 +18,8 @@ const W = WIN.width;
 const BASEROW_TOKEN = 'Zpp1pMg1AYeG0lnXC1De0hIZID19BUM6';
 const USERS_TABLE   = '221009';
 const MODEL_IA      = 'gemini-2.5-flash';
-const API_KEY_IA    = 'AIzaSyCYVd7Tp6638Kmj6xVHlgm0YMqUZg3GaYs';
-
+const API_KEY_IA    = 'AIzaSyBb_ZhucvM-Y8SX4mlCW8KJsFsHCU7olYw';
+const BLUESOFT_TOKEN = 'Py8pbK4V5YwLGB09ECMJrA';   // ← coloque o token real
 const SHELVES = {
   bebida:'150731', macarrao:'656122', pesado:'656123',
   frios:'656124',  biscoito:'656126',
@@ -86,6 +86,167 @@ const makeGiro = T => ({
   'Pouco giro': {color:T.red,  solid:T.redSolid,  glow:T.redGlow,  icon:'trending-down',short:'↓ Pouco',rate:0.8},
 });
 
+
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DARK TORCH PROMPT — Mensagem premium para ligar lanterna
+// ═══════════════════════════════════════════════════════════════════════════
+const DarkTorchPrompt = ({ 
+  isDarkEnv, 
+  lightLevel, 
+  torchOn, 
+  onToggleTorch, 
+  T, 
+  fontScale 
+}) => {
+  const slideA = useRef(new Animated.Value(140)).current;
+  const pulseA = useRef(new Animated.Value(1)).current;
+  const [dismissed, setDismissed] = useState(false);
+
+  const darkPct = Math.round((1 - lightLevel) * 100);
+
+  useEffect(() => {
+    if (isDarkEnv && !torchOn && !dismissed) {
+      Animated.parallel([
+        Animated.spring(slideA, { toValue: 0, tension: 70, friction: 10, useNativeDriver: false }),
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(pulseA, { toValue: 1.22, duration: 720, useNativeDriver: false }),
+            Animated.timing(pulseA, { toValue: 1, duration: 720, useNativeDriver: false }),
+          ])
+        )
+      ]).start();
+    } else {
+      Animated.timing(slideA, { 
+        toValue: 140, 
+        duration: 240, 
+        easing: Easing.in(Easing.cubic), 
+        useNativeDriver: false 
+      }).start();
+    }
+  }, [isDarkEnv, torchOn, dismissed]);
+
+  if (!isDarkEnv || torchOn || dismissed) return null;
+
+  return (
+    <Animated.View style={{
+      position: 'absolute',
+      bottom: 160,
+      left: 20,
+      right: 20,
+      backgroundColor: T.bgCard,
+      borderRadius: 28,
+      padding: 22,
+      borderWidth: 2.5,
+      borderColor: T.orange + '75',
+      shadowColor: T.orange,
+      shadowOffset: { width: 0, height: 22 },
+      shadowOpacity: 0.5,
+      shadowRadius: 32,
+      elevation: 32,
+      transform: [{ translateY: slideA }],
+      zIndex: 10000,
+    }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+        <Animated.View style={{
+          width: 58,
+          height: 58,
+          borderRadius: 18,
+          backgroundColor: T.orange + '22',
+          justifyContent: 'center',
+          alignItems: 'center',
+          borderWidth: 2,
+          borderColor: T.orange + '45',
+          transform: [{ scale: pulseA }],
+        }}>
+          <Feather name="zap" size={34} color={T.orange} />
+        </Animated.View>
+
+        <View style={{ flex: 1 }}>
+          <Text style={{
+            fontSize: 12.5 * fontScale,
+            fontWeight: '900',
+            color: T.orange,
+            textTransform: 'uppercase',
+            letterSpacing: 1.4,
+          }}>
+            🌙 Ambiente muito escuro
+          </Text>
+          <Text style={{
+            fontSize: 17.5 * fontScale,
+            fontWeight: '900',
+            color: T.text,
+            lineHeight: 23,
+            marginTop: 3,
+          }}>
+            Ligue a lanterna para ler melhor!
+          </Text>
+          <Text style={{
+            fontSize: 13 * fontScale,
+            color: T.textSub,
+            fontWeight: '600',
+            marginTop: 6,
+          }}>
+            Luminosidade: {darkPct}% de escuridão
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ height: 7, backgroundColor: T.border, borderRadius: 999, marginTop: 18, overflow: 'hidden' }}>
+        <View style={{
+          height: '100%',
+          width: `${Math.max(10, darkPct)}%`,
+          backgroundColor: T.orange,
+          borderRadius: 999,
+        }} />
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: 12, marginTop: 22 }}>
+        <TouchableOpacity
+          onPress={onToggleTorch}
+          style={{
+            flex: 1,
+            height: 58,
+            backgroundColor: T.orange,
+            borderRadius: 18,
+            justifyContent: 'center',
+            alignItems: 'center',
+            shadowColor: T.orange,
+            shadowOpacity: 0.55,
+            shadowRadius: 16,
+            elevation: 14,
+          }}
+        >
+          <Text style={{ color: '#FFF', fontSize: 16.5 * fontScale, fontWeight: '900' }}>
+            ⚡ LIGAR LANTERNA
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setDismissed(true)}
+          style={{
+            width: 58,
+            height: 58,
+            backgroundColor: T.bgInput,
+            borderRadius: 18,
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 1.5,
+            borderColor: T.border,
+          }}
+        >
+          <Feather name="x" size={26} color={T.textMuted} />
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+};
+
+
+
+
+
 // ─── DATE UTILS ─────────────────────────────────────────────────────────────
 const parseDate = str => {
   if (!str?.trim()) return null;
@@ -123,6 +284,513 @@ const qtyToNumber = v => {
   return Number.isFinite(n)?n:0;
 };
 
+// ─── NOVA VALIDAÇÃO DE DATA ─────────────────────────────────────────────────
+const isValidDate = (dateStr) => {
+  if (!dateStr || dateStr.length !== 10) return false;
+  const [d, m, y] = dateStr.split('/').map(Number);
+  if (isNaN(d) || isNaN(m) || isNaN(y)) return false;
+  if (y < 1900 || y > 2100) return false;
+  if (m < 1 || m > 12) return false;
+  const daysInMonth = new Date(y, m, 0).getDate();
+  if (d < 1 || d > daysInMonth) return false;
+  return true;
+};
+
+
+
+const fetchProductSources = async (ean) => {
+  const results = [];
+ 
+  // ─── FONTE 1: IA Gemini (maior prioridade) ───────────────────────────────
+  const fetchGemini = async () => {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 18000);
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IA}:generateContent?key=${API_KEY_IA}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: ` Atue como um especialista em logística e varejo. Identifique o produto referente ao EAN-13: ${ean}.
+
+Contexto adicional: Este produto foi encontrado em um supermercado no Brasil (Minas Gerais).Instruções: > 1. Realize uma busca profunda em bancos de dados de códigos de barras (como Cosmos, GPC ou tabelas tributárias).
+
+2. Se houver ambiguidade, priorize o item de maior circulação nacional.
+
+3. Retorne EXCLUSIVAMENTE o JSON no formato forneca detalhes:
+
+{
+
+"nome": "string",
+
+"marca": "string",
+
+"categoria": "string",
+
+"gramatura": "string",
+
+"rotatividade": "Grande giro"|"Médio giro"|"Pouco giro",
+
+"confianca": 0-100
+
+}"`
+              }]
+            }]
+          }),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(tid);
+      if (!r.ok) return null;
+      const d = await r.json();
+      const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const clean = txt.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+      if (!parsed?.nome) return null;
+      const nome = [parsed.nome, parsed.marca].filter(Boolean).join(' · ') +
+                   (parsed.gramatura ? ` (${parsed.gramatura})` : '');
+      return {
+        source: 'ia',
+        sourceLabel: 'IA Gemini',
+        sourceIcon: 'cpu',
+        sourceColor: null, // será preenchido com T.purple
+        nome: nome.trim(),
+        giro: parsed.rotatividade || 'Médio giro',
+        categoria: parsed.categoria || '',
+        confianca: parsed.confianca || 75,
+        raw: parsed,
+      };
+    } catch (_) { return null; }
+  };
+ 
+  // ─── FONTE 2: Bluesoft Cosmos ────────────────────────────────────────────
+  const fetchBluesoft = async () => {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 10000);
+      const r = await fetch(
+        `https://api.cosmos.bluesoft.com.br/gtins/${ean}.json`,
+        {
+          headers: {
+            'X-Cosmos-Token': BLUESOFT_TOKEN,
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(tid);
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (!d?.description) return null;
+      const nome = [d.description, d.brand?.name].filter(Boolean).join(' · ') +
+                   (d.net_weight ? ` (${d.net_weight}${d.net_weight_unit || 'g'})` : '');
+      return {
+        source: 'bluesoft',
+        sourceLabel: 'Bluesoft Cosmos',
+        sourceIcon: 'database',
+        sourceColor: null,
+        nome: nome.trim(),
+        giro: 'Médio giro',
+        categoria: d.ncm?.description || '',
+        confianca: 90,
+        raw: d,
+      };
+    } catch (_) { return null; }
+  };
+ 
+  // ─── FONTE 3: Open Food Facts ────────────────────────────────────────────
+  const fetchOpenFoodFacts = async () => {
+    try {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), 10000);
+      const r = await fetch(
+        `https://world.openfoodfacts.org/api/v0/product/${ean}.json`,
+        { signal: controller.signal }
+      );
+      clearTimeout(tid);
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (d.status !== 1) return null;
+      const p = d.product;
+      const nome = (p.product_name_pt || p.product_name || p.generic_name || '').trim();
+      if (!nome) return null;
+      const marca = p.brands ? p.brands.split(',')[0].trim() : '';
+      const qty   = p.quantity || '';
+      const nomeCompleto = [nome, marca].filter(Boolean).join(' · ') +
+                           (qty ? ` (${qty})` : '');
+      return {
+        source: 'openfoodfacts',
+        sourceLabel: 'Open Food Facts',
+        sourceIcon: 'globe',
+        sourceColor: null,
+        nome: nomeCompleto.trim(),
+        giro: 'Médio giro',
+        categoria: p.categories_tags?.[0]?.replace('en:','') || '',
+        confianca: 70,
+        raw: p,
+      };
+    } catch (_) { return null; }
+  };
+ 
+  // Executa todas em paralelo
+  const [gemini, bluesoft, off] = await Promise.all([
+    fetchGemini(),
+    fetchBluesoft(),
+    fetchOpenFoodFacts(),
+  ]);
+ 
+  // Ordem de prioridade: IA → Bluesoft → OpenFoodFacts
+  if (gemini)    results.push(gemini);
+  if (bluesoft)  results.push(bluesoft);
+  if (off)       results.push(off);
+ 
+  // Se nenhum retornou, cria fallback
+  if (results.length === 0) {
+    results.push({
+      source: 'manual',
+      sourceLabel: 'Não encontrado',
+      sourceIcon: 'alert-circle',
+      sourceColor: null,
+      nome: `Produto EAN ${ean}`,
+      giro: 'Médio giro',
+      categoria: '',
+      confianca: 0,
+      raw: {},
+    });
+  }
+ 
+  return results;
+};
+ 
+// ═══════════════════════════════════════════════════════════════════════════
+// MODAL DE PRÉ-SELEÇÃO DE NOME DO PRODUTO
+// ═══════════════════════════════════════════════════════════════════════════
+const ProductSourceModal = ({ visible, sources, onSelect, onClose, T, fontScale }) => {
+  const [selected, setSelected] = useState(0);
+  const slideA = useRef(new Animated.Value(WIN.height)).current;
+  const opacA  = useRef(new Animated.Value(0)).current;
+ 
+  // Cores por fonte
+  const sourceColors = (src, T) => ({
+    ia:           { color: T.purple, glow: T.purpleGlow, icon: 'cpu' },
+    bluesoft:     { color: T.blue,   glow: T.blueGlow,   icon: 'database' },
+    openfoodfacts:{ color: T.teal,   glow: T.tealGlow,   icon: 'globe' },
+    manual:       { color: T.textSub,glow: T.bgInput,    icon: 'alert-circle' },
+  }[src] || { color: T.blue, glow: T.blueGlow, icon: 'info' });
+ 
+  useEffect(() => {
+    if (visible) {
+      setSelected(0);
+      slideA.setValue(WIN.height);
+      opacA.setValue(0);
+      Animated.parallel([
+        Animated.spring(slideA, { toValue: 0, tension: 52, friction: 11, useNativeDriver: false }),
+        Animated.timing(opacA,  { toValue: 1, duration: 280, useNativeDriver: false }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideA, { toValue: WIN.height, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(opacA,  { toValue: 0, duration: 200, useNativeDriver: false }),
+      ]).start();
+    }
+  }, [visible]);
+ 
+  if (!visible || !sources?.length) return null;
+ 
+  const handleConfirm = () => {
+    const item = sources[selected];
+    onSelect({ nome: item.nome, giro: item.giro });
+  };
+ 
+  const confidenceBadge = (c) => {
+    if (c >= 85) return { label: 'Alta confiança', color: T.green };
+    if (c >= 60) return { label: 'Média confiança', color: T.amber };
+    return { label: 'Baixa confiança', color: T.red };
+  };
+ 
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', opacity: opacA }}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <Animated.View style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          backgroundColor: T.bgCard,
+          borderTopLeftRadius: 36, borderTopRightRadius: 36,
+          paddingBottom: 28 + NAV_BAR_H,
+          borderTopWidth: 2, borderColor: T.blue + '60',
+          maxHeight: WIN.height * 0.88,
+          transform: [{ translateY: slideA }],
+          shadowColor: '#000', shadowOffset: { width: 0, height: -12 },
+          shadowOpacity: 0.5, shadowRadius: 30, elevation: 28,
+        }}>
+          {/* Handle */}
+          <View style={{ alignItems: 'center', paddingTop: 14, paddingBottom: 4 }}>
+            <View style={{ width: 48, height: 5, backgroundColor: T.blue + '60', borderRadius: 3 }} />
+          </View>
+ 
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 8 }}>
+            {/* Header */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+              <View style={{
+                width: 48, height: 48, borderRadius: 15,
+                backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center',
+                borderWidth: 1.5, borderColor: T.blue + '50',
+              }}>
+                <MaterialCommunityIcons name="text-search" size={24} color={T.blue} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                  Fontes encontradas
+                </Text>
+                <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>
+                  Selecione o nome do produto
+                </Text>
+              </View>
+            </View>
+ 
+            <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 20, lineHeight: 19 }}>
+              Consultamos {sources.length} fonte{sources.length !== 1 ? 's' : ''}. O resultado com maior confiança foi pré-selecionado. Escolha o melhor nome:
+            </Text>
+ 
+            {/* Cards das fontes */}
+            <View style={{ gap: 12, marginBottom: 20 }}>
+              {sources.map((src, i) => {
+                const pal = sourceColors(src.source, T);
+                const conf = confidenceBadge(src.confianca);
+                const isSelected = selected === i;
+ 
+                return (
+                  <TouchableOpacity
+                    key={`${src.source}-${i}`}
+                    activeOpacity={0.85}
+                    onPress={() => setSelected(i)}
+                  >
+                    <Animated.View style={{
+                      borderRadius: 22,
+                      borderWidth: isSelected ? 2.5 : 1.5,
+                      borderColor: isSelected ? pal.color : T.border,
+                      backgroundColor: isSelected ? pal.glow : T.bgElevated,
+                      overflow: 'hidden',
+                    }}>
+                      {/* Barra colorida no topo quando selecionado */}
+                      {isSelected && (
+                        <View style={{ height: 3, backgroundColor: pal.color }} />
+                      )}
+ 
+                      <View style={{ padding: 16 }}>
+                        {/* Header do card */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                          {/* Ícone da fonte */}
+                          <View style={{
+                            width: 36, height: 36, borderRadius: 11,
+                            backgroundColor: isSelected ? pal.color + '25' : T.bgCard,
+                            justifyContent: 'center', alignItems: 'center',
+                            borderWidth: 1, borderColor: isSelected ? pal.color + '50' : T.border,
+                          }}>
+                            <Feather name={pal.icon} size={16} color={isSelected ? pal.color : T.textSub} />
+                          </View>
+ 
+                          {/* Label da fonte */}
+                          <View style={{ flex: 1 }}>
+                            <Text style={{
+                              fontSize: 10 * fontScale, fontWeight: '900',
+                              color: isSelected ? pal.color : T.textMuted,
+                              textTransform: 'uppercase', letterSpacing: 0.6,
+                            }}>
+                              {src.sourceLabel}
+                            </Text>
+                            {i === 0 && (
+                              <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '800', color: T.green }}>
+                                ⭐ Recomendado
+                              </Text>
+                            )}
+                          </View>
+ 
+                          {/* Badge de confiança */}
+                          <View style={{
+                            paddingHorizontal: 8, paddingVertical: 4,
+                            borderRadius: 8,
+                            backgroundColor: conf.color + '18',
+                            borderWidth: 1, borderColor: conf.color + '40',
+                          }}>
+                            <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '900', color: conf.color }}>
+                              {src.confianca}%
+                            </Text>
+                          </View>
+ 
+                          {/* Check se selecionado */}
+                          {isSelected ? (
+                            <View style={{
+                              width: 26, height: 26, borderRadius: 9,
+                              backgroundColor: pal.color,
+                              justifyContent: 'center', alignItems: 'center',
+                            }}>
+                              <Feather name="check" size={14} color="#FFF" />
+                            </View>
+                          ) : (
+                            <View style={{
+                              width: 26, height: 26, borderRadius: 9,
+                              backgroundColor: T.bgCard,
+                              borderWidth: 1.5, borderColor: T.border,
+                            }} />
+                          )}
+                        </View>
+ 
+                        {/* Nome do produto */}
+                        <View style={{
+                          backgroundColor: isSelected ? pal.color + '12' : T.bgCard,
+                          borderRadius: 12, padding: 12,
+                          borderWidth: 1, borderColor: isSelected ? pal.color + '30' : T.border,
+                        }}>
+                          <Text style={{
+                            fontSize: 15 * fontScale, fontWeight: '800',
+                            color: isSelected ? T.text : T.textSub,
+                            lineHeight: 21 * fontScale,
+                          }}>
+                            {src.nome}
+                          </Text>
+                          {src.categoria ? (
+                            <Text style={{
+                              fontSize: 10.5 * fontScale, fontWeight: '700',
+                              color: T.textMuted, marginTop: 5,
+                            }}>
+                              Categoria: {src.categoria}
+                            </Text>
+                          ) : null}
+                        </View>
+ 
+                        {/* Giro sugerido */}
+                        {src.giro && (
+                          <View style={{
+                            flexDirection: 'row', alignItems: 'center', gap: 6,
+                            marginTop: 10,
+                          }}>
+                            <Feather name="refresh-cw" size={11} color={T.textMuted} />
+                            <Text style={{ fontSize: 11 * fontScale, color: T.textMuted, fontWeight: '700' }}>
+                              Giro sugerido: <Text style={{ color: isSelected ? pal.color : T.textSub, fontWeight: '900' }}>{src.giro}</Text>
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </Animated.View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+ 
+            {/* Botão confirmar */}
+            <TouchableOpacity
+              onPress={handleConfirm}
+              style={{
+                height: 54, borderRadius: 16,
+                backgroundColor: T.blue,
+                justifyContent: 'center', alignItems: 'center',
+                flexDirection: 'row', gap: 10,
+                shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 14, elevation: 6,
+                marginBottom: 8,
+              }}
+            >
+              <Feather name="check-circle" size={18} color="#FFF" />
+              <Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: '#FFF' }}>
+                Usar este nome
+              </Text>
+            </TouchableOpacity>
+ 
+            <TouchableOpacity
+              onPress={onClose}
+              style={{
+                height: 48, borderRadius: 14,
+                backgroundColor: T.bgInput,
+                justifyContent: 'center', alignItems: 'center',
+                borderWidth: 1, borderColor: T.border,
+              }}
+            >
+              <Text style={{ fontSize: 14 * fontScale, fontWeight: '700', color: T.textSub }}>
+                Digitar manualmente
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+};
+ 
+// ═══════════════════════════════════════════════════════════════════════════
+// DETECÇÃO DE AMBIENTE ESCURO + MODO CÂMERA (verificação recorrente)
+// ═══════════════════════════════════════════════════════════════════════════
+const useDarkEnvironment = (isScanning = false) => {
+  const systemScheme = Appearance.getColorScheme();
+  const [state, setState] = useState({
+    isDarkEnv: systemScheme === 'dark',
+    lightLevel: systemScheme === 'dark' ? 0 : 1,
+    source: 'system',
+  });
+
+  const subRef = useRef(null);
+  const sensorSubRef = useRef(null);
+  const sensorAvailable = useRef(false);
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    // Listener do sistema
+    subRef.current = Appearance.addChangeListener(({ colorScheme }) => {
+      if (!sensorAvailable.current) {
+        setState({
+          isDarkEnv: colorScheme === 'dark',
+          lightLevel: colorScheme === 'dark' ? 0.1 : 0.9,
+          source: 'system',
+        });
+      }
+    });
+
+    // Sensor de luminosidade
+    const tryLightSensor = async () => {
+      try {
+        const { LightSensor } = await import('expo-sensors');
+        const isAvail = await LightSensor.isAvailableAsync();
+        if (!isAvail) return;
+
+        sensorAvailable.current = true;
+        // Intervalo mais rápido quando a câmera está aberta
+        LightSensor.setUpdateInterval(isScanning ? 650 : 1500);
+
+        sensorSubRef.current = LightSensor.addListener(({ illuminance }) => {
+          const normalized = Math.min(1, illuminance / 300);
+          const isDark = illuminance < 40;
+          setState({
+            isDarkEnv: isDark,
+            lightLevel: normalized,
+            source: 'sensor',
+          });
+        });
+      } catch (_) {}
+    };
+
+    tryLightSensor();
+
+    // Polling recorrente (só durante o scan)
+    if (isScanning && !pollRef.current) {
+      pollRef.current = setInterval(() => {
+        setState(prev => ({ ...prev })); // força re-render para atualizar o banner
+      }, 700);
+    }
+
+    return () => {
+      subRef.current?.remove();
+      sensorSubRef.current?.remove();
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [isScanning]);
+
+  return state;
+};
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTO-DELETE ENGINE — exclui produtos vencidos há +30 dias
 // ═══════════════════════════════════════════════════════════════════════════
@@ -296,167 +964,393 @@ const useCountUp=(target,ms=380)=>{
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// AUTO-CLEAN TOAST
+// AUTO-CLEAN TOAST COM BARRA DE PROGRESSO (VERSÃO ATUALIZADA)
 // ═══════════════════════════════════════════════════════════════════════════
-const AutoCleanToast = ({data, onClose, T, fontScale}) => {
-  const slideA   = useRef(new Animated.Value(-220)).current;
-  const opacA    = useRef(new Animated.Value(0)).current;
-  const scaleA   = useRef(new Animated.Value(0.88)).current;
-  const trashA   = useRef(new Animated.Value(0)).current;
-  const [modalVis, setModalVis] = useState(false);
+const TOAST_DURATION = 4000; // ms
 
+const AutoCleanToast = ({ data, onClose, T, fontScale, WIN }) => {   // ← adicionei WIN caso esteja usando
+  const slideA = useRef(new Animated.Value(-220)).current;
+  const opacA = useRef(new Animated.Value(0)).current;
+  const scaleA = useRef(new Animated.Value(0.88)).current;
+  const trashA = useRef(new Animated.Value(0)).current;
+  const progressAnim = useRef(new Animated.Value(1)).current;
+
+  const [modalVis, setModalVis] = useState(false);
+  const [countdown, setCountdown] = useState(Math.ceil(TOAST_DURATION / 1000));
+
+  const dismissedRef = useRef(false);
+  const intervalRef = useRef(null);        // ← Solução mais simples e segura no Expo
+
+  const deletedCount = data.deleted?.length ?? 0;
+  const shouldAutoDismiss = !data.cleaning && deletedCount === 0;
+
+  // Animação de entrada (uma única vez)
   useEffect(() => {
     Animated.parallel([
-      Animated.spring(slideA,  {toValue:0, tension:70, friction:11, useNativeDriver:false}),
-      Animated.timing(opacA,   {toValue:1, duration:280, useNativeDriver:false}),
-      Animated.spring(scaleA,  {toValue:1, tension:90, friction:10, useNativeDriver:false}),
-    ]).start(() => {
-      Animated.sequence([
-        Animated.timing(trashA,{toValue:1,duration:120,useNativeDriver:false}),
-        Animated.timing(trashA,{toValue:-1,duration:120,useNativeDriver:false}),
-        Animated.timing(trashA,{toValue:0.7,duration:100,useNativeDriver:false}),
-        Animated.timing(trashA,{toValue:-0.7,duration:100,useNativeDriver:false}),
-        Animated.timing(trashA,{toValue:0,duration:100,useNativeDriver:false}),
-      ]).start();
-    });
-    if (!data.cleaning && data.deleted?.length === 0) {
-      const t = setTimeout(dismiss, 4000);
-      return () => clearTimeout(t);
-    }
+      Animated.spring(slideA, { toValue: 0, tension: 70, friction: 11, useNativeDriver: false }),
+      Animated.timing(opacA, { toValue: 1, duration: 280, useNativeDriver: false }),
+      Animated.spring(scaleA, { toValue: 1, tension: 90, friction: 10, useNativeDriver: false }),
+    ]).start();
   }, []);
 
+  // Timer + Progress + Countdown
+  useEffect(() => {
+    if (!shouldAutoDismiss) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
+    }
+
+    dismissedRef.current = false;
+    progressAnim.setValue(1);
+    setCountdown(Math.ceil(TOAST_DURATION / 1000));
+
+    // Barra de progresso
+    Animated.timing(progressAnim, {
+      toValue: 0,
+      duration: TOAST_DURATION,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (finished && !dismissedRef.current) {
+        dismiss();
+      }
+    });
+
+    // Countdown
+    intervalRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        const next = prev - 1;
+        if (next <= 0) {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          return 0;
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      progressAnim.stopAnimation();
+    };
+  }, [shouldAutoDismiss]);
+
   const dismiss = () => {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    progressAnim.stopAnimation();
+
     Animated.parallel([
-      Animated.timing(slideA,{toValue:-250, duration:260, easing:Easing.in(Easing.cubic), useNativeDriver:false}),
-      Animated.timing(opacA, {toValue:0,   duration:220, useNativeDriver:false}),
+      Animated.timing(slideA, { toValue: -250, duration: 260, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(opacA, { toValue: 0, duration: 220, useNativeDriver: false }),
     ]).start(() => onClose());
   };
 
-  const trashRot = trashA.interpolate({inputRange:[-1,0,1],outputRange:['-15deg','0deg','15deg']});
-  const deletedCount = data.deleted?.length ?? 0;
+  const trashRot = trashA.interpolate({
+    inputRange: [-1, 0, 1],
+    outputRange: ['-15deg', '0deg', '15deg'],
+  });
 
+  // ==================== ESTADO: LIMPANDO ====================
   if (data.cleaning) {
     return (
       <Animated.View style={{
-        position:'absolute', top: 60+(Platform.OS==='android'?20:44), left:16, right:16,
-        backgroundColor:T.bgCard, borderRadius:20, padding:16,
-        borderWidth:1.5, borderColor:T.amber+'60',
-        flexDirection:'row', alignItems:'center', gap:12,
-        transform:[{translateY:slideA},{scale:scaleA}], opacity:opacA,
-        shadowColor:T.amber, shadowOpacity:0.3, shadowRadius:16, elevation:14, zIndex:9998,
+        position: 'absolute',
+        top: 60 + (Platform.OS === 'android' ? 20 : 44),
+        left: 16,
+        right: 16,
+        backgroundColor: T.bgCard,
+        borderRadius: 20,
+        padding: 16,
+        borderWidth: 1.5,
+        borderColor: T.amber + '60',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        transform: [{ translateY: slideA }, { scale: scaleA }],
+        opacity: opacA,
+        shadowColor: T.amber,
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+        elevation: 14,
+        zIndex: 9998,
       }}>
-        <View style={{width:44,height:44,borderRadius:14,backgroundColor:T.amberGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.amber+'50'}}>
-          <ActivityIndicator size="small" color={T.amber}/>
+        <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.amber + '50' }}>
+          <ActivityIndicator size="small" color={T.amber} />
         </View>
-        <View style={{flex:1}}>
-          <Text style={{fontSize:12*fontScale,fontWeight:'900',color:T.amber,textTransform:'uppercase',letterSpacing:0.8}}>Limpeza automática</Text>
-          <Text style={{fontSize:13*fontScale,color:T.textSub,fontWeight:'700',marginTop:2}}>Verificando produtos vencidos há +30 dias...</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.amber, textTransform: 'uppercase', letterSpacing: 0.8 }}>Limpeza automática</Text>
+          <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 2 }}>Verificando produtos vencidos há +30 dias...</Text>
         </View>
       </Animated.View>
     );
   }
 
+  // ==================== ESTADO: NADA DELETADO ====================
   if (deletedCount === 0) {
+    const barWidthInterp = progressAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0%', '100%'],
+    });
+
     return (
       <Animated.View style={{
-        position:'absolute', top: 60+(Platform.OS==='android'?20:44), left:16, right:16,
-        backgroundColor:T.bgCard, borderRadius:20, padding:16,
-        borderWidth:1.5, borderColor:T.green+'50',
-        flexDirection:'row', alignItems:'center', gap:12,
-        transform:[{translateY:slideA},{scale:scaleA}], opacity:opacA,
-        shadowColor:T.green, shadowOpacity:0.25, shadowRadius:14, elevation:12, zIndex:9998,
+        position: 'absolute',
+        top: 60 + (Platform.OS === 'android' ? 20 : 44),
+        left: 16,
+        right: 16,
+        backgroundColor: T.bgCard,
+        borderRadius: 20,
+        padding: 16,
+        borderWidth: 1.5,
+        borderColor: T.green + '50',
+        flexDirection: 'column',
+        gap: 12,
+        transform: [{ translateY: slideA }, { scale: scaleA }],
+        opacity: opacA,
+        shadowColor: T.green,
+        shadowOpacity: 0.25,
+        shadowRadius: 14,
+        elevation: 12,
+        zIndex: 9998,
       }}>
-        <View style={{width:44,height:44,borderRadius:14,backgroundColor:T.greenGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.green+'50'}}>
-          <Feather name="check-circle" size={22} color={T.green}/>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.greenGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.green + '50' }}>
+            <Feather name="check-circle" size={22} color={T.green} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green, textTransform: 'uppercase', letterSpacing: 0.8 }}>Estoque limpo ✓</Text>
+            <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 1 }}>Nenhum produto vencido há +30 dias.</Text>
+          </View>
+
+          <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: T.greenGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.green + '40' }}>
+            <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green }}>{countdown}</Text>
+          </View>
         </View>
-        <View style={{flex:1}}>
-          <Text style={{fontSize:12*fontScale,fontWeight:'900',color:T.green,textTransform:'uppercase',letterSpacing:0.8}}>Estoque limpo ✓</Text>
-          <Text style={{fontSize:13*fontScale,color:T.textSub,fontWeight:'700',marginTop:1}}>Nenhum produto vencido há +30 dias.</Text>
+
+        <View style={{ height: 5, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}>
+          <Animated.View style={{ width: barWidthInterp, height: '100%', backgroundColor: T.green, borderRadius: 3 }} />
         </View>
-        <TouchableOpacity onPress={dismiss} style={{padding:6}}>
-          <Feather name="x" size={16} color={T.textMuted}/>
+
+        <TouchableOpacity onPress={dismiss} style={{ position: 'absolute', top: 12, right: 12, padding: 6 }}>
+          <Feather name="x" size={16} color={T.textMuted} />
         </TouchableOpacity>
       </Animated.View>
     );
   }
 
+  // ==================== ESTADO: PRODUTOS DELETADOS ====================
   return (
     <>
       <Animated.View style={{
-        position:'absolute', top: 60+(Platform.OS==='android'?20:44), left:16, right:16,
-        backgroundColor:T.bgCard, borderRadius:22,
-        borderWidth:2, borderColor:T.red+'55',
-        transform:[{translateY:slideA},{scale:scaleA}], opacity:opacA,
-        shadowColor:T.red, shadowOpacity:0.35, shadowRadius:20, elevation:16,
-        zIndex:9998, overflow:'hidden',
+        position: 'absolute',
+        top: 60 + (Platform.OS === 'android' ? 20 : 44),
+        left: 16,
+        right: 16,
+        backgroundColor: T.bgCard,
+        borderRadius: 22,
+        borderWidth: 2,
+        borderColor: T.red + '55',
+        transform: [{ translateY: slideA }, { scale: scaleA }],
+        opacity: opacA,
+        shadowColor: T.red,
+        shadowOpacity: 0.35,
+        shadowRadius: 20,
+        elevation: 16,
+        zIndex: 9998,
+        overflow: 'hidden',
       }}>
-        <View style={{flexDirection:'row', alignItems:'center', gap:12, padding:16, paddingBottom:12}}>
-          <Animated.View style={{width:48,height:48,borderRadius:15,backgroundColor:T.redGlow,justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:T.red+'50',transform:[{rotate:trashRot}]}}>
-            <Feather name="trash-2" size={22} color={T.red}/>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, paddingBottom: 12 }}>
+          <Animated.View style={{
+            width: 48, height: 48, borderRadius: 15, backgroundColor: T.redGlow,
+            justifyContent: 'center', alignItems: 'center',
+            borderWidth: 1.5, borderColor: T.red + '50',
+            transform: [{ rotate: trashRot }],
+          }}>
+            <Feather name="trash-2" size={22} color={T.red} />
           </Animated.View>
-          <View style={{flex:1}}>
-            <Text style={{fontSize:11*fontScale,fontWeight:'900',color:T.red,textTransform:'uppercase',letterSpacing:0.8}}>Limpeza automática</Text>
-            <View style={{flexDirection:'row',alignItems:'baseline',gap:4,marginTop:2}}>
-              <Text style={{fontSize:28*fontScale,fontWeight:'900',color:T.red,letterSpacing:-1}}>{deletedCount}</Text>
-              <Text style={{fontSize:13*fontScale,fontWeight:'700',color:T.textSub}}>produto{deletedCount!==1?'s':''} removido{deletedCount!==1?'s':''}</Text>
+
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.red, textTransform: 'uppercase', letterSpacing: 0.8 }}>Limpeza automática</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
+              <Text style={{ fontSize: 28 * fontScale, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{deletedCount}</Text>
+              <Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }}>
+                produto{deletedCount !== 1 ? 's' : ''} removido{deletedCount !== 1 ? 's' : ''}
+              </Text>
             </View>
           </View>
-          <View style={{gap:6,alignItems:'flex-end'}}>
-            <TouchableOpacity onPress={dismiss} style={{width:28,height:28,borderRadius:8,backgroundColor:T.bgInput,justifyContent:'center',alignItems:'center'}}>
-              <Feather name="x" size={14} color={T.textMuted}/>
+
+          <View style={{ gap: 6, alignItems: 'flex-end' }}>
+            <TouchableOpacity onPress={dismiss} style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}>
+              <Feather name="x" size={14} color={T.textMuted} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={()=>setModalVis(true)} style={{paddingHorizontal:8,paddingVertical:4,borderRadius:8,backgroundColor:T.red+'18',borderWidth:1,borderColor:T.red+'40'}}>
-              <Text style={{fontSize:9.5*fontScale,fontWeight:'900',color:T.red}}>Ver lista</Text>
+            <TouchableOpacity onPress={() => setModalVis(true)} style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: T.red + '18', borderWidth: 1, borderColor: T.red + '40' }}>
+              <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '900', color: T.red }}>Ver lista</Text>
             </TouchableOpacity>
           </View>
         </View>
-        <View style={{height:3,backgroundColor:T.red,opacity:0.7}}/>
+
+        <View style={{ height: 3, backgroundColor: T.red, opacity: 0.7 }} />
       </Animated.View>
 
-      <Modal visible={modalVis} transparent animationType="fade" onRequestClose={()=>setModalVis(false)}>
-        <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.65)',justifyContent:'center',padding:20}}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={()=>setModalVis(false)}/>
-          <View style={{backgroundColor:T.bgCard,borderRadius:28,overflow:'hidden',borderWidth:1,borderColor:T.red+'40',maxHeight:WIN.height*0.75}}>
-            <View style={{backgroundColor:T.red+'18',padding:22,paddingBottom:16,flexDirection:'row',alignItems:'center',gap:14,borderBottomWidth:1,borderColor:T.red+'25'}}>
-              <View style={{width:52,height:52,borderRadius:17,backgroundColor:T.red+'25',justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:T.red+'50'}}>
-                <Feather name="trash-2" size={24} color={T.red}/>
+      {/* Modal */}
+      <Modal visible={modalVis} transparent animationType="fade" onRequestClose={() => setModalVis(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 20 }}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setModalVis(false)} />
+          <View style={{ backgroundColor: T.bgCard, borderRadius: 28, overflow: 'hidden', borderWidth: 1, borderColor: T.red + '40', maxHeight: WIN?.height * 0.75 || 600 }}>
+            {/* Cabeçalho Modal */}
+            <View style={{ backgroundColor: T.red + '18', padding: 22, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 14, borderBottomWidth: 1, borderColor: T.red + '25' }}>
+              <View style={{ width: 52, height: 52, borderRadius: 17, backgroundColor: T.red + '25', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.red + '50' }}>
+                <Feather name="trash-2" size={24} color={T.red} />
               </View>
-              <View style={{flex:1}}>
-                <Text style={{fontSize:11*fontScale,fontWeight:'900',color:T.red,textTransform:'uppercase',letterSpacing:1}}>Relatório de Limpeza</Text>
-                <Text style={{fontSize:18*fontScale,fontWeight:'900',color:T.text,marginTop:2}}>{deletedCount} produto{deletedCount!==1?'s':''} excluído{deletedCount!==1?'s':''}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.red, textTransform: 'uppercase', letterSpacing: 1 }}>Relatório de Limpeza</Text>
+                <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text, marginTop: 2 }}>{deletedCount} produto{deletedCount !== 1 ? 's' : ''} excluído{deletedCount !== 1 ? 's' : ''}</Text>
               </View>
             </View>
-            <ScrollView contentContainerStyle={{padding:16,gap:8}} showsVerticalScrollIndicator={false}>
-              {data.deleted.map((item,i)=>(
-                <View key={i} style={{flexDirection:'row',alignItems:'center',gap:12,backgroundColor:T.bgElevated,borderRadius:16,padding:14,borderWidth:1,borderColor:T.border}}>
-                  <View style={{width:32,height:32,borderRadius:10,backgroundColor:T.red+'20',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.red+'35'}}>
-                    <Text style={{fontSize:11,fontWeight:'900',color:T.red}}>{i+1}</Text>
+
+            <ScrollView contentContainerStyle={{ padding: 16, gap: 8 }} showsVerticalScrollIndicator={false}>
+              {data.deleted.map((item, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: T.bgElevated, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: T.border }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.red + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.red + '35' }}>
+                    <Text style={{ fontSize: 11, fontWeight: '900', color: T.red }}>{i + 1}</Text>
                   </View>
-                  <View style={{flex:1}}>
-                    <Text style={{fontSize:13*fontScale,fontWeight:'900',color:T.text}} numberOfLines={1}>{item.nome}</Text>
-                    <View style={{flexDirection:'row',gap:6,marginTop:4,flexWrap:'wrap'}}>
-                      <View style={{paddingHorizontal:7,paddingVertical:2,borderRadius:6,backgroundColor:T.red+'15',borderWidth:1,borderColor:T.red+'30'}}>
-                        <Text style={{fontSize:9.5*fontScale,fontWeight:'800',color:T.red}}>Venceu {item.vencimento}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13 * fontScale, fontWeight: '900', color: T.text }} numberOfLines={1}>{item.nome}</Text>
+                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: T.red + '15', borderWidth: 1, borderColor: T.red + '30' }}>
+                        <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '800', color: T.red }}>Venceu {item.vencimento}</Text>
                       </View>
-                      <View style={{paddingHorizontal:7,paddingVertical:2,borderRadius:6,backgroundColor:T.bgInput,borderWidth:1,borderColor:T.border}}>
-                        <Text style={{fontSize:9.5*fontScale,fontWeight:'700',color:T.textSub}}>{item.dias}d atrás</Text>
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }}>
+                        <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '700', color: T.textSub }}>{item.dias}d atrás</Text>
                       </View>
                     </View>
                   </View>
-                  <Feather name="check-circle" size={18} color={T.green}/>
+                  <Feather name="check-circle" size={18} color={T.green} />
                 </View>
               ))}
             </ScrollView>
-            <View style={{padding:16,borderTopWidth:1,borderColor:T.border}}>
-              <TouchableOpacity onPress={()=>{setModalVis(false);dismiss();}} style={{height:50,borderRadius:14,backgroundColor:T.blue,justifyContent:'center',alignItems:'center',flexDirection:'row',gap:8}}>
-                <Feather name="check" size={17} color="#FFF"/>
-                <Text style={{fontSize:14*fontScale,fontWeight:'900',color:'#FFF'}}>Entendido</Text>
+
+            <View style={{ padding: 16, borderTopWidth: 1, borderColor: T.border }}>
+              <TouchableOpacity 
+                onPress={() => { setModalVis(false); dismiss(); }} 
+                style={{ height: 50, borderRadius: 14, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8 }}
+              >
+                <Feather name="check" size={17} color="#FFF" />
+                <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: '#FFF' }}>Entendido</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
     </>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NOVO COMPONENTE DE SUCESSO PROFISSIONAL
+// ═══════════════════════════════════════════════════════════════════════════
+const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
+  const scale = useRef(new Animated.Value(0)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const ringScale = useRef(new Animated.Value(0.5)).current;
+  const timeoutRef = useRef(null);
+
+  useEffect(() => {
+    if (visible) {
+      // Reinicia animações
+      scale.setValue(0);
+      rotate.setValue(0);
+      opacity.setValue(0);
+      ringScale.setValue(0.5);
+      
+      Animated.parallel([
+        Animated.spring(scale, { toValue: 1, tension: 90, friction: 8, useNativeDriver: false }),
+        Animated.timing(opacity, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.spring(ringScale, { toValue: 1, tension: 50, friction: 7, useNativeDriver: false }),
+      ]).start();
+
+      // Rotação sutil do check
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(rotate, { toValue: 1, duration: 600, useNativeDriver: false }),
+          Animated.timing(rotate, { toValue: -1, duration: 600, useNativeDriver: false }),
+          Animated.timing(rotate, { toValue: 0, duration: 600, useNativeDriver: false }),
+        ])
+      );
+      loop.start();
+
+      // Auto-fechar após 2.5 segundos
+      timeoutRef.current = setTimeout(() => {
+        loop.stop();
+        onClose();
+      }, 2500);
+    } else {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    }
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [visible]);
+
+  const rotateInterp = rotate.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-12deg', '0deg', '12deg'] });
+
+  if (!visible) return null;
+
+  return (
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+      <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.88)', opacity }]} />
+      <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Animated.View style={{ transform: [{ scale: ringScale }] }}>
+          <View style={{ width: 140, height: 140, borderRadius: 70, backgroundColor: T.green + '20', justifyContent: 'center', alignItems: 'center' }}>
+            <Animated.View style={{
+              width: 110, height: 110, borderRadius: 55,
+              backgroundColor: T.green,
+              justifyContent: 'center', alignItems: 'center',
+              transform: [{ scale }, { rotate: rotateInterp }],
+              shadowColor: T.green, shadowOpacity: 0.7, shadowRadius: 20, elevation: 12,
+            }}>
+              <Feather name="check" size={60} color="#FFF" />
+            </Animated.View>
+          </View>
+        </Animated.View>
+        <Animated.Text style={{
+          marginTop: 32,
+          fontSize: 28 * fontScale,
+          fontWeight: '900',
+          color: '#FFF',
+          textAlign: 'center',
+          opacity,
+          transform: [{ scale }],
+        }}>
+          Cadastro Concluído!
+        </Animated.Text>
+        <Animated.Text style={{
+          marginTop: 12,
+          fontSize: 16 * fontScale,
+          color: 'rgba(255,255,255,0.7)',
+          textAlign: 'center',
+          paddingHorizontal: 32,
+          opacity,
+        }}>
+          Produto adicionado com sucesso.
+        </Animated.Text>
+      </View>
+    </View>
   );
 };
 
@@ -1142,10 +2036,12 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
     return () => clearInterval(iv);
   }, [busy]);
 
-  // Auto-scroll when new message arrives
-  useEffect(() => {
-    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-    return () => clearTimeout(t);
+  // Auto-scroll using layout effect to ensure DOM is ready
+  useLayoutEffect(() => {
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 150);
+    return () => clearTimeout(timer);
   }, [msgs, busy]);
 
   const handleSend = () => {
@@ -1318,13 +2214,14 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CADASTRO WIZARD — Nome primeiro, depois validade
+// CADASTRO WIZARD — Nome primeiro, depois validade (COM VALIDAÇÃO DE DATA)
 // ═══════════════════════════════════════════════════════════════════════════
 const CadastroScreen = ({
   T, fontScale, perf, cadastroShelf, setCadastroShelf, activeShelf,
   prodName, setProdName, validade, setValidade, qtd, setQtd, giro, setGiro,
   wStep, setWStep, nextStep, saveProduct, TAB_SAFE, GIRO,
   isCoord, isDeposito, SHELF_KEYS, shlabel, shelfPalette,
+  showErr
 }) => {
   const stepAnim = useRef(new Animated.Value(1)).current;
   const inputRef  = useRef(null);
@@ -1355,6 +2252,33 @@ const CadastroScreen = ({
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 200);
   }, [wStep]);
+
+  const handleNext = () => {
+    // Validações específicas antes de avançar
+    if (wStep === 1 && !prodName.trim()) {
+      showErr('O nome do produto é obrigatório.');
+      return;
+    }
+    if (wStep === 2) {
+      if (!validade) {
+        showErr('A data de validade é obrigatória.');
+        return;
+      }
+      if (!isValidDate(validade)) {
+        showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.');
+        return;
+      }
+    }
+    if (wStep === 3 && (!qtd || Number(qtd) <= 0)) {
+      showErr('A quantidade deve ser um número positivo.');
+      return;
+    }
+    if (wStep === 4 && !giro) {
+      showErr('Selecione o giro estimado.');
+      return;
+    }
+    animateStep(() => nextStep());
+  };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{flex:1}}>
@@ -1446,7 +2370,7 @@ const CadastroScreen = ({
             </>
           )}
 
-          {/* STEP 2 — Validade */}
+          {/* STEP 2 — Validade (com validação) */}
           {wStep === 2 && (
             <>
               <View style={{flexDirection:'row',alignItems:'center',gap:12,marginBottom:20}}>
@@ -1477,18 +2401,27 @@ const CadastroScreen = ({
                 maxLength={10}
                 autoFocus
               />
-              {validade.length === 10 && (() => {
-                const vs = vencStatus(validade);
-                const colors = {expired:T.red, warning:T.amber, ok:T.green, unknown:T.textMuted};
-                const icons  = {expired:'alert-circle', warning:'alert-triangle', ok:'check-circle', unknown:'clock'};
-                const labels = {expired:`Produto já vencido!`, warning:`Vence em ${vs.days} dia${vs.days!==1?'s':''}`, ok:`Válido até ${validade}`, unknown:'Data inválida'};
-                return (
-                  <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:12,padding:12,backgroundColor:colors[vs.status]+'18',borderRadius:12,borderWidth:1,borderColor:colors[vs.status]+'40'}}>
-                    <Feather name={icons[vs.status]} size={16} color={colors[vs.status]}/>
-                    <Text style={{fontSize:13*fontScale,color:colors[vs.status],fontWeight:'800'}}>{labels[vs.status]}</Text>
+              {validade.length === 10 && (
+                isValidDate(validade) ? (
+                  (() => {
+                    const vs = vencStatus(validade);
+                    const colors = {expired:T.red, warning:T.amber, ok:T.green, unknown:T.textMuted};
+                    const icons  = {expired:'alert-circle', warning:'alert-triangle', ok:'check-circle', unknown:'clock'};
+                    const labels = {expired:`Produto já vencido!`, warning:`Vence em ${vs.days} dia${vs.days!==1?'s':''}`, ok:`Válido até ${validade}`, unknown:'Data inválida'};
+                    return (
+                      <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:12,padding:12,backgroundColor:colors[vs.status]+'18',borderRadius:12,borderWidth:1,borderColor:colors[vs.status]+'40'}}>
+                        <Feather name={icons[vs.status]} size={16} color={colors[vs.status]}/>
+                        <Text style={{fontSize:13*fontScale,color:colors[vs.status],fontWeight:'800'}}>{labels[vs.status]}</Text>
+                      </View>
+                    );
+                  })()
+                ) : (
+                  <View style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:12,padding:12,backgroundColor:T.redGlow,borderRadius:12,borderWidth:1,borderColor:T.red+'40'}}>
+                    <Feather name="alert-circle" size={16} color={T.red}/>
+                    <Text style={{fontSize:13*fontScale,color:T.red,fontWeight:'800'}}>Data inválida! Use o formato DD/MM/AAAA e uma data real.</Text>
                   </View>
-                );
-              })()}
+                )
+              )}
             </>
           )}
 
@@ -1593,7 +2526,7 @@ const CadastroScreen = ({
             )}
             <PrimaryBtn
               label={wStep < 4 ? 'Avançar →' : '✓ Finalizar Cadastro'}
-              onPress={() => animateStep(() => nextStep())}
+              onPress={handleNext}
               style={{flex:1}}
               color={T.blue}
               fontScale={fontScale}
@@ -1645,10 +2578,12 @@ export default function App() {
   const [fontScale, setFontScale] = useState(1);
   const [notifOn, setNotifOn] = useState(true);
   const T = THEMES[currentTheme] || THEMES.dark;
-
+  const [scanning, setScanning] = useState(false);
+  const darkEnv = useDarkEnvironment(scanning);
+  const [torchOn, setTorchOn] = useState(false);
   const [erro, setErro] = useState('');
   const showErr = useCallback(m => { setErro(m); setTimeout(() => setErro(''), 6000); }, []);
-
+ 
   const [isLogged, setIsLogged] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [userData, setUserData] = useState(null);
@@ -1663,9 +2598,7 @@ export default function App() {
   const [stockData, setStockData] = useState([]);
   const [shelfModal, setShelfModal] = useState(false);
   const [currentTab, setCurrentTab] = useState('home');
-  const [scanning, setScanning] = useState(false);
   const [scanMode, setScanMode] = useState('barcode');
-  const [torchOn, setTorchOn] = useState(false);
   const [prodName, setProdName] = useState('');
   const [countdown, setCountdown] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1682,6 +2615,9 @@ export default function App() {
   const [viewMode, setViewMode] = useState('list');
   const [showSuccess, setShowSuccess] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [sourceModalVisible, setSourceModalVisible] = useState(false);
+  const [currentSources, setCurrentSources] = useState([]);
+  const [scannedEAN, setScannedEAN] = useState('');
 
   // ── AUTO-CLEAN STATE
   const [cleanToast, setCleanToast] = useState(null);
@@ -1803,22 +2739,33 @@ export default function App() {
     if (mode === 'aiVision') setCountdown(5);
   };
   const onBarcode = async ({ data }) => {
-    lastScan.current = Date.now(); setScanning(false); setBusy(true); setBusyMsg('Consultando produto...');
-    let nomeFinal = '', giroFinal = 'Médio giro';
+    if (Date.now() - lastScan.current < 1500) return;
+    lastScan.current = Date.now();
+    setScannedEAN(data);
+    setBusy(true);
+    setBusyMsg('Consultando fontes de dados...');
     try {
-      let ok = false;
-      try {
-        const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${data}`);
-        if (r.ok) { const j = await r.json(); if (j.status === 1) { const n = j.product.product_name_pt || j.product.product_name || j.product.generic_name || ''; if (n.trim()) { const b = j.product.brands ? ` · ${j.product.brands.split(',')[0].trim()}` : ''; const q = j.product.quantity ? ` (${j.product.quantity})` : ''; nomeFinal = `${n}${b}${q}`; ok = true; } } }
-      } catch (_) { }
-      if (!ok) { setBusyMsg('IA buscando produto...'); try { const txt = await callIA(`Você é especialista em produtos de supermercado brasileiro. EAN: ${data}. Retorne APENAS JSON válido: {"nome":"","marca":"","categoria":"","gramatura":"","rotatividade":"Grande giro"|"Médio giro"|"Pouco giro"}`); const ir = JSON.parse(txt.replace(/```json|```/g,'').trim()); if (ir?.nome) { nomeFinal = [ir.nome, ir.marca].filter(Boolean).join(' · '); giroFinal = ir.rotatividade || 'Médio giro'; } else nomeFinal = `Produto EAN ${data}`; } catch (_) { nomeFinal = `Produto EAN ${data}`; } }
+      const sources = await fetchProductSources(data);
+      setCurrentSources(sources);
       setBusy(false);
-      setProdName(nomeFinal);
-      setGiro(giroFinal);
-      resetWiz();
-      navTo('cadastro');
-    } catch (ex) { setBusy(false); showErr('Erro ao processar código de barras.'); }
+      setScanning(false);
+      setSourceModalVisible(true);
+    } catch (ex) {
+      console.error(ex);
+      setBusy(false);
+      setScanning(false);
+      showErr('Erro ao consultar fontes de dados.');
+    }
   };
+
+  const onSourceSelected = ({ nome, giro }) => {
+    setSourceModalVisible(false);
+    setProdName(nome);
+    setGiro(giro);
+    resetWiz();
+    navTo('cadastro');
+  };
+
   const captureVision = async () => {
     if (!camRef.current) { showErr('Câmera não iniciada.'); return; }
     setCountdown(null); setBusy(true); setBusyMsg('IA analisando imagem...');
@@ -1867,6 +2814,7 @@ export default function App() {
   const saveProduct = async () => {
     if (!prodName) { showErr('O nome do produto é obrigatório.'); return; }
     if (!validade) { showErr('A data de validade é obrigatória.'); return; }
+    if (!isValidDate(validade)) { showErr('Data de validade inválida! Use o formato DD/MM/AAAA e uma data real.'); return; }
     if (!qtd)      { showErr('A quantidade é obrigatória.'); return; }
     if (!giro)     { showErr('Selecione o giro estimado.'); return; }
     const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf];
@@ -1875,7 +2823,7 @@ export default function App() {
     try {
       await axios.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, {
         produto: prodName.trim(),
-        codig: 'Sem EAN',
+        codig: scannedEAN || 'Sem EAN',
         VENCIMENTO: validade,
         quantidade: String(qtd),
         ENVIADOPORQUEM: userData?.NOME || 'Sistema',
@@ -1887,15 +2835,20 @@ export default function App() {
       }, { headers: { Authorization: `Token ${BASEROW_TOKEN}` } });
       setBusy(false);
       setShowSuccess(true);
+      setScannedEAN('');
     } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); }
   };
 
   const nextStep = () => {
     if (wStep === 1 && !prodName.trim()) { showErr('O nome do produto é obrigatório.'); return; }
-    if (wStep === 2 && !validade)        { showErr('A data de validade é obrigatória.'); return; }
-    if (wStep === 3 && !qtd)             { showErr('A quantidade é obrigatória.'); return; }
-    if (wStep === 4) { saveProduct(); return; }
-    setWStep(p => p + 1);
+    if (wStep === 2) {
+      if (!validade) { showErr('A data de validade é obrigatória.'); return; }
+      if (!isValidDate(validade)) { showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; }
+    }
+    if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { showErr('A quantidade deve ser um número positivo.'); return; }
+    if (wStep === 4 && !giro) { showErr('Selecione o giro estimado.'); return; }
+    if (wStep < 4) setWStep(p => p + 1);
+    else saveProduct();
   };
 
   const onSuccessDone = () => {
@@ -1907,6 +2860,7 @@ export default function App() {
     setProdName('');
     setGiro('');
     setCadastroShelf('');
+    setScannedEAN('');
   };
   const navTo = tab => {
     Animated.timing(fadeAnim, { toValue: 0, duration: 110, useNativeDriver: false }).start(() => {
@@ -1925,13 +2879,21 @@ export default function App() {
       <View style={{ flex: 1, backgroundColor: '#000' }}><StatusBar hidden /><CameraView style={StyleSheet.absoluteFill} onBarcodeScanned={onQR} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} /><View style={{ position: 'absolute', top: 40, left: 24 }}><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setQrStep('role')}><Feather name="arrow-left" size={22} color="#FFF" /></TouchableOpacity></View><View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><View style={{ width: 240, height: 240, borderWidth: 2, borderColor: T.blue, borderRadius: 32, backgroundColor: 'rgba(59,91,255,0.05)' }} /><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16 }}>Aponte para o QR Code de acesso</Text></View></View>
     );
     return (
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: T.bg }}><StatusBar hidden /><View style={{ paddingTop: 16 }}><ErrBanner msg={erro} onClose={() => setErro('')} /></View><ScrollView contentContainerStyle={{ flexGrow: 1, padding: 26, paddingTop: 60, paddingBottom: 40 }} keyboardShouldPersistTaps="handled"><Text style={{ fontSize: 56, fontWeight: '900', color: T.text, letterSpacing: -2.5, textAlign: 'center' }}>GEI<Text style={{ color: T.blue }}>.AI</Text></Text><Text style={{ fontSize: 10, letterSpacing: 5, color: T.textSub, marginTop: 6, marginBottom: 40, fontWeight: '700', textAlign: 'center' }}>GESTÃO DE ESTOQUE INTEGRADO</Text><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 22, fontWeight: '900', color: T.text, marginBottom: 6 }}>Bem-vindo de volta</Text><Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24, lineHeight: 20 }}>Acesse sua conta para gerenciar o estoque em tempo real.</Text><View style={{ gap: 16, marginBottom: 24 }}><View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>E-MAIL</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, padding: 16, borderRadius: 16, fontSize: 15, color: T.text }} placeholder="seu@email.com" placeholderTextColor={T.textMuted} value={emailIn} onChangeText={setEmailIn} autoCapitalize="none" keyboardType="email-address" /></View><View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>SENHA</Text><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 16, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 16, fontSize: 15, color: T.text }} placeholder="••••••••" placeholderTextColor={T.textMuted} value={passIn} onChangeText={setPassIn} secureTextEntry={!showPass} /><TouchableOpacity onPress={() => setShowPass(!showPass)}><Feather name={showPass ? 'eye-off' : 'eye'} size={20} color={T.textSub} /></TouchableOpacity></View></View></View>{loading ? <ActivityIndicator size="large" color={T.blue} style={{ marginVertical: 12 }} /> : <PrimaryBtn label="Entrar no Painel" onPress={() => doLogin(emailIn, passIn)} color={T.blue} />}<View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 24 }}><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /><Text style={{ paddingHorizontal: 16, color: T.textMuted, fontSize: 12, fontWeight: '800' }}>OU</Text><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /></View><TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16, borderRadius: 16, borderWidth: 1.5, borderColor: T.blue + '40', backgroundColor: T.blueGlow }} onPress={() => setAuthMode('qrScanner')}><Feather name="maximize" size={18} color={T.blue} /><Text style={{ color: T.blue, fontWeight: '800', fontSize: 15 }}>Escanear QR Code</Text></TouchableOpacity></View><Text style={{ marginTop: 32, textAlign: 'center', color: T.textMuted, fontSize: 12, fontWeight: '600' }}>GEI.AI v4.6 Premium · 2026</Text></ScrollView></KeyboardAvoidingView>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: T.bg }}><StatusBar hidden /><View style={{ paddingTop: 16 }}><ErrBanner msg={erro} onClose={() => setErro('')} /></View><ScrollView contentContainerStyle={{ flexGrow: 1, padding: 26, paddingTop: 60, paddingBottom: 40 }} keyboardShouldPersistTaps="handled"><Text style={{ fontSize: 56, fontWeight: '900', color: T.text, letterSpacing: -2.5, textAlign: 'center' }}>GEI<Text style={{ color: T.blue }}>.AI</Text></Text><Text style={{ fontSize: 10, letterSpacing: 5, color: T.textSub, marginTop: 6, marginBottom: 40, fontWeight: '700', textAlign: 'center' }}>GESTÃO DE ESTOQUE INTEGRADO</Text><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 22, fontWeight: '900', color: T.text, marginBottom: 6 }}>Bem-vindo de volta</Text><Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24, lineHeight: 20 }}>Acesse sua conta para gerenciar o estoque em tempo real.</Text><View style={{ gap: 16, marginBottom: 24 }}><View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>E-MAIL</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, padding: 16, borderRadius: 16, fontSize: 15, color: T.text }} placeholder="seu@email.com" placeholderTextColor={T.textMuted} value={emailIn} onChangeText={setEmailIn} autoCapitalize="none" keyboardType="email-address" /></View><View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>SENHA</Text><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 16, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 16, fontSize: 15, color: T.text }} placeholder="••••••••" placeholderTextColor={T.textMuted} value={passIn} onChangeText={setPassIn} secureTextEntry={!showPass} /><TouchableOpacity onPress={() => setShowPass(!showPass)}><Feather name={showPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View></View></View>{loading ? <ActivityIndicator size="large" color={T.blue} style={{ marginVertical: 12 }} /> : <PrimaryBtn label="Entrar no Painel" onPress={() => doLogin(emailIn, passIn)} color={T.blue} />}<View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 24 }}><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /><Text style={{ paddingHorizontal: 16, color: T.textMuted, fontSize: 12, fontWeight: '800' }}>OU</Text><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /></View><TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16, borderRadius: 16, borderWidth: 1.5, borderColor: T.blue + '40', backgroundColor: T.blueGlow }} onPress={() => setAuthMode('qrScanner')}><Feather name="maximize" size={18} color={T.blue} /><Text style={{ color: T.blue, fontWeight: '800', fontSize: 15 }}>Escanear QR Code</Text></TouchableOpacity></View><Text style={{ marginTop: 32, textAlign: 'center', color: T.textMuted, fontSize: 12, fontWeight: '600' }}>GEI.AI v4.6 Premium · 2026</Text></ScrollView></KeyboardAvoidingView>
     );
   }
 
   return (
     <View style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar hidden />
+      <DarkTorchPrompt
+        isDarkEnv={darkEnv.isDarkEnv}
+        lightLevel={darkEnv.lightLevel}
+        torchOn={torchOn}
+        onToggleTorch={() => setTorchOn(!torchOn)}
+        T={T}
+        fontScale={fontScale}
+      />
       {!scanning && (
         <View style={{ paddingTop: 50, paddingHorizontal: 20, paddingBottom: 16, backgroundColor: T.bg, borderBottomWidth: 1, borderColor: T.border }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -2028,6 +2990,7 @@ export default function App() {
             isCoord={isCoord} isDeposito={isDeposito}
             SHELF_KEYS={SHELF_KEYS} shlabel={shlabel}
             shelfPalette={shelfPalette}
+            showErr={showErr}
           />
         )}
 
@@ -2137,6 +3100,20 @@ export default function App() {
         fontScale={fontScale}
       />
 
+      {/* Product Source Modal */}
+      <ProductSourceModal
+        visible={sourceModalVisible}
+        sources={currentSources}
+        onSelect={onSourceSelected}
+        onClose={() => {
+          setSourceModalVisible(false);
+          setCurrentSources([]);
+          setProdName('');
+        }}
+        T={T}
+        fontScale={fontScale}
+      />
+
       {/* Shelf Modal */}
       <Modal visible={shelfModal} transparent animationType="fade" onRequestClose={() => setShelfModal(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}>
@@ -2174,24 +3151,8 @@ export default function App() {
         </View>
       )}
 
-      {/* Success overlay */}
-      {showSuccess && (
-        <View style={styles.successOverlay}>
-          <ConfettiOverlay visible={showSuccess} cx={W / 2} cy={WIN.height / 2 - 50} count={50} />
-          <View style={styles.successIconBox}>
-            <View style={styles.successGlow} />
-            <View style={styles.successRing} />
-            <View style={styles.checkCircle}>
-              <Feather name="check" size={60} color="#FFF" />
-            </View>
-            <Text style={styles.successLabel}>Cadastro Concluído!</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.7)', textAlign: 'center', paddingHorizontal: 40, lineHeight: 22, fontSize: 15 }}>
-              Produto adicionado com sucesso na prateleira.
-            </Text>
-            <PrimaryBtn label="Continuar" onPress={onSuccessDone} color="#22C55E" style={{ width: 200, marginTop: 20 }} fontScale={fontScale} />
-          </View>
-        </View>
-      )}
+      {/* Success Overlay — novo componente profissional */}
+      <SuccessOverlay visible={showSuccess} onClose={onSuccessDone} T={T} fontScale={fontScale} />
 
       {/* Auto-clean toast */}
       {cleanToast && !scanning && (
