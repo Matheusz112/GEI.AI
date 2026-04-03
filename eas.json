@@ -11,13 +11,22 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "YARN_BARE_MODE": "1"
       }
     },
     "production": {
       "autoIncrement": true,
       "android": {
-        "buildType": "apk"          // ← Adicione esta linha
+        "buildType": "apk"
+      },
+      "env": {
+        "YARN_BARE_MODE": "1"
       }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }
