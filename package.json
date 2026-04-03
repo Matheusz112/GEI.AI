@@ -1,34 +1,50 @@
 {
-  "name": "gei-gestao-estoque",
-  "version": "1.0.0",
-  "description": "Sistema de Gestão de Estoque Integrado - GEI.IA",
-  "main": "index.js",
-  "scripts": {
-    "start": "expo start --clear",
-    "android": "expo start --android --clear",
-    "ios": "expo start --ios --clear",
-    "web": "expo start --web --clear"
-  },
-  "dependencies": {
-    "expo": "~52.0.0",
-    "expo-status-bar": "~2.0.1",
-    "react": "18.3.1",
-    "react-native": "0.76.0",
-    "axios": "*",
-    "expo-camera": "~17.0.10",
-    "expo-crypto": "~15.0.8",
-    "expo-clipboard": "~8.0.8",
-    "expo-constants": "~18.0.13",
-    "react-native-svg": "15.12.1",
-    "expo-secure-store": "~15.0.8",
-    "@expo/vector-icons": "^15.0.3",
-    "react-native-paper": "4.9.2",
-    "expo-navigation-bar": "~5.0.10",
-    "react-native-qrcode-svg": "*",
-    "expo-local-authentication": "~17.0.8"
-  },
-  "devDependencies": {
-    "@babel/core": "^7.25.2"
-  },
-  "private": true
+  "expo": {
+    "name": "gei-gestao-estoque",
+    "slug": "gei-gestao-estoque",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.seuempresa.geigestaoestoque",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to scan QR codes and take photos"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.seuempresa.geigestaoestoque",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.USE_BIOMETRIC"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to scan QR codes and manage inventory.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-local-authentication",
+      "expo-secure-store"
+    ]
+  }
 }
