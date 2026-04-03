@@ -16,10 +16,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.seuempresa.geigestaoestoque",
-      "infoPlist": {
-        "NSCameraUsageDescription": "This app uses the camera to scan QR codes and take photos"
-      }
+      "bundleIdentifier": "com.seuempresa.geigestaoestoque"
     },
     "android": {
       "adaptiveIcon": {
@@ -36,13 +33,6 @@
       "favicon": "./assets/logo.png"
     },
     "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to scan QR codes and manage inventory.",
-          "microphonePermission": false
-        }
-      ],
       "expo-local-authentication",
       "expo-secure-store"
     ]
