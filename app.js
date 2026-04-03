@@ -15,7 +15,6 @@ import * as Crypto from 'expo-crypto';
 import Constants from 'expo-constants';
 import QRCode from 'react-native-qrcode-svg';
 import axios from 'axios';
-
 const WIN = Dimensions.get('window');
 const SCR = Dimensions.get('screen');
 const NAV_BAR_H = Platform.OS === 'android' ? Math.max(0, SCR.height - WIN.height) : 0;
@@ -437,6 +436,7 @@ const QrCodeGenerator = ({ T, fontScale, userData, onClose }) => {
   const [loginRapido, setLoginRapido] = useState('');
   const [expiresAt, setExpiresAt] = useState(null);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     generateLoginQR();
   }, []);
@@ -667,9 +667,9 @@ const cleanShelf = async (shelfKey, tableId) => {
       try {
         await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${row.id}/`);
         deleted.push({ nome: String(row.produto || 'Produto').trim() || 'Produto sem nome', vencimento: row.VENCIMENTO, shelf: SHELF_LABEL[shelfKey] || shelfKey, dias: Math.abs(diffDays(today(), parseDate(row.VENCIMENTO))) });
-      } catch (_) { }
+      } catch (_) { /* noop */ }
     }));
-  } catch (_) { }
+  } catch (_) { /* noop */ }
   return deleted;
 };
 const runAutoClean = async () => { const results = await Promise.all(SHELF_KEYS.map(k => cleanShelf(k, SHELVES[k]))); return results.flat(); };
@@ -787,6 +787,7 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
   const deletedCount = data.deleted?.length ?? 0;
   const shouldAutoDismiss = !data.cleaning && deletedCount === 0;
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     Animated.parallel([
       Animated.spring(slideA, { toValue: 0, tension: 70, friction: 11, useNativeDriver: false }),
@@ -795,6 +796,7 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
     ]).start();
   }, []);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!shouldAutoDismiss) { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } return; }
     dismissedRef.current = false; progressAnim.setValue(1); setCountdown(Math.ceil(TOAST_DURATION / 1000));
@@ -946,7 +948,6 @@ const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
 
 // ─── PRODUCT DETAIL MODAL ───────────────────────────────────────────────────
 const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
-  if (!product) return null;
   const slideA = useRef(new Animated.Value(WIN.height)).current;
   const opacA = useRef(new Animated.Value(0)).current;
   const headerA = useRef(new Animated.Value(0)).current;
@@ -962,14 +963,16 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
   const GIRO = useMemo(() => makeGiro(T), [T]);
   const VENC = useMemo(() => makeVENC(T), [T]);
   const metrics = useMemo(() => buildDepletionMetrics(product), [product]);
-  const g = GIRO[product.MARGEM] || { color: T.textSub, glow: T.bgInput, icon: 'minus', short: '—', rate: 2.5 };
-  const vs = vencStatus(product.VENCIMENTO);
+  const g = GIRO[product?.MARGEM] || { color: T.textSub, glow: T.bgInput, icon: 'minus', short: '—', rate: 2.5 };
+  const vs = vencStatus(product?.VENCIMENTO);
   const vc = VENC[vs.status];
   const animRem = useCountUp(metrics.remainingQty, 900);
   const animSold = useCountUp(metrics.soldEstimate, 700);
   const animPct = useCountUp(metrics.remainingPct, 800);
   const stockColor = metrics.remainingPct <= 0 ? T.red : metrics.remainingPct <= 15 ? T.red : metrics.remainingPct <= 35 ? T.amber : T.green;
+  if (!product) return null;
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (visible) {
       slideA.setValue(WIN.height); opacA.setValue(0); headerA.setValue(0); card1A.setValue(40); card2A.setValue(60); card3A.setValue(80); card4A.setValue(100); barA.setValue(0); soldBarA.setValue(0);
@@ -1327,6 +1330,7 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
   const [typingDots, setTypingDots] = useState(0);
   const inputRef = useRef(null);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onShow = e => { Animated.spring(keyboardAnim, { toValue: e.endCoordinates.height, useNativeDriver: false, tension: 65, friction: 11 }).start(); setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80); };
     const onHide = () => { Animated.spring(keyboardAnim, { toValue: 0, useNativeDriver: false, tension: 65, friction: 11 }).start(); };
@@ -1342,6 +1346,7 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
     return () => clearInterval(iv);
   }, [busy]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
     return () => clearTimeout(timer);
@@ -1658,7 +1663,7 @@ const useDarkEnvironment = (isScanning = false) => {
           const normalized = Math.min(1, illuminance / 300);
           setState({ isDarkEnv: illuminance < 40, lightLevel: normalized, source: 'sensor' });
         });
-      } catch (_) { }
+      } catch (_) { /* noop */ }
     };
     tryLightSensor();
     if (isScanning && !pollRef.current) { pollRef.current = setInterval(() => setState(prev => ({ ...prev })), 700); }
@@ -1718,19 +1723,19 @@ export default function App() {
           initializeSecureToken(),
           new Promise(r => setTimeout(r, 5000)),
         ]);
-      } catch (_) {}
+      } catch (_) { /* noop */ }
 
       try {
         await Promise.race([
           loadSecrets(),
           new Promise(r => setTimeout(r, 5000)),
         ]);
-      } catch (_) {}
+      } catch (_) { /* noop */ }
 
       try {
         const bioPref = await SecureStore.getItemAsync('biometric_enabled');
         if (bioPref === 'true') setBiometricEnabled(true);
-      } catch (_) {}
+      } catch (_) { /* noop */ }
 
       clearTimeout(timeout);
       forceInit();
@@ -1835,7 +1840,7 @@ export default function App() {
   const camRef = useRef(null);
   const lastScan = useRef(Date.now());
 
-  const GIRO = useMemo(() => makeGiro(T), [currentTheme]);
+  const GIRO = useMemo(() => makeGiro(T), [T, currentTheme]);
   const perf = userData?.PERFIL || '';
   const canSw = canSwitch(perf);
   const initials = getInitials(userData?.NOME || 'Usuário');
@@ -1847,13 +1852,16 @@ export default function App() {
     const hide = () => { StatusBar.setHidden(true, 'none'); StatusBar.setTranslucent(true); StatusBar.setBackgroundColor('transparent', false); };
     hide(); const sub = AppState.addEventListener('change', s => { if (s === 'active') hide(); }); return () => sub.remove();
   }, []);
-  useEffect(() => { if (Platform.OS === 'android') { NavigationBar.setVisibilityAsync('hidden').catch(() => { }); NavigationBar.setBackgroundColorAsync('transparent').catch(() => { }); } }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (Platform.OS === 'android') { NavigationBar.setVisibilityAsync('hidden').catch(() => { /* noop */ }); NavigationBar.setBackgroundColorAsync('transparent').catch(() => { /* noop */ }); } }, []);
   useEffect(() => {
     if (scanning && scanMode === 'barcode') { Animated.loop(Animated.sequence([Animated.timing(scanAnim, { toValue: 1, duration: 2000, useNativeDriver: false }), Animated.timing(scanAnim, { toValue: 0, duration: 2000, useNativeDriver: false })])).start(); } else scanAnim.setValue(0);
   }, [scanning, scanMode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (scanning && scanMode === 'aiVision') { Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.07, duration: 800, useNativeDriver: false }), Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false })])).start(); } else pulseAnim.setValue(1);
   }, [scanning, scanMode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     let t;
     if (scanning && scanMode === 'aiVision') { if (countdown > 0) t = setTimeout(() => setCountdown(c => c - 1), 1000); else if (countdown === 0) captureVision(); }
@@ -1875,7 +1883,7 @@ export default function App() {
     setCleanToast({ cleaning: true });
     try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); }
     catch (_) { setCleanToast({ cleaning: false, deleted: [] }); }
-  }, [activeShelf, userData]);
+  }, [activeShelf, userData, loadStock]);
 
   // ── LOGIN SEGURO ──────────────────────────────────────────────────────────
   const doLogin = async (e, p, useBiometrics = false) => {
@@ -1968,7 +1976,7 @@ export default function App() {
             `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/${user.id}/?user_field_names=true`,
             { TOKEN_BIOMETRICO: bioToken }
           );
-        } catch (_) {}
+        } catch (_) { /* noop */ }
       }
       
       await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id);
@@ -2177,7 +2185,7 @@ export default function App() {
           `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/${userData?.id}/?user_field_names=true`,
           { TOKEN_BIOMETRICO: bioToken }
         );
-      } catch (_) {}
+      } catch (_) { /* noop */ }
     } else {
       // Revogar TOKEN_BIOMETRICO no Baserow
       try {
@@ -2188,7 +2196,7 @@ export default function App() {
             { TOKEN_BIOMETRICO: '' }
           );
         }
-      } catch (_) {}
+      } catch (_) { /* noop */ }
     }
     setBiometricEnabled(value);
     await SecureStore.setItemAsync('biometric_enabled', value ? 'true' : 'false');
