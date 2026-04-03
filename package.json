@@ -7,19 +7,19 @@
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
-"dependencies": {
-    "axios": "*",
-    "expo-camera": "~17.0.10",
-    "expo-crypto": "~15.0.8",
-    "expo-clipboard": "~8.0.8",
-    "expo-constants": "~18.0.13",
-    "react-native-svg": "15.12.1",
-    "expo-secure-store": "~15.0.8",
-    "@expo/vector-icons": "^15.0.3",
-    "react-native-paper": "4.9.2",
-    "expo-navigation-bar": "~5.0.10",
-    "react-native-qrcode-svg": "*",
-    "expo-local-authentication": "~17.0.8"
-  },
+""dependencies": {
+  "axios": "^1.8.0",
+  "expo-camera": "~17.0.10",
+  "expo-crypto": "~15.0.8",
+  "expo-clipboard": "~8.0.8",
+  "expo-constants": "~18.0.13",
+  "react-native-svg": "~15.11.0",           // corrigi um pouco
+  "expo-secure-store": "~15.0.8",
+  "@expo/vector-icons": "^15.0.3",
+  "react-native-paper": "^5.12.5",          // versão mais nova e recomendada
+  "expo-navigation-bar": "~5.0.10",
+  "react-native-qrcode-svg": "^6.3.12",     // tirei o *
+  "expo-local-authentication": "~17.0.8"
+},
   "private": true
 }
