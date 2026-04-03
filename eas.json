@@ -13,7 +13,8 @@
         "buildType": "apk"
       },
       "env": {
-        "YARN_BARE_MODE": "1"
+        "YARN_BARE_MODE": "1",
+        "NODE_OPTIONS": "--max-old-space-size=4096"
       }
     },
     "production": {
@@ -22,11 +23,9 @@
         "buildType": "apk"
       },
       "env": {
-        "YARN_BARE_MODE": "1"
+        "YARN_BARE_MODE": "1",
+        "NODE_OPTIONS": "--max-old-space-size=4096"
       }
     }
-  },
-  "submit": {
-    "production": {}
   }
 }
