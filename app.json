@@ -8,7 +8,7 @@
     "icon": "./assets/logo.png",
     "extra": {
       "eas": {
-        "projectId": "SEU_PROJECT_ID_AQUI"
+        "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
       }
     },
     "android": {
@@ -46,7 +46,7 @@
     "icon": "./assets/logo.png",
     "extra": {
       "eas": {
-        "projectId": "SEU_PROJECT_ID_AQUI"
+        "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
       }
     },
     "android": {
