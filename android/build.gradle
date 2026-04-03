@@ -1,0 +1,9 @@
+allprojects {
+    repositories {
+        // Seus outros repositórios aqui
+        maven {
+            // Repositório necessário para o expo-camera
+            url "$rootDir/../node_modules/expo-camera/android/maven"
+        }
+    }
+}
