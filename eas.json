@@ -1,58 +1,22 @@
 {
-  "cli": {
-    "version": ">= 10.0.0",
-    "appVersionSource": "local"
-  },
   "build": {
     "development": {
       "developmentClient": true,
       "distribution": "internal",
       "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
-      },
-      "ios": {
-        "simulator": true
-      },
-      "env": {
-        "APP_ENV": "development"
+        "buildType": "apk"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      },
-      "ios": {
-        "simulator": false
-      },
-      "env": {
-        "APP_ENV": "preview"
       }
     },
     "production": {
       "autoIncrement": true,
       "android": {
-        "buildType": "apk"
-      },
-      "ios": {
-        "simulator": false
-      },
-      "env": {
-        "APP_ENV": "production"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "android": {
-        "serviceAccountKeyPath": "./google-service-account.json",
-        "track": "internal"
-      },
-      "ios": {
-        "appleId": "SEU_APPLE_ID@email.com",
-        "ascAppId": "SEU_APP_STORE_CONNECT_APP_ID",
-        "appleTeamId": "SEU_APPLE_TEAM_ID"
+        "buildType": "apk"          // ← Adicione esta linha
       }
     }
   }
