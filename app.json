@@ -1,21 +1,32 @@
-   "version": "4.5.0",
+{
+  "expo": {
+    "name": "gei-gestao-estoque",
+    "slug": "gei-gestao-estoque",
+    "version": "4.5.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "icon": "./assets/logo.png",               // ← Ícone principal adicionado aqui
+    "icon": "./assets/logo.png",
     "extra": {
       "eas": {
         "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
-@@ -16,7 +17,11 @@
-      "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-        "android.permission.USE_BIOMETRIC"
-      ]
-      ],
-      "adaptiveIcon": {                        // ← Recomendado para Android (melhor visual)
-        "foregroundImage": "./assets/logo.png",
-        "backgroundColor": "#FFFFFF"
       }
     },
+    "android": {
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.seuempresa.geigestaoestoque"
+    },
     "plugins": [
-      "expo-camera"
+      "expo-camera",
+      "expo-local-authentication",
+      "expo-secure-store"
+    ]
+  }
+}
