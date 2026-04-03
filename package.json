@@ -1,7 +1,7 @@
 {
   "name": "gei-ai",
   "version": "5.0.0",
-  "main": "expo-router/entry",
+  "main": "App.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -9,26 +9,24 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "expo": "~52.0.0",
-    "expo-status-bar": "~2.0.0",
-    "expo-camera": "~16.0.0",
-    "expo-secure-store": "~14.0.0",
+    "expo": "~52.0.28",
+    "expo-status-bar": "~2.0.1",
+    "expo-camera": "~16.0.10",
+    "expo-secure-store": "~14.0.1",
     "expo-clipboard": "~7.0.0",
-    "expo-local-authentication": "~15.0.0",
-    "expo-crypto": "~14.0.0",
-    "expo-navigation-bar": "~4.0.0",
-    "expo-sensors": "~14.0.0",
-    "expo-constants": "~17.0.0",
+    "expo-local-authentication": "~15.0.2",
+    "expo-crypto": "~14.0.2",
+    "expo-navigation-bar": "~4.0.8",
+    "expo-sensors": "~14.0.2",
+    "expo-constants": "~17.0.5",
     "react": "18.3.2",
-    "react-native": "0.76.3",
-    "@expo/vector-icons": "^14.0.3",
+    "react-native": "0.76.5",
+    "@expo/vector-icons": "^14.0.4",
     "axios": "^1.7.9",
     "react-native-qrcode-svg": "^6.3.2",
     "react-native-svg": "15.8.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.25.0",
-    "@types/react": "~18.3.12",
-    "typescript": "^5.3.3"
+    "@babel/core": "^7.25.2"
   }
 }
