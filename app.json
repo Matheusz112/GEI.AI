@@ -1,33 +1,70 @@
 {
   "expo": {
-    "name": "gei-gestao-estoque",
-    "slug": "gei-gestao-estoque",
-    "owner": "cordeiro",
-    "version": "4.5.0",
+    "name": "GEI.AI",
+    "slug": "gei-ai",
+    "version": "5.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
     "icon": "./assets/logo.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#060B18"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.gei.ai",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "O GEI.AI precisa da câmera para escanear códigos de barras e identificar produtos com IA Vision.",
+        "NSFaceIDUsageDescription": "O GEI.AI usa Face ID para autenticação rápida e segura.",
+        "NSMotionUsageDescription": "O GEI.AI usa sensores para detectar luminosidade do ambiente."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#060B18"
+      },
+      "package": "com.gei.ai",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE",
+        "android.permission.CAMERA",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ],
+      "softwareKeyboardLayoutMode": "pan"
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O GEI.AI precisa da câmera para escanear códigos de barras e identificar produtos."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Usar Face ID para login seguro no GEI.AI."
+        }
+      ],
+      "expo-secure-store",
+      "expo-navigation-bar"
+    ],
     "extra": {
       "eas": {
         "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
       }
-    },
-    "android": {
-      "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.USE_BIOMETRIC"
-      ],
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/logo.png",
-        "backgroundColor": "#FFFFFF"
-      },
-      "package": "com.seuempresa.geigestaoestoque"
-    },
-    "plugins": [
-      "expo-camera",
-      "expo-local-authentication",
-      "expo-secure-store"
-    ]
+    }
   }
 }
