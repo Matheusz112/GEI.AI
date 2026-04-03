@@ -1,37 +1,50 @@
 {
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+  "expo": {
+    "name": "gei-gestao-estoque",
+    "slug": "gei-gestao-estoque",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.seuempresa.geigestaoestoque",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to scan QR codes and take photos"
       }
     },
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#ffffff"
       },
-      "env": {
-        "YARN_BARE_MODE": "1",
-        "NODE_OPTIONS": "--max-old-space-size=4096"
-      }
+      "package": "com.seuempresa.geigestaoestoque",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.USE_BIOMETRIC"
+      ]
     },
-    "production": {
-      "autoIncrement": true,
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
-      },
-      "env": {
-        "YARN_BARE_MODE": "1",
-        "NODE_OPTIONS": "--max-old-space-size=4096"
-      }
-    }
-  },
-  "cli": {
-    "version": ">= 15.0.0"
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to scan QR codes and manage inventory.",
+          "microphonePermission": false
+        }
+      ],
+      "expo-local-authentication",
+      "expo-secure-store"
+    ]
   }
 }
