@@ -15,6 +15,7 @@ import * as Crypto from 'expo-crypto';
 import Constants from 'expo-constants';
 import QRCode from 'react-native-qrcode-svg';
 import axios from 'axios';
+
 const WIN = Dimensions.get('window');
 const SCR = Dimensions.get('screen');
 const NAV_BAR_H = Platform.OS === 'android' ? Math.max(0, SCR.height - WIN.height) : 0;
@@ -29,7 +30,6 @@ const SQL_INJECTION_PATTERN = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 // ─── CHAVES (armazenadas seguramente) ───────────────────────────────────────
-// A chave Baserow será carregada do SecureStore - NUNCA no código fonte!
 const SECRETS_TABLE = '915031';
 const USERS_TABLE = '221009';
 const MODEL_IA = 'gemini-2.5-flash';
@@ -73,18 +73,15 @@ const clearAuditLogs = async () => {
   await SecureStore.deleteItemAsync(AUDIT_LOGS_KEY);
 };
 
-// ─── TOKEN (substitua por variável de ambiente em produção) ──────────────────
+// ─── TOKEN ──────────────────────────────────────────────────
 let BASEROW_TOKEN = 'QNhuEjQ6tUb2CmQyN2B5ipfhC61gLfXe';
 let RT_API_KEY_IA = '';
 let RT_BLUESOFT_TOKEN = '';
 
-// Função para inicializar o token seguro
 const initializeSecureToken = async () => {
   try {
     let token = await SecureStore.getItemAsync('BASEROW_TOKEN');
     if (!token) {
-      // Primeira execução: token precisa ser configurado
-      // Em produção, isso viria de um backend seguro
       token = 'QNhuEjQ6tUb2CmQyN2B5ipfhC61gLfXe';
       await SecureStore.setItemAsync('BASEROW_TOKEN', token);
       await addAuditLog('TOKEN_INITIALIZED', 'Token seguro inicializado');
@@ -97,9 +94,9 @@ const initializeSecureToken = async () => {
   }
 };
 
-// ─── CERTIFICATE PINNING (segurança de rede) ────────────────────────────────
+// ─── CERTIFICATE PINNING ────────────────────────────────────
 const API_BASE_URL = 'https://api.baserow.io';
-const EXPECTED_CERT_HASH = ''; // Em produção, adicione o hash do certificado
+const EXPECTED_CERT_HASH = '';
 
 const secureAxiosInstance = axios.create({
   timeout: 15000,
@@ -108,7 +105,6 @@ const secureAxiosInstance = axios.create({
   }
 });
 
-// Interceptor para verificar certificado (simplificado - em produção use react-native-ssl-pinning)
 secureAxiosInstance.interceptors.request.use(async (config) => {
   config.headers.Authorization = `Token ${BASEROW_TOKEN}`;
   return config;
@@ -154,7 +150,7 @@ const authenticateWithBiometrics = async (reason = 'Autentique-se para acessar o
   }
 };
 
-// ─── FUNÇÃO DE SANITIZAÇÃO DE INPUT (melhorada) ─────────────────────────────
+// ─── FUNÇÃO DE SANITIZAÇÃO DE INPUT ─────────────────────────────────────────
 const sanitizeInput = (input) => {
   if (!input) return '';
   let sanitized = String(input);
@@ -436,9 +432,9 @@ const QrCodeGenerator = ({ T, fontScale, userData, onClose }) => {
   const [loginRapido, setLoginRapido] = useState('');
   const [expiresAt, setExpiresAt] = useState(null);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     generateLoginQR();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const generateLoginQR = async () => {
@@ -787,16 +783,15 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
   const deletedCount = data.deleted?.length ?? 0;
   const shouldAutoDismiss = !data.cleaning && deletedCount === 0;
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     Animated.parallel([
       Animated.spring(slideA, { toValue: 0, tension: 70, friction: 11, useNativeDriver: false }),
       Animated.timing(opacA, { toValue: 1, duration: 280, useNativeDriver: false }),
       Animated.spring(scaleA, { toValue: 1, tension: 90, friction: 10, useNativeDriver: false }),
     ]).start();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!shouldAutoDismiss) { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } return; }
     dismissedRef.current = false; progressAnim.setValue(1); setCountdown(Math.ceil(TOAST_DURATION / 1000));
@@ -805,6 +800,7 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
       setCountdown(prev => { const next = prev - 1; if (next <= 0) { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } return 0; } return next; });
     }, 1000);
     return () => { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } progressAnim.stopAnimation(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shouldAutoDismiss]);
 
   const dismiss = () => {
@@ -838,7 +834,7 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
           <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: T.greenGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.green + '40' }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green }}>{countdown}</Text></View>
         </View>
         <View style={{ height: 5, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}><Animated.View style={{ width: barWidthInterp, height: '100%', backgroundColor: T.green, borderRadius: 3 }} /></View>
-        <TouchableOpacity onPress={dismiss} style={{ position: 'absolute', top: 12, right: 12, padding: 6 }}><Feather name="x" size={16} color={T.textMuted} /></TouchableOpacity>
+        <TouchableOpacity onPress={dismiss} style={{ position: 'absolute', top: -4, right: 8, padding: 8, backgroundColor: T.bgCard, borderRadius: 12, borderWidth: 1, borderColor: T.border, zIndex: 10 }}><Feather name="x" size={16} color={T.textMuted} /></TouchableOpacity>
       </Animated.View>
     );
   }
@@ -923,7 +919,7 @@ const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
       timeoutRef.current = setTimeout(() => { loop.stop(); onClose(); }, 2500);
     } else { if (timeoutRef.current) clearTimeout(timeoutRef.current); }
     return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
-  }, [visible]);
+  }, [visible, onClose]);
 
   const rotateInterp = rotate.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-12deg', '0deg', '12deg'] });
   if (!visible) return null;
@@ -946,8 +942,9 @@ const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
   );
 };
 
-// ─── PRODUCT DETAIL MODAL ───────────────────────────────────────────────────
+// ─── PRODUCT DETAIL MODAL - CORRIGIDO (hooks no topo, tratamento seguro para product nulo) ──
 const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
+  // TODOS OS HOOKS DEVEM FICAR AQUI, NO TOPO DO COMPONENTE
   const slideA = useRef(new Animated.Value(WIN.height)).current;
   const opacA = useRef(new Animated.Value(0)).current;
   const headerA = useRef(new Animated.Value(0)).current;
@@ -962,20 +959,25 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
 
   const GIRO = useMemo(() => makeGiro(T), [T]);
   const VENC = useMemo(() => makeVENC(T), [T]);
-  const metrics = useMemo(() => buildDepletionMetrics(product), [product]);
-  const g = GIRO[product?.MARGEM] || { color: T.textSub, glow: T.bgInput, icon: 'minus', short: '—', rate: 2.5 };
-  const vs = vencStatus(product?.VENCIMENTO);
+  
+  // Métricas seguras: se product for nulo, usamos objeto vazio
+  const safeProduct = product || {};
+  const metrics = useMemo(() => buildDepletionMetrics(safeProduct), [safeProduct]);
+  const g = GIRO[safeProduct?.MARGEM] || { color: T.textSub, glow: T.bgInput, icon: 'minus', short: '—', rate: 2.5 };
+  const vs = vencStatus(safeProduct?.VENCIMENTO);
   const vc = VENC[vs.status];
   const animRem = useCountUp(metrics.remainingQty, 900);
   const animSold = useCountUp(metrics.soldEstimate, 700);
   const animPct = useCountUp(metrics.remainingPct, 800);
   const stockColor = metrics.remainingPct <= 0 ? T.red : metrics.remainingPct <= 15 ? T.red : metrics.remainingPct <= 35 ? T.amber : T.green;
-  if (!product) return null;
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  
+  // Efeito para animações de entrada/saída
   useEffect(() => {
     if (visible) {
-      slideA.setValue(WIN.height); opacA.setValue(0); headerA.setValue(0); card1A.setValue(40); card2A.setValue(60); card3A.setValue(80); card4A.setValue(100); barA.setValue(0); soldBarA.setValue(0);
+      slideA.setValue(WIN.height); opacA.setValue(0); headerA.setValue(0); 
+      card1A.setValue(40); card2A.setValue(60); card3A.setValue(80); card4A.setValue(100); 
+      barA.setValue(0); soldBarA.setValue(0);
+      
       Animated.parallel([
         Animated.spring(slideA, { toValue: 0, tension: 52, friction: 11, useNativeDriver: false }),
         Animated.timing(opacA, { toValue: 1, duration: 300, useNativeDriver: false }),
@@ -987,11 +989,13 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
           Animated.spring(card3A, { toValue: 0, tension: 90, friction: 11, useNativeDriver: false }),
           Animated.spring(card4A, { toValue: 0, tension: 90, friction: 11, useNativeDriver: false }),
         ]).start();
+        
         setTimeout(() => {
           Animated.timing(barA, { toValue: metrics.remainingPct, duration: 1200, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
           Animated.timing(soldBarA, { toValue: metrics.salesPct, duration: 1400, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
         }, 350);
       });
+      
       if (metrics.remainingPct <= 15) {
         const loop = Animated.loop(Animated.sequence([
           Animated.timing(pulseA, { toValue: 1.03, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
@@ -1001,23 +1005,30 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
           Animated.timing(glowA, { toValue: 1, duration: 800, useNativeDriver: false }),
           Animated.timing(glowA, { toValue: 0, duration: 800, useNativeDriver: false }),
         ]));
-        loop.start(); glowLoop.start();
+        loop.start(); 
+        glowLoop.start();
         return () => { loop.stop(); glowLoop.stop(); };
-      } else { pulseA.setValue(1); glowA.setValue(0); }
+      } else { 
+        pulseA.setValue(1); 
+        glowA.setValue(0); 
+      }
     } else {
       Animated.parallel([
         Animated.timing(slideA, { toValue: WIN.height, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
         Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: false }),
       ]).start();
     }
-  }, [visible]);
+  }, [visible, metrics.remainingPct, WIN.height]);
 
+  // Calcular valores derivados que serão usados em hooks e no render
   const statusLabel = metrics.remainingPct <= 0 ? '💀 RUPTURA' : metrics.remainingPct <= 15 ? '🚨 CRÍTICO' : metrics.remainingPct <= 35 ? '⚠️ ATENÇÃO' : '✅ SEGURO';
   const statusBg = metrics.remainingPct <= 0 ? T.redGlow : metrics.remainingPct <= 15 ? T.redGlow : metrics.remainingPct <= 35 ? T.amberGlow : T.greenGlow;
-  const sendDate = parseDate(product?.DATAENVIO);
+  const sendDate = parseDate(safeProduct?.DATAENVIO);
   const sendDateLabel = sendDate ? fmtFull(sendDate) : '—';
 
+  // useMemo DEVE ficar ANTES de qualquer return condicional
   const obs = useMemo(() => {
+    if (!product) return [];
     const list = [];
     if (metrics.elapsedDays > 0) list.push(`📦 Lote no estoque há ${metrics.elapsedDays} dia${metrics.elapsedDays !== 1 ? 's' : ''} (desde ${sendDateLabel}).`);
     if (metrics.soldEstimate > 0) list.push(`📉 Estimativa: ~${metrics.soldEstimate} unidade${metrics.soldEstimate !== 1 ? 's' : ''} vendida${metrics.soldEstimate !== 1 ? 's' : ''} desde a entrada.`);
@@ -1030,9 +1041,11 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
     if (metrics.dailyRate >= 5) list.push(`⚡ Alta rotatividade — monitore o estoque diariamente.`);
     else if (metrics.dailyRate <= 1) list.push(`🐢 Baixa rotatividade — atenção ao prazo de validade.`);
     return list;
-  }, [metrics, vs, sendDateLabel]);
+  }, [product, metrics, vs, sendDateLabel]);
 
-  if (!visible) return null;
+  // Se não houver produto, retorna null (após todos os hooks)
+  if (!product) return null;
+
   const barWidth = barA.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
   const soldBarWidth = soldBarA.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
 
@@ -1040,7 +1053,14 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', opacity: opacA }}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <Animated.View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: T.bgCard, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingBottom: 32 + NAV_BAR_H, borderTopWidth: 2, borderColor: stockColor + '60', maxHeight: WIN.height * 0.94, transform: [{ translateY: slideA }], shadowColor: '#000', shadowOffset: { width: 0, height: -16 }, shadowOpacity: 0.55, shadowRadius: 36, elevation: 32 }}>
+        <Animated.View style={{ 
+          position: 'absolute', bottom: 0, left: 0, right: 0, 
+          backgroundColor: T.bgCard, borderTopLeftRadius: 36, borderTopRightRadius: 36, 
+          paddingBottom: 32 + NAV_BAR_H, borderTopWidth: 2, borderColor: stockColor + '60', 
+          maxHeight: WIN.height * 0.94, transform: [{ translateY: slideA }], 
+          shadowColor: '#000', shadowOffset: { width: 0, height: -16 }, 
+          shadowOpacity: 0.55, shadowRadius: 36, elevation: 32 
+        }}>
           <View style={{ alignItems: 'center', paddingTop: 14, paddingBottom: 4 }}>
             <Animated.View style={{ width: 50, height: 5, backgroundColor: stockColor, borderRadius: 3, opacity: glowA.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }} />
           </View>
@@ -1049,36 +1069,82 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', gap: 7, marginBottom: 10, flexWrap: 'wrap' }}>
-                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: statusBg, borderWidth: 1.5, borderColor: stockColor + '50' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: 0.5 }}>{statusLabel}</Text></View>
-                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: g.glow, borderWidth: 1, borderColor: g.color + '40' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{product.MARGEM || 'Médio giro'}</Text></View>
-                    {vs.status !== 'unknown' && (<View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: vc.glow, borderWidth: 1, borderColor: vc.color + '40' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: vc.color }}>{vs.status === 'expired' ? `Vencido ${Math.abs(vs.days)}d` : vs.status === 'warning' ? `Vence ${vs.days}d` : 'Válido'}</Text></View>)}
+                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: statusBg, borderWidth: 1.5, borderColor: stockColor + '50' }}>
+                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: 0.5 }}>{statusLabel}</Text>
+                    </View>
+                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: g.glow, borderWidth: 1, borderColor: g.color + '40' }}>
+                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{product.MARGEM || 'Médio giro'}</Text>
+                    </View>
+                    {vs.status !== 'unknown' && (
+                      <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: vc.glow, borderWidth: 1, borderColor: vc.color + '40' }}>
+                        <Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: vc.color }}>
+                          {vs.status === 'expired' ? `Vencido ${Math.abs(vs.days)}d` : vs.status === 'warning' ? `Vence ${vs.days}d` : 'Válido'}
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                  <Text style={{ fontSize: 22 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5, lineHeight: 28 * fontScale }} numberOfLines={3}>{product.produto || 'Produto sem nome'}</Text>
-                  {sendDate && <Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 6 }}>📅 Entrada: {sendDateLabel} · {metrics.elapsedDays}d em estoque</Text>}
+                  <Text style={{ fontSize: 22 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5, lineHeight: 28 * fontScale }} numberOfLines={3}>
+                    {product.produto || 'Produto sem nome'}
+                  </Text>
+                  {sendDate && (
+                    <Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 6 }}>
+                      📅 Entrada: {sendDateLabel} · {metrics.elapsedDays}d em estoque
+                    </Text>
+                  )}
                 </View>
-                <TouchableOpacity onPress={onClose} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }}><Feather name="x" size={18} color={T.textSub} /></TouchableOpacity>
+                <TouchableOpacity onPress={onClose} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }}>
+                  <Feather name="x" size={18} color={T.textSub} />
+                </TouchableOpacity>
               </View>
             </Animated.View>
 
             <Animated.View style={{ transform: [{ translateY: card1A }], marginBottom: 14 }}>
-              <Animated.View style={{ backgroundColor: T.bgElevated, borderRadius: 28, padding: 22, borderWidth: 2, borderColor: stockColor + '50', shadowColor: stockColor, shadowOpacity: 0.25, shadowRadius: 20, elevation: 10, transform: [{ scale: pulseA }] }}>
+              <Animated.View style={{ 
+                backgroundColor: T.bgElevated, borderRadius: 28, padding: 22, 
+                borderWidth: 2, borderColor: stockColor + '50', shadowColor: stockColor, 
+                shadowOpacity: 0.25, shadowRadius: 20, elevation: 10, transform: [{ scale: pulseA }] 
+              }}>
                 <Animated.View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 28, backgroundColor: stockColor, opacity: glowA.interpolate({ inputRange: [0, 1], outputRange: [0, 0.04] }) }} />
-                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: stockColor, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 16 }}>Estoque Atual Estimado</Text>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: stockColor, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 16 }}>
+                  Estoque Atual Estimado
+                </Text>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginBottom: 18 }}>
-                  <Text style={{ fontSize: 72 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: -3, lineHeight: 72 * fontScale }}>{animRem}</Text>
-                  <View style={{ paddingBottom: 10 }}><Text style={{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }}>un</Text><Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted }}>restantes</Text></View>
-                  <View style={{ flex: 1, alignItems: 'flex-end', paddingBottom: 8 }}><Text style={{ fontSize: 36 * fontScale, fontWeight: '900', color: stockColor, opacity: 0.7 }}>{animPct}%</Text><Text style={{ fontSize: 10 * fontScale, color: T.textMuted, fontWeight: '700' }}>do lote original</Text></View>
+                  <Text style={{ fontSize: 72 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: -3, lineHeight: 72 * fontScale }}>
+                    {animRem}
+                  </Text>
+                  <View style={{ paddingBottom: 10 }}>
+                    <Text style={{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }}>un</Text>
+                    <Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted }}>restantes</Text>
+                  </View>
+                  <View style={{ flex: 1, alignItems: 'flex-end', paddingBottom: 8 }}>
+                    <Text style={{ fontSize: 36 * fontScale, fontWeight: '900', color: stockColor, opacity: 0.7 }}>{animPct}%</Text>
+                    <Text style={{ fontSize: 10 * fontScale, color: T.textMuted, fontWeight: '700' }}>do lote original</Text>
+                  </View>
                 </View>
                 <View style={{ marginBottom: 6 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Restante</Text><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor }}>{animPct}%</Text></View>
-                  <View style={{ height: 12, backgroundColor: T.bgInput, borderRadius: 6, overflow: 'hidden' }}><Animated.View style={{ height: '100%', borderRadius: 6, width: barWidth, backgroundColor: stockColor }} /></View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Restante</Text>
+                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor }}>{animPct}%</Text>
+                  </View>
+                  <View style={{ height: 12, backgroundColor: T.bgInput, borderRadius: 6, overflow: 'hidden' }}>
+                    <Animated.View style={{ height: '100%', borderRadius: 6, width: barWidth, backgroundColor: stockColor }} />
+                  </View>
                 </View>
                 <View style={{ marginTop: 10 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimativa vendida</Text><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{animSold} un</Text></View>
-                  <View style={{ height: 8, backgroundColor: T.bgInput, borderRadius: 4, overflow: 'hidden' }}><Animated.View style={{ height: '100%', borderRadius: 4, width: soldBarWidth, backgroundColor: g.color + '80' }} /></View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimativa vendida</Text>
+                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{animSold} un</Text>
+                  </View>
+                  <View style={{ height: 8, backgroundColor: T.bgInput, borderRadius: 4, overflow: 'hidden' }}>
+                    <Animated.View style={{ height: '100%', borderRadius: 4, width: soldBarWidth, backgroundColor: g.color + '80' }} />
+                  </View>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
-                  {[{ label: 'Entrada', val: `${metrics.qty} un`, icon: 'package', c: T.blue }, { label: 'Vendidas ~', val: `${animSold} un`, icon: 'trending-down', c: g.color }, { label: 'Saída/dia', val: `~${metrics.dailyRate.toFixed(1)}`, icon: 'zap', c: T.purple }].map(b => (
+                  {[
+                    { label: 'Entrada', val: `${metrics.qty} un`, icon: 'package', c: T.blue }, 
+                    { label: 'Vendidas ~', val: `${animSold} un`, icon: 'trending-down', c: g.color }, 
+                    { label: 'Saída/dia', val: `~${metrics.dailyRate.toFixed(1)}`, icon: 'zap', c: T.purple }
+                  ].map(b => (
                     <View key={b.label} style={{ flex: 1, backgroundColor: T.bgCard, borderRadius: 14, padding: 10, alignItems: 'center', borderWidth: 1, borderColor: b.c + '20' }}>
                       <Feather name={b.icon} size={14} color={b.c} />
                       <Text style={{ fontSize: 13 * fontScale, fontWeight: '900', color: b.c, marginTop: 4 }}>{b.val}</Text>
@@ -1091,19 +1157,39 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
 
             <Animated.View style={{ transform: [{ translateY: card2A }], marginBottom: 14 }}>
               <View style={{ backgroundColor: T.bgCard, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: T.border }}>
-                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>Linha do Tempo</Text>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>
+                  Linha do Tempo
+                </Text>
                 <View style={{ flexDirection: 'row', gap: 12 }}>
                   <View style={{ alignItems: 'center', width: 32 }}>
-                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="log-in" size={14} color={T.blue} /></View>
+                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}>
+                      <Feather name="log-in" size={14} color={T.blue} />
+                    </View>
                     <View style={{ width: 2, flex: 1, backgroundColor: T.border, marginVertical: 4 }} />
-                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 8 }}>📍</Text></View>
+                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}>
+                      <Text style={{ fontSize: 8 }}>📍</Text>
+                    </View>
                     <View style={{ width: 2, flex: 1, backgroundColor: T.border, marginVertical: 4 }} />
-                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: stockColor + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: stockColor + '40' }}><Feather name="alert-circle" size={14} color={stockColor} /></View>
+                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: stockColor + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: stockColor + '40' }}>
+                      <Feather name="alert-circle" size={14} color={stockColor} />
+                    </View>
                   </View>
                   <View style={{ flex: 1, justifyContent: 'space-between' }}>
-                    <View style={{ marginBottom: 18 }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase' }}>Entrada</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text, marginTop: 2 }}>{sendDateLabel}</Text><Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>{metrics.qty} unidades cadastradas</Text></View>
-                    <View style={{ marginBottom: 18 }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase' }}>Hoje</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text, marginTop: 2 }}>{fmtFull(today())}</Text><Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>~{metrics.remainingQty} unidades restantes</Text></View>
-                    <View><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor, textTransform: 'uppercase' }}>Ruptura Estimada</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: stockColor, marginTop: 2 }}>{metrics.depletionDateFull}</Text><Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>em ~{metrics.remainingDays} dia{metrics.remainingDays !== 1 ? 's' : ''}</Text></View>
+                    <View style={{ marginBottom: 18 }}>
+                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase' }}>Entrada</Text>
+                      <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text, marginTop: 2 }}>{sendDateLabel}</Text>
+                      <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>{metrics.qty} unidades cadastradas</Text>
+                    </View>
+                    <View style={{ marginBottom: 18 }}>
+                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase' }}>Hoje</Text>
+                      <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text, marginTop: 2 }}>{fmtFull(today())}</Text>
+                      <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>~{metrics.remainingQty} unidades restantes</Text>
+                    </View>
+                    <View>
+                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor, textTransform: 'uppercase' }}>Ruptura Estimada</Text>
+                      <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: stockColor, marginTop: 2 }}>{metrics.depletionDateFull}</Text>
+                      <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>em ~{metrics.remainingDays} dia{metrics.remainingDays !== 1 ? 's' : ''}</Text>
+                    </View>
                   </View>
                 </View>
               </View>
@@ -1112,10 +1198,14 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
             {product.VENCIMENTO?.trim() && (
               <Animated.View style={{ transform: [{ translateY: card3A }], marginBottom: 14 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: vc.glow, borderRadius: 18, padding: 16, borderWidth: 1.5, borderColor: vc.color + '50' }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: vc.color + '25', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: vc.color + '50' }}><Feather name={vc.icon} size={22} color={vc.color} /></View>
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: vc.color + '25', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: vc.color + '50' }}>
+                    <Feather name={vc.icon} size={22} color={vc.color} />
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: vc.color, textTransform: 'uppercase', letterSpacing: 0.8 }}>Validade do Produto</Text>
-                    <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: vc.color, marginTop: 3 }}>{vs.status === 'expired' ? vc.label(vs.days) : vs.status === 'warning' ? vc.label(vs.days) : vc.label(product.VENCIMENTO)}</Text>
+                    <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: vc.color, marginTop: 3 }}>
+                      {vs.status === 'expired' ? vc.label(vs.days) : vs.status === 'warning' ? vc.label(vs.days) : vc.label(product.VENCIMENTO)}
+                    </Text>
                     <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 2, fontWeight: '700' }}>Data: {product.VENCIMENTO}</Text>
                   </View>
                 </View>
@@ -1125,7 +1215,9 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
             <Animated.View style={{ transform: [{ translateY: card4A }], marginBottom: 20 }}>
               <View style={{ backgroundColor: T.bgElevated, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: T.border }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                  <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><MaterialCommunityIcons name="robot-outline" size={16} color={T.blue} /></View>
+                  <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}>
+                    <MaterialCommunityIcons name="robot-outline" size={16} color={T.blue} />
+                  </View>
                   <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Observações GEI.AI</Text>
                 </View>
                 {obs.map((o, i) => (
@@ -1330,14 +1422,13 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
   const [typingDots, setTypingDots] = useState(0);
   const inputRef = useRef(null);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onShow = e => { Animated.spring(keyboardAnim, { toValue: e.endCoordinates.height, useNativeDriver: false, tension: 65, friction: 11 }).start(); setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80); };
     const onHide = () => { Animated.spring(keyboardAnim, { toValue: 0, useNativeDriver: false, tension: 65, friction: 11 }).start(); };
     const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', onShow);
     const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', onHide);
     return () => { show.remove(); hide.remove(); };
-  }, []);
+  }, [keyboardAnim, scrollRef]);
 
   useEffect(() => {
     let iv;
@@ -1346,11 +1437,10 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
     return () => clearInterval(iv);
   }, [busy]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
     return () => clearTimeout(timer);
-  }, [msgs, busy]);
+  }, [msgs, busy, scrollRef]);
 
   const handleSend = () => { if (!chatTxt.trim() || busy) return; sendChat(); inputRef.current?.focus(); };
 
@@ -1883,7 +1973,14 @@ export default function App() {
     setCleanToast({ cleaning: true });
     try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); }
     catch (_) { setCleanToast({ cleaning: false, deleted: [] }); }
-  }, [activeShelf, userData, loadStock]);
+  }, [activeShelf, userData]);
+
+  // ── FUNÇÃO loadStock (definida antes de ser usada) ────────────────────────
+  const loadStock = useCallback(async shelf => {
+    const tid = SHELVES[shelf]; if (!tid) return;
+    try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`); setStockData(res.data.results || []); }
+    catch (ex) { showErr('Erro ao carregar dados da prateleira.'); }
+  }, [showErr]);
 
   // ── LOGIN SEGURO ──────────────────────────────────────────────────────────
   const doLogin = async (e, p, useBiometrics = false) => {
@@ -1898,7 +1995,6 @@ export default function App() {
         showErr('Falha na autenticação biométrica.');
         return;
       }
-      // Autenticar via TOKEN_BIOMETRICO no Baserow
       const bioToken = await SecureStore.getItemAsync('bio_token');
       if (!bioToken) {
         showErr('Nenhum token biométrico salvo. Faça login normal primeiro.');
@@ -1964,7 +2060,6 @@ export default function App() {
       }
       setFailedAttempts(0);
       
-      // Salvar TOKEN_BIOMETRICO no Baserow após login bem-sucedido
       if (biometricEnabled) {
         try {
           const bioToken = await Crypto.digestStringAsync(
@@ -2040,7 +2135,7 @@ export default function App() {
     }
   };
 
-  const onOk = user => {
+  const onOk = useCallback(user => {
     setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role');
     const area = extractShelf(user.AREA);
     const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.());
@@ -2051,13 +2146,7 @@ export default function App() {
     setActiveShelf(def);
     if (def) loadStock(def);
     setTimeout(() => triggerAutoClean(), 1500);
-  };
-
-  const loadStock = async shelf => {
-    const tid = SHELVES[shelf]; if (!tid) return;
-    try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`); setStockData(res.data.results || []); }
-    catch (ex) { showErr('Erro ao carregar dados da prateleira.'); }
-  };
+  }, [loadStock, triggerAutoClean]);
 
   const switchShelf = async shelf => { setActiveShelf(shelf); setCadastroShelf(shelf); await loadStock(shelf); setShelfModal(false); };
 
@@ -2078,7 +2167,7 @@ export default function App() {
     } catch (ex) { setBusy(false); setScanning(false); showErr('Erro ao consultar fontes de dados.'); }
   };
 
-  const onSourceSelected = ({ nome, giro }) => { setSourceModalVisible(false); setProdName(nome); setGiro(giro); resetWiz(); navTo('cadastro'); };
+  const onSourceSelected = ({ nome, giro: giroVal }) => { setSourceModalVisible(false); setProdName(nome); setGiro(giroVal); resetWiz(); navTo('cadastro'); };
 
   const captureVision = async () => {
     if (!camRef.current) { showErr('Câmera não iniciada.'); return; }
@@ -2174,7 +2263,6 @@ export default function App() {
         Alert.alert('Falha na autenticação', 'Não foi possível ativar a biometria.');
         return;
       }
-      // Gerar e salvar TOKEN_BIOMETRICO no Baserow
       try {
         const bioToken = await Crypto.digestStringAsync(
           Crypto.CryptoDigestAlgorithm.SHA256,
@@ -2187,7 +2275,6 @@ export default function App() {
         );
       } catch (_) { /* noop */ }
     } else {
-      // Revogar TOKEN_BIOMETRICO no Baserow
       try {
         await SecureStore.deleteItemAsync('bio_token');
         if (userData?.id) {
