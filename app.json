@@ -28,7 +28,10 @@
     "plugins": [
       "expo-camera",
       "expo-secure-store",
-      "expo-navigation-bar"
+      "expo-navigation-bar",
+      "expo-local-authentication",
+      "expo-crypto",
+      "expo-clipboard"
     ],
     "platforms": ["ios", "android"]
   }
