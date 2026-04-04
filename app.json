@@ -29,9 +29,7 @@
       "expo-camera",
       "expo-secure-store",
       "expo-navigation-bar",
-      "expo-local-authentication",
-      "expo-crypto",
-      "expo-clipboard"
+      "expo-local-authentication"
     ],
     "platforms": ["ios", "android"]
   }
