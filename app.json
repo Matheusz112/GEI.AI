@@ -8,44 +8,6 @@
     "icon": "./assets/logo.png",
     "extra": {
       "eas": {
-        "projectId": "feb7a18a-2e87-4d1c-a4ad-18d9747e9fb5"
-      }
-    },
-    "android": {
-      "package": "com.geiai.app",
-      "versionCode": 50,
-      "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
-      ],
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/logo.png",
-        "backgroundColor": "#060B18"
-      }
-    },
-    "plugins": [
-      "expo-camera",
-      "expo-secure-store",
-      "expo-navigation-bar"
-    ],
-    "sdkVersion": "54.0.0",
-    "platforms": [
-      "ios",
-      "android"
-    ]
-  }
-}{
-  "expo": {
-    "name": "GEI.AI",
-    "slug": "gei-ai",
-    "version": "5.0.0",
-    "orientation": "portrait",
-    "userInterfaceStyle": "automatic",
-    "icon": "./assets/logo.png",
-    "extra": {
-      "eas": {
         "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
       }
     },
