@@ -1,6 +1,8 @@
 {
+  "name": "GEI-CORDEIRO",
+  "version": "5.0.0",
   "license": "0BSD",
-  "main": "App.js",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -8,24 +10,24 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "expo": "~54.0.33",
-    "expo-status-bar": "~3.0.9",
-    "react": "19.1.0",
-    "react-native": "0.81.5",
+    "expo": "~54.0.0",
+    "expo-status-bar": "~3.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.0",
     "axios": "^1.6.0",
-    "expo-camera": "~17.0.10",
-    "@expo/vector-icons": "^15.0.3",
-    "expo-navigation-bar": "~5.0.10",
-    "expo-font": "~13.0.3",
-    "expo-asset": "~11.0.3",
-    "expo-secure-store": "~14.0.1",
+    "expo-camera": "~17.0.0",
+    "@expo/vector-icons": "^14.0.0",
+    "expo-navigation-bar": "~5.0.0",
+    "expo-font": "~13.0.0",
+    "expo-asset": "~11.0.0",
+    "expo-secure-store": "~14.0.0",
     "expo-clipboard": "~7.0.0",
-    "expo-local-authentication": "~15.0.2",
-    "expo-crypto": "~14.0.2",
-    "expo-sensors": "~14.0.2",
-    "expo-constants": "~17.0.5",
+    "expo-local-authentication": "~15.0.0",
+    "expo-crypto": "~14.0.0",
+    "expo-sensors": "~14.0.0",
+    "expo-constants": "~17.0.0",
     "react-native-qrcode-svg": "^6.3.2",
-    "react-native-svg": "^15.8.0"
+    "react-native-svg": "15.8.0"
   },
   "private": true
 }
