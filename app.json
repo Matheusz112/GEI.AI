@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GEI.AI",
-    "slug": "gei-cordeiro",
+    "slug": "cordeiro",
     "version": "5.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -11,11 +11,11 @@
     },
     "extra": {
       "eas": {
-        "projectId": "feb7a18a-2e87-4d1c-a4ad-18d9747e9fb5"
+        "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
       }
     },
     "android": {
-      "package": "com.geiai.app",
+      "package": "com.geiaicordeiro.app",
       "versionCode": 50,
       "permissions": [
         "android.permission.CAMERA",
