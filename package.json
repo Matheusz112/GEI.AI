@@ -1,35 +1,36 @@
 {
-  "name": "gei-cordeiro",
-  "version": "5.0.0",
-  "license": "0BSD",
-  "main": "index.js",
-  "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
-  },
-  "dependencies": {
-    "expo": "~51.0.0",
-    "react": "18.2.0",
-    "react-native": "0.74.3",
-    "react-native-paper": "^5.12.5",
-    "axios": "^1.7.9",
-    "@expo/vector-icons": "^15.0.3",
-    "expo-navigation-bar": "~3.0.7",
-    "expo-camera": "~15.0.16",
-    "expo-secure-store": "~13.0.2",
-    "expo-clipboard": "~6.0.3",
-    "expo-local-authentication": "~14.0.1",
-    "expo-crypto": "~13.0.2",
-    "expo-constants": "~16.0.2",
-    "expo-sensors": "~13.0.1",
-    "react-native-qrcode-svg": "^6.3.2",
-    "react-native-svg": "15.2.0"
-  },
-  "devDependencies": {
-    "@babel/core": "^7.24.0",
-    "babel-preset-expo": "~11.0.0"
-  },
-  "private": true
+  "expo": {
+    "name": "GEI.AI",
+    "slug": "gei-cordeiro",
+    "version": "5.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/logo.png",
+    "extra": {
+      "eas": {
+        "projectId": "feb7a18a-2e87-4d1c-a4ad-18d9747e9fb5"
+      }
+    },
+    "android": {
+      "package": "com.geiai.app",
+      "versionCode": 50,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#060B18"
+      }
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-secure-store",
+      "expo-navigation-bar",
+      "expo-sensors"
+    ],
+    "platforms": ["ios", "android"]
+  }
 }
