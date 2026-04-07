@@ -1,16 +1,22 @@
 module.exports = async (req, res) => {
-  // A SENHA QUE VOCÊ ESCOLHEU
-  const CHAVE_MESTRA = "cordeirorequestloja3";
+  // LIBERAÇÃO DE SEGURANÇA (CORS) - IMPORTANTE!
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'x-api-key, Content-Type, X-Request-ID');
 
-  // Verificamos se quem está chamando enviou a senha no cabeçalho 'x-api-key'
+  // Responde rápido se for apenas uma checagem de conexão (Preflight)
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
+  const CHAVE_MESTRA = "cordeirorequestloja3";
   const chaveRecebida = req.headers['x-api-key'];
 
   if (chaveRecebida !== CHAVE_MESTRA) {
-    // Se a senha estiver errada (ou vazia, como no navegador), bloqueia!
     return res.status(401).json({ error: "Acesso negado! Chave incorreta." });
   }
 
-  // Se passou pela segurança, o código abaixo roda:
   const token = process.env.BASEROW_TOKEN;
 
   try {
@@ -18,10 +24,8 @@ module.exports = async (req, res) => {
       headers: { 'Authorization': `Token ${token}` }
     });
     const data = await response.json();
-    
-    // Retorna os dados para o seu App
     res.status(200).json(data.results[0]);
   } catch (error) {
-    res.status(500).json({ error: "Erro interno no servidor do GEI.AI" });
+    res.status(500).json({ error: "Erro interno no servidor" });
   }
 };
