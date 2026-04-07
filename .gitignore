@@ -1,2 +1,32 @@
-# local env files
-.env*.local
+# --- SEGURANÇA (O mais importante) ---
+# Ignora todos os arquivos de variáveis de ambiente
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+
+# --- EXPO / REACT NATIVE ---
+node_modules/
+.expo/
+dist/
+npm-debug.*
+yarn-error.*
+
+# --- ANDROID & IOS (Se você fizer builds locais) ---
+android/
+ios/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# --- VERCEL ---
+.vercel
+
+# --- SISTEMA ---
+.DS_Store
+Thumbs.db
