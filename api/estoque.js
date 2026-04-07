@@ -1,15 +1,16 @@
 module.exports = async (req, res) => {
-  // LIBERAÇÃO DE SEGURANÇA (CORS) - IMPORTANTE!
+  // CONFIGURAÇÃO DE CORS - LIBERA OS HEADERS PERSONALIZADOS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'x-api-key, Content-Type, X-Request-ID');
 
-  // Responde rápido se for apenas uma checagem de conexão (Preflight)
+  // Responde com OK se for apenas uma checagem de pre-conexão (OPTIONS)
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
+  // VALIDAÇÃO DA SUA CHAVE "CORDEIRO"
   const CHAVE_MESTRA = "cordeirorequestloja3";
   const chaveRecebida = req.headers['x-api-key'];
 
@@ -26,6 +27,6 @@ module.exports = async (req, res) => {
     const data = await response.json();
     res.status(200).json(data.results[0]);
   } catch (error) {
-    res.status(500).json({ error: "Erro interno no servidor" });
+    res.status(500).json({ error: "Erro interno no servidor do GEI.AI" });
   }
 };
