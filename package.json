@@ -25,7 +25,7 @@
     "expo-local-authentication": "~17.0.8",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo-speech-recognition": "14.0.8",
-    "expo": "~52.0.0",
+    "expo": "~54.0.0",
     "@expo/config-plugins": "~8.0.0"
   },
   "devDependencies": {
