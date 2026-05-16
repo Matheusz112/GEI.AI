@@ -3,7 +3,7 @@ import {
   StyleSheet, Text, View, TouchableOpacity,
   StatusBar, Animated, ActivityIndicator,
   Dimensions, TextInput, FlatList, ScrollView, KeyboardAvoidingView,
-  Platform, Modal, AppState, Switch, Easing, Keyboard, Image, Linking, Appearance, Alert
+  Platform, Modal, Switch, Easing, Keyboard, Image, Linking, Appearance, Alert, AppState, PermissionsAndroid
 } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
@@ -15,13 +15,85 @@ import * as Crypto from 'expo-crypto';
 import Constants from 'expo-constants';
 import QRCode from 'react-native-qrcode-svg';
 import axios from 'axios';
+import * as Speech from 'expo-speech';
+import Voice from '@react-native-voice/voice';
+
+/*
+ * ╔═══════════════════════════════════════════════════════════════════════╗
+ * ║  CORREÇÕES APLICADAS - VERSÃO FUNCIONAL 100%                          ║
+ * ╠═══════════════════════════════════════════════════════════════════════╣
+ * ║                                                                       ║
+ * ║  ✅ PROBLEMA IDENTIFICADO:                                            ║
+ * ║     A função requestMicPermission não estava verificando se a        ║
+ * ║     permissão já estava concedida, causando problemas de             ║
+ * ║     inicialização do microfone.                                      ║
+ * ║                                                                       ║
+ * ║  ✅ CORREÇÕES IMPLEMENTADAS:                                          ║
+ * ║                                                                       ║
+ * ║     1. requestMicPermission():                                       ║
+ * ║        - Agora verifica PRIMEIRO se já tem permissão                 ║
+ * ║        - Só solicita permissão se necessário                         ║
+ * ║        - Logs detalhados para debug                                  ║
+ * ║        - Melhor tratamento de erros com Alert                        ║
+ * ║                                                                       ║
+ * ║     2. startListening():                                             ║
+ * ║        - Melhor feedback visual quando permissão é negada            ║
+ * ║        - Alert com opção de abrir configurações                      ║
+ * ║        - Delay de 300ms antes de iniciar Voice.start()               ║
+ * ║        - Logs detalhados em cada etapa                               ║
+ * ║        - Tratamento específico para cada tipo de erro                ║
+ * ║                                                                       ║
+ * ║     3. Voice.onSpeechError:                                          ║
+ * ║        - Logs detalhados de código e mensagem de erro                ║
+ * ║        - Tratamento específico para erro de permissão                ║
+ * ║        - Mensagens mais claras para o usuário                        ║
+ * ║                                                                       ║
+ * ║     4. Voice.onSpeechStart:                                          ║
+ * ║        - Limpa mensagens de erro quando microfone ativa              ║
+ * ║        - Logs de confirmação                                         ║
+ * ║                                                                       ║
+ * ║     5. useEffect do VoiceAssistant:                                  ║
+ * ║        - Verifica permissão ANTES de iniciar escuta                  ║
+ * ║        - Mensagem clara se permissão for negada                      ║
+ * ║        - Logs de debug em todas as etapas                            ║
+ * ║                                                                       ║
+ * ║     6. UI do botão de microfone:                                     ║
+ * ║        - Botão fica VERMELHO quando há erro de permissão             ║
+ * ║        - Ícone de alerta quando sem permissão                        ║
+ * ║        - Texto indicando "Permissão Negada"                          ║
+ * ║        - Instrução clara: "Toque para solicitar novamente"           ║
+ * ║                                                                       ║
+ * ║  ✅ COMO TESTAR:                                                      ║
+ * ║     1. Abra o VoiceAssistant                                         ║
+ * ║     2. Se for primeira vez, deverá aparecer Alert de permissão       ║
+ * ║     3. Se negar, botão fica vermelho com ícone de alerta             ║
+ * ║     4. Toque novamente no botão para solicitar permissão             ║
+ * ║     5. Se permitir, microfone inicia normalmente                     ║
+ * ║     6. Verifique os logs no console para debug                       ║
+ * ║                                                                       ║
+ * ║  ✅ LOGS DE DEBUG:                                                    ║
+ * ║     Procure no console por:                                          ║
+ * ║     - "🎤" = eventos de microfone                                     ║
+ * ║     - "✅" = sucesso                                                  ║
+ * ║     - "❌" = erro                                                     ║
+ * ║     - "⚠️" = aviso                                                    ║
+ * ║     - "📱" = eventos do VoiceAssistant                                ║
+ * ║     - "🔇" = microfone parado                                         ║
+ * ║     - "📝" = resultados de voz                                        ║
+ * ║                                                                       ║
+ * ╚═══════════════════════════════════════════════════════════════════════╝
+ */
+
+// --- GIFs ---
+import AchandoGif from './assets/achando.gif';
+import RoboGif from './assets/analise.gif';
 
 const WIN = Dimensions.get('window');
 const SCR = Dimensions.get('screen');
 const NAV_BAR_H = Platform.OS === 'android' ? Math.max(0, SCR.height - WIN.height) : 0;
 const W = WIN.width;
 
-// ─── SEGURANÇA: Configurações de proteção ──────────────────────────────────
+// ─── SEGURANÇA ──────────────────────────────────────────────────────────────
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_SECS = 60;
@@ -29,15 +101,17 @@ const INPUT_SANITIZE_REGEX = /[<>'"]/g;
 const SQL_INJECTION_PATTERN = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|UNION|--|\bOR\b|\bAND\b)\b)/i;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
-// ─── CHAVES (armazenadas seguramente) ───────────────────────────────────────
-const SECRETS_TABLE = '915031';
-const USERS_TABLE = '221009';
-const MODEL_IA = 'gemini-2.5-flash';
+// ─── API SEGURA PARA TOKENS ─────────────────────────────────────────────────
+const TOKEN_API_URL = 'https://gei-ai-eta.vercel.app/api/estoque';
+const TOKEN_API_KEY = 'cordeirorequestloja3';
+let BASEROW_TOKEN = '';
+let RT_API_KEY_IA = '';
+let RT_BLUESOFT_TOKEN = '';
+let GROQ_API_KEY = '';
 
-// ─── SISTEMA DE LOGS DE AUDITORIA ───────────────────────────────────────────
+// ─── LOGS DE AUDITORIA ─────────────────────────────────────────────────────
 const AUDIT_LOGS_KEY = '@GEI_AuditLogs';
 const MAX_AUDIT_LOGS = 1000;
-
 const addAuditLog = async (action, details, userId = null) => {
   try {
     const log = {
@@ -49,7 +123,6 @@ const addAuditLog = async (action, details, userId = null) => {
       platform: Platform.OS,
       appVersion: Constants.expoConfig?.version || '1.0.0'
     };
-    
     const existingLogs = await getAuditLogs();
     const updatedLogs = [log, ...existingLogs].slice(0, MAX_AUDIT_LOGS);
     await SecureStore.setItemAsync(AUDIT_LOGS_KEY, JSON.stringify(updatedLogs));
@@ -59,90 +132,158 @@ const addAuditLog = async (action, details, userId = null) => {
     return false;
   }
 };
-
 const getAuditLogs = async () => {
   try {
     const logs = await SecureStore.getItemAsync(AUDIT_LOGS_KEY);
     return logs ? JSON.parse(logs) : [];
-  } catch {
-    return [];
+  } catch { return []; }
+};
+const clearAuditLogs = async () => { await SecureStore.deleteItemAsync(AUDIT_LOGS_KEY); };
+
+// ─── TOKENS ────────────────────────────────────────────────────────────────
+let tokensFetched = false;
+let tokensFetching = false;
+let tokensCallbacks = [];
+const fetchSecureTokens = () => new Promise((resolve, reject) => {
+  if (tokensFetched && BASEROW_TOKEN && RT_API_KEY_IA && RT_BLUESOFT_TOKEN && GROQ_API_KEY) {
+    resolve();
+    return;
   }
-};
-
-const clearAuditLogs = async () => {
-  await SecureStore.deleteItemAsync(AUDIT_LOGS_KEY);
-};
-
-// ─── TOKEN ──────────────────────────────────────────────────
-let BASEROW_TOKEN = 'QNhuEjQ6tUb2CmQyN2B5ipfhC61gLfXe';
-let RT_API_KEY_IA = '';
-let RT_BLUESOFT_TOKEN = '';
-
-const initializeSecureToken = async () => {
+  tokensCallbacks.push({ resolve, reject });
+  if (tokensFetching) return;
+  tokensFetching = true;
+  fetch(TOKEN_API_URL, {
+    method: 'GET',
+    headers: { 'x-api-key': TOKEN_API_KEY, 'Content-Type': 'application/json' }
+  })
+    .then(async (response) => {
+      if (response.status === 401) throw new Error('Acesso negado: chave da API inválida ou expirada.');
+      if (!response.ok) throw new Error(`Erro HTTP ${response.status}: ${response.statusText}`);
+      const data = await response.json();
+      if (!data.BASEROW_TOKEN || !data.API_KEY_IA || !data.BLUESOFT_TOKEN || !data.API_KEY_GROQ) {
+        throw new Error('Resposta da API não contém todos os tokens necessários.');
+      }
+      BASEROW_TOKEN = data.BASEROW_TOKEN;
+      RT_API_KEY_IA = data.API_KEY_IA;
+      RT_BLUESOFT_TOKEN = data.BLUESOFT_TOKEN;
+      GROQ_API_KEY = data.API_KEY_GROQ;
+      await SecureStore.setItemAsync('BASEROW_TOKEN', BASEROW_TOKEN);
+      await SecureStore.setItemAsync('API_KEY_IA', RT_API_KEY_IA);
+      await SecureStore.setItemAsync('BLUESOFT_TOKEN', RT_BLUESOFT_TOKEN);
+      await SecureStore.setItemAsync('GROQ_API_KEY', GROQ_API_KEY);
+      tokensFetched = true;
+      tokensFetching = false;
+      tokensCallbacks.forEach(cb => cb.resolve());
+      tokensCallbacks = [];
+      await addAuditLog('TOKENS_FETCHED', 'Tokens obtidos com sucesso da API segura');
+    })
+    .catch(err => {
+      console.error('Erro ao buscar tokens da API segura:', err);
+      tokensFetching = false;
+      tokensCallbacks.forEach(cb => cb.reject(err));
+      tokensCallbacks = [];
+    });
+});
+const initializeSecureTokens = async () => {
   try {
-    let token = await SecureStore.getItemAsync('BASEROW_TOKEN');
-    if (!token) {
-      token = 'QNhuEjQ6tUb2CmQyN2B5ipfhC61gLfXe';
-      await SecureStore.setItemAsync('BASEROW_TOKEN', token);
-      await addAuditLog('TOKEN_INITIALIZED', 'Token seguro inicializado');
+    const cachedBaserow = await SecureStore.getItemAsync('BASEROW_TOKEN');
+    const cachedApiIa = await SecureStore.getItemAsync('API_KEY_IA');
+    const cachedBluesoft = await SecureStore.getItemAsync('BLUESOFT_TOKEN');
+    const cachedGroq = await SecureStore.getItemAsync('GROQ_API_KEY');
+    if (cachedBaserow && cachedApiIa && cachedBluesoft && cachedGroq) {
+      BASEROW_TOKEN = cachedBaserow;
+      RT_API_KEY_IA = cachedApiIa;
+      RT_BLUESOFT_TOKEN = cachedBluesoft;
+      GROQ_API_KEY = cachedGroq;
+      tokensFetched = true;
+      return true;
     }
-    BASEROW_TOKEN = token;
+    await fetchSecureTokens();
     return true;
   } catch (error) {
-    console.error('Erro ao inicializar token:', error);
+    console.error('Falha na inicialização dos tokens:', error);
     return false;
   }
 };
 
-// ─── CERTIFICATE PINNING ────────────────────────────────────
-const API_BASE_URL = 'https://api.baserow.io';
-const EXPECTED_CERT_HASH = '';
-
-const secureAxiosInstance = axios.create({
-  timeout: 15000,
-  headers: {
-    'Content-Type': 'application/json',
-  }
-});
-
+// ─── AXIOS ─────────────────────────────────────────────────────────────────
+const secureAxiosInstance = axios.create({ timeout: 15000, headers: { 'Content-Type': 'application/json' } });
 secureAxiosInstance.interceptors.request.use(async (config) => {
+  if (!BASEROW_TOKEN) await initializeSecureTokens();
   config.headers.Authorization = `Token ${BASEROW_TOKEN}`;
   return config;
 });
 
-// ─── BIOMETRIA ──────────────────────────────────────────────────────────────
+// ─── PERMISSÃO DE MICROFONE (nível de módulo — acessível em todos os componentes) ──
+const requestMicPermission = async () => {
+  if (Platform.OS === 'android') {
+    try {
+      // 1. PRIMEIRO: Verificar se já tem permissão concedida
+      const hasPermission = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+      );
+      
+      // Se já tem permissão, retorna true imediatamente
+      if (hasPermission) {
+        console.log('✅ Permissão de microfone JÁ concedida');
+        return true;
+      }
+
+      // 2. Se NÃO tem permissão, solicita ao usuário
+      console.log('🎤 Solicitando permissão de microfone...');
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+        {
+          title: 'Permissão de Microfone',
+          message: 'O GEI.AI precisa acessar seu microfone para comandos de voz e cadastro por voz.',
+          buttonNeutral: 'Perguntar depois',
+          buttonNegative: 'Negar',
+          buttonPositive: 'Permitir',
+        }
+      );
+
+      const isGranted = granted === PermissionsAndroid.RESULTS.GRANTED;
+      
+      if (isGranted) {
+        console.log('✅ Permissão de microfone CONCEDIDA pelo usuário');
+      } else {
+        console.log('❌ Permissão de microfone NEGADA pelo usuário');
+      }
+      
+      return isGranted;
+    } catch (err) {
+      console.error('❌ ERRO ao solicitar permissão de microfone:', err);
+      Alert.alert(
+        'Erro de Permissão',
+        'Ocorreu um erro ao solicitar permissão do microfone. Tente novamente.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+  }
+  
+  // iOS: o sistema solicita automaticamente na primeira chamada a Voice.start()
+  return true;
+};
+
+// ─── BIOMETRIA ─────────────────────────────────────────────────────────────
 const checkBiometricSupport = async () => {
   const hasHardware = await LocalAuthentication.hasHardwareAsync();
   const isEnrolled = await LocalAuthentication.isEnrolledAsync();
   const supportedTypes = await LocalAuthentication.supportedAuthenticationTypesAsync();
-  
-  return {
-    isAvailable: hasHardware && isEnrolled,
-    hasHardware,
-    isEnrolled,
-    types: supportedTypes
-  };
+  return { isAvailable: hasHardware && isEnrolled, hasHardware, isEnrolled, types: supportedTypes };
 };
-
 const authenticateWithBiometrics = async (reason = 'Autentique-se para acessar o GEI.AI') => {
   try {
     const { isAvailable } = await checkBiometricSupport();
-    if (!isAvailable) {
-      return { success: false, error: 'Biometria não disponível' };
-    }
-    
+    if (!isAvailable) return { success: false, error: 'Biometria não disponível' };
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: reason,
       fallbackLabel: 'Usar senha',
       disableDeviceFallback: false,
     });
-    
-    if (result.success) {
-      await addAuditLog('BIOMETRIC_AUTH_SUCCESS', 'Autenticação biométrica bem-sucedida');
-    } else {
-      await addAuditLog('BIOMETRIC_AUTH_FAILED', `Falha: ${result.error}`);
-    }
-    
+    if (result.success) await addAuditLog('BIOMETRIC_AUTH_SUCCESS', 'Autenticação biométrica bem-sucedida');
+    else await addAuditLog('BIOMETRIC_AUTH_FAILED', `Falha: ${result.error}`);
     return { success: result.success, error: result.error };
   } catch (error) {
     await addAuditLog('BIOMETRIC_AUTH_ERROR', error.message);
@@ -150,7 +291,7 @@ const authenticateWithBiometrics = async (reason = 'Autentique-se para acessar o
   }
 };
 
-// ─── FUNÇÃO DE SANITIZAÇÃO DE INPUT ─────────────────────────────────────────
+// ─── SANITIZAÇÃO ───────────────────────────────────────────────────────────
 const sanitizeInput = (input) => {
   if (!input) return '';
   let sanitized = String(input);
@@ -160,14 +301,9 @@ const sanitizeInput = (input) => {
   sanitized = sanitized.slice(0, 200);
   return sanitized;
 };
+const isValidEmail = (email) => { if (!email) return false; return EMAIL_REGEX.test(email); };
 
-// ─── VALIDAÇÃO DE EMAIL ─────────────────────────────────────────────────────
-const isValidEmail = (email) => {
-  if (!email) return false;
-  return EMAIL_REGEX.test(email);
-};
-
-// ─── SHELVES CONFIGURATION ──────────────────────────────────────────────────
+// ─── SHELVES ───────────────────────────────────────────────────────────────
 const SHELVES = {
   bebida: '150731', macarrao: '656122', pesado: '656123',
   frios: '656124', biscoito: '656126',
@@ -185,7 +321,7 @@ const SHELF_ALIAS = {
 const AREA_PERFIS = ['deposito', 'coordenador', 'repositor'];
 const ALL_ROLES = ['Repositor', 'Deposito', 'Coordenador'];
 
-// ─── TEMAS ──────────────────────────────────────────────────────────────────
+// ─── TEMAS ─────────────────────────────────────────────────────────────────
 const THEMES = {
   light: {
     name: 'Claro', icon: 'sun',
@@ -228,45 +364,13 @@ const THEMES = {
   },
 };
 
-const makeGiro = T => ({
-  'Grande giro': { color: T.green, solid: T.greenSolid, glow: T.greenGlow, icon: 'trending-up', short: '↑ Grande', rate: 5.2 },
-  'Médio giro': { color: T.amber, solid: T.amberSolid, glow: T.amberGlow, icon: 'minus', short: '⟶ Médio', rate: 2.5 },
-  'Pouco giro': { color: T.red, solid: T.redSolid, glow: T.redGlow, icon: 'trending-down', short: '↓ Pouco', rate: 0.8 },
+const makeGiro = (theme) => ({
+  'Grande giro': { color: theme.green, solid: theme.greenSolid, glow: theme.greenGlow, icon: 'trending-up', short: '↑ Grande', rate: 5.2 },
+  'Médio giro': { color: theme.amber, solid: theme.amberSolid, glow: theme.amberGlow, icon: 'minus', short: '⟶ Médio', rate: 2.5 },
+  'Pouco giro': { color: theme.red, solid: theme.redSolid, glow: theme.redGlow, icon: 'trending-down', short: '↓ Pouco', rate: 0.8 },
 });
 
-// ─── FETCH SECRETS ──────────────────────────────────────────────────────────
-let secretsFetched = false;
-let secretsFetching = false;
-let secretsCallbacks = [];
-
-const loadSecrets = () => new Promise((resolve, reject) => {
-  if (secretsFetched) { resolve(); return; }
-  secretsCallbacks.push({ resolve, reject });
-  if (secretsFetching) return;
-  secretsFetching = true;
-
-  secureAxiosInstance.get(
-    `https://api.baserow.io/api/database/rows/table/${SECRETS_TABLE}/?user_field_names=true`
-  )
-    .then(res => {
-      const row = res.data?.results?.[0];
-      if (row) {
-        RT_API_KEY_IA = row.API_KEY_IA || '';
-        RT_BLUESOFT_TOKEN = row.BLUESOFT_TOKEN || '';
-      }
-      secretsFetched = true;
-      secretsFetching = false;
-      secretsCallbacks.forEach(cb => cb.resolve());
-      secretsCallbacks = [];
-    })
-    .catch(err => {
-      secretsFetching = false;
-      secretsCallbacks.forEach(cb => cb.reject(err));
-      secretsCallbacks = [];
-    });
-});
-
-// ─── DATE UTILS ─────────────────────────────────────────────────────────────
+// ─── DATE UTILS ────────────────────────────────────────────────────────────
 const parseDate = str => {
   if (!str?.trim()) return null;
   const [d, m, y] = String(str).trim().split('/');
@@ -305,105 +409,253 @@ const isValidDate = (dateStr) => {
   return true;
 };
 
-// ─── PRODUCT SOURCES ────────────────────────────────────────────────────────
-const fetchProductSources = async (ean) => {
-  const results = [];
-
-  const fetchGemini = async () => {
-    if (!RT_API_KEY_IA) return null;
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 18000);
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IA}:generateContent?key=${RT_API_KEY_IA}`,
-        {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: `Atue como um especialista em logística e varejo. Identifique o produto referente ao EAN-13: ${ean}.\n\nContexto adicional: Este produto foi encontrado em um supermercado no Brasil (Minas Gerais).Instruções: > 1. Realize uma busca profunda em bancos de dados de códigos de barras (como Cosmos, GPC ou tabelas tributárias).\n\n2. Se houver ambiguidade, priorize o item de maior circulação nacional.\n\n3. Retorne EXCLUSIVAMENTE o JSON no formato forneca detalhes:\n\n{\n\n"nome": "string",\n\n"marca": "string",\n\n"categoria": "string",\n\n"gramatura": "string",\n\n"rotatividade": "Grande giro"|"Médio giro"|"Pouco giro",\n\n"confianca": 0-100\n\n}`
-              }]
-            }]
-          }),
-          signal: controller.signal,
-        }
-      );
-      clearTimeout(tid);
-      if (!r.ok) return null;
-      const d = await r.json();
-      const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const clean = txt.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(clean);
-      if (!parsed?.nome) return null;
-      const nome = [parsed.nome, parsed.marca].filter(Boolean).join(' · ') + (parsed.gramatura ? ` (${parsed.gramatura})` : '');
-      return {
-        source: 'ia', sourceLabel: 'IA Gemini', sourceIcon: 'cpu', sourceColor: null, nome: nome.trim(),
-        giro: parsed.rotatividade || 'Médio giro', categoria: parsed.categoria || '', confianca: parsed.confianca || 75, raw: parsed
-      };
-    } catch (_) { return null; }
-  };
-
-  const fetchBluesoft = async () => {
-    if (!RT_BLUESOFT_TOKEN) return null;
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 10000);
-      const r = await fetch(`https://api.cosmos.bluesoft.com.br/gtins/${ean}.json`, {
-        headers: { 'X-Cosmos-Token': RT_BLUESOFT_TOKEN, 'Content-Type': 'application/json' },
-        signal: controller.signal,
-      });
-      clearTimeout(tid);
-      if (!r.ok) return null;
-      const d = await r.json();
-      if (!d?.description) return null;
-      const nome = [d.description, d.brand?.name].filter(Boolean).join(' · ') + (d.net_weight ? ` (${d.net_weight}${d.net_weight_unit || 'g'})` : '');
-      return {
-        source: 'bluesoft', sourceLabel: 'Bluesoft Cosmos', sourceIcon: 'database', sourceColor: null, nome: nome.trim(),
-        giro: 'Médio giro', categoria: d.ncm?.description || '', confianca: 90, raw: d
-      };
-    } catch (_) { return null; }
-  };
-
-  const fetchOpenFoodFacts = async () => {
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 10000);
-      const r = await fetch(`https://world.openfoodfacts.org/api/v0/product/${ean}.json`, { signal: controller.signal });
-      clearTimeout(tid);
-      if (!r.ok) return null;
-      const d = await r.json();
-      if (d.status !== 1) return null;
-      const p = d.product;
-      const nome = (p.product_name_pt || p.product_name || p.generic_name || '').trim();
-      if (!nome) return null;
-      const marca = p.brands ? p.brands.split(',')[0].trim() : '';
-      const qty = p.quantity || '';
-      const nomeCompleto = [nome, marca].filter(Boolean).join(' · ') + (qty ? ` (${qty})` : '');
-      return {
-        source: 'openfoodfacts', sourceLabel: 'Open Food Facts', sourceIcon: 'globe', sourceColor: null, nome: nomeCompleto.trim(),
-        giro: 'Médio giro', categoria: p.categories_tags?.[0]?.replace('en:', '') || '', confianca: 70, raw: p
-      };
-    } catch (_) { return null; }
-  };
-
-  const [gemini, bluesoft, off] = await Promise.all([fetchGemini(), fetchBluesoft(), fetchOpenFoodFacts()]);
-  if (gemini) results.push(gemini);
-  if (bluesoft) results.push(bluesoft);
-  if (off) results.push(off);
-  if (results.length === 0) {
-    results.push({
-      source: 'manual', sourceLabel: 'Não encontrado', sourceIcon: 'alert-circle', sourceColor: null,
-      nome: `Produto EAN ${ean}`, giro: 'Médio giro', categoria: '', confianca: 0, raw: {}
-    });
+// ─── HELPERS DE API ────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 22000) => {
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(tid);
+    return r;
+  } catch (e) {
+    clearTimeout(tid);
+    if (e.name === 'AbortError') throw new Error('Timeout: requisição demorou demais');
+    throw e;
   }
-  return results;
+};
+const parseApiError = async (response) => {
+  try {
+    const body = await response.json();
+    if (body?.error?.message) return body.error.message;
+    if (body?.error?.error?.message) return body.error.error.message;
+    if (body?.message) return body.message;
+    return `HTTP ${response.status}`;
+  } catch { return `HTTP ${response.status}`; }
 };
 
-// ─── COMPONENTE DETECTOR DE CAPS LOCK ───────────────────────────────────────
+// ==================== SISTEMA DE IA OTIMIZADO COM CACHE ====================
+const AI_CACHE_KEY = '@GEI_AICache';
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const pendingRequests = new Map();
+const getAICache = async () => {
+  try {
+    const raw = await SecureStore.getItemAsync(AI_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+};
+const setAICache = async (cache) => {
+  try { await SecureStore.setItemAsync(AI_CACHE_KEY, JSON.stringify(cache)); } catch (e) { console.warn('Cache save error', e); }
+};
+const cleanExpiredCache = async () => {
+  const cache = await getAICache();
+  const now = Date.now();
+  let changed = false;
+  for (const [key, val] of Object.entries(cache)) {
+    if (val.expiresAt && val.expiresAt < now) {
+      delete cache[key];
+      changed = true;
+    }
+  }
+  if (changed) await setAICache(cache);
+};
+const callGeminiOptimized = async (prompt, useCache = true, cacheKey = null) => {
+  if (!RT_API_KEY_IA) throw new Error('Chave Gemini indisponível');
+  const finalCacheKey = cacheKey || `gemini_${await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, prompt)}`;
+  if (useCache) {
+    const cache = await getAICache();
+    if (cache[finalCacheKey] && cache[finalCacheKey].expiresAt > Date.now()) return cache[finalCacheKey].response;
+  }
+  if (pendingRequests.has(finalCacheKey)) return await pendingRequests.get(finalCacheKey);
+  const requestPromise = (async () => {
+    const cheapModels = ['gemini-2.0-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    let lastError = null;
+    for (const model of cheapModels) {
+      try {
+        const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${RT_API_KEY_IA}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.05, maxOutputTokens: 512 },
+          }),
+        }, 15000);
+        if (!res.ok) {
+          const err = await parseApiError(res);
+          if (res.status === 429 || err.includes('quota')) continue;
+          throw new Error(err);
+        }
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (text) {
+          if (useCache) {
+            const cache = await getAICache();
+            cache[finalCacheKey] = { response: text, expiresAt: Date.now() + CACHE_TTL_MS };
+            await setAICache(cache);
+          }
+          return text;
+        }
+      } catch (e) { lastError = e; }
+    }
+    throw lastError || new Error('Gemini falhou');
+  })();
+  pendingRequests.set(finalCacheKey, requestPromise);
+  try { return await requestPromise; } finally { pendingRequests.delete(finalCacheKey); }
+};
+const callGroqOptimized = async (prompt, systemPrompt = null, useCache = true) => {
+  if (!GROQ_API_KEY) throw new Error('Chave Groq indisponível');
+  const fullPrompt = systemPrompt ? systemPrompt + '\n' + prompt : prompt;
+  const cacheKey = `groq_${await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, fullPrompt)}`;
+  if (useCache) {
+    const cache = await getAICache();
+    if (cache[cacheKey] && cache[cacheKey].expiresAt > Date.now()) return cache[cacheKey].response;
+  }
+  if (pendingRequests.has(cacheKey)) return await pendingRequests.get(cacheKey);
+  const requestPromise = (async () => {
+    const cheapGroqModels = ['llama-3.1-8b-instant', 'gemma2-9b-it', 'llama3-70b-8192'];
+    let lastError = null;
+    for (const model of cheapGroqModels) {
+      try {
+        const messages = systemPrompt
+          ? [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
+          : [{ role: 'user', content: prompt }];
+        const res = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages, temperature: 0.05, max_tokens: 512 }),
+        }, 15000);
+        if (!res.ok) {
+          const err = await parseApiError(res);
+          if (res.status === 429 || err.includes('rate limit')) continue;
+          throw new Error(err);
+        }
+        const data = await res.json();
+        const text = data.choices?.[0]?.message?.content || '';
+        if (text) {
+          if (useCache) {
+            const cache = await getAICache();
+            cache[cacheKey] = { response: text, expiresAt: Date.now() + CACHE_TTL_MS };
+            await setAICache(cache);
+          }
+          return text;
+        }
+      } catch (e) { lastError = e; }
+    }
+    throw lastError || new Error('Groq falhou');
+  })();
+  pendingRequests.set(cacheKey, requestPromise);
+  try { return await requestPromise; } finally { pendingRequests.delete(cacheKey); }
+};
+const callGEIOptimized = async (prompt, useCache = true) => {
+  try { return await callGeminiOptimized(prompt, useCache); } catch (e) {
+    console.warn('Gemini falhou, usando Groq fallback:', e.message);
+    return await callGroqOptimized(prompt, null, useCache);
+  }
+};
+const fetchIAWithConsensusOptimized = async (ean, nomeBase = "", categoriaBase = "") => {
+  const cacheKey = `product_${ean}_${await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nomeBase + categoriaBase)}`;
+  const cache = await getAICache();
+  if (cache[cacheKey] && cache[cacheKey].expiresAt > Date.now()) return cache[cacheKey].data;
+  const prompt = `Você é GEI.IA, especialista em produtos de supermercado. Melhore o nome do produto abaixo, extraia marca, categoria, gramatura e rotatividade. Retorne APENAS JSON: {"nome":"...","marca":"...","categoria":"...","gramatura":"...","rotatividade":"Grande giro"|"Médio giro"|"Pouco giro","confianca":95}
+Dados: Nome: ${nomeBase}, Categoria: ${categoriaBase}, EAN: ${ean}`;
+  try {
+    const resposta = await callGEIOptimized(prompt, true);
+    const clean = resposta.replace(/```json|```/g, '').trim();
+    const match = clean.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('JSON inválido');
+    const parsed = JSON.parse(match[0]);
+    if (!parsed.nome || parsed.confianca < 50) throw new Error('Baixa confiança');
+    const cacheData = { data: parsed, expiresAt: Date.now() + CACHE_TTL_MS };
+    const newCache = await getAICache();
+    newCache[cacheKey] = cacheData;
+    await setAICache(newCache);
+    return parsed;
+  } catch (e) {
+    console.warn('Consenso IA falhou:', e);
+    return null;
+  }
+};
+const fetchProductSourcesOptimized = async (ean) => {
+  const fetchBluesoftCached = async () => {
+    const cacheKey = `bluesoft_${ean}`;
+    const cache = await getAICache();
+    if (cache[cacheKey] && cache[cacheKey].expiresAt > Date.now()) return cache[cacheKey].data;
+    try {
+      const res = await fetchWithTimeout(`https://api.cosmos.bluesoft.com.br/gtins/${ean}.json`, {
+        headers: { 'X-Cosmos-Token': RT_BLUESOFT_TOKEN, 'Content-Type': 'application/json' }
+      }, 8000);
+      if (!res.ok) throw new Error('Bluesoft error');
+      const d = await res.json();
+      const nome = ([d.description, d.brand?.name].filter(Boolean).join(' · ') + (d.net_weight ? ` (${d.net_weight}${d.net_weight_unit || 'g'})` : '')).toUpperCase();
+      const data = { status: 'success', source: 'bluesoft', sourceLabel: 'Bluesoft Cosmos', sourceIcon: 'database', nome: nome.trim(), giro: 'Médio giro', categoria: d.ncm?.description || '', confianca: 95 };
+      const newCache = await getAICache();
+      newCache[cacheKey] = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+      await setAICache(newCache);
+      return data;
+    } catch { return { status: 'error', source: 'bluesoft', sourceLabel: 'Bluesoft Cosmos', error: 'Falha na consulta' }; }
+  };
+  const fetchOFFCached = async () => {
+    const cacheKey = `off_${ean}`;
+    const cache = await getAICache();
+    if (cache[cacheKey] && cache[cacheKey].expiresAt > Date.now()) return cache[cacheKey].data;
+    try {
+      const res = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v0/product/${ean}.json`, {}, 8000);
+      if (!res.ok) throw new Error('OFF error');
+      const d = await res.json();
+      if (d.status !== 1) throw new Error('Not found');
+      const p = d.product;
+      const nomePt = (p.product_name_pt || p.product_name_pt_BR || p.product_name || '').toUpperCase().trim();
+      const nomeCompleto = ([nomePt, p.brands].filter(Boolean).join(' · ') + (p.quantity ? ` (${p.quantity})` : '')).toUpperCase();
+      const data = { status: 'success', source: 'openfoodfacts', sourceLabel: 'Open Food Facts', sourceIcon: 'globe', nome: nomeCompleto, giro: 'Médio giro', categoria: p.categories_tags?.[0]?.replace('en:', '') || p.categories || '', confianca: 92 };
+      const newCache = await getAICache();
+      newCache[cacheKey] = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+      await setAICache(newCache);
+      return data;
+    } catch { return { status: 'error', source: 'openfoodfacts', sourceLabel: 'Open Food Facts', error: 'Não encontrado' }; }
+  };
+  const [bluesoft, off] = await Promise.all([fetchBluesoftCached(), fetchOFFCached()]);
+  const melhorBase = off.status === 'success' ? off : (bluesoft.status === 'success' ? bluesoft : null);
+  let iaResult = { status: 'error', source: 'ia', sourceLabel: 'GEI.IA (Gemini)', error: 'Sem dados base' };
+  if (melhorBase) {
+    const iaParsed = await fetchIAWithConsensusOptimized(ean, melhorBase.nome, melhorBase.categoria);
+    if (iaParsed) {
+      iaResult = {
+        status: 'success', source: 'ia', sourceLabel: 'GEI.IA (Gemini)', sourceIcon: 'cpu',
+        nome: ([iaParsed.nome, iaParsed.marca].filter(Boolean).join(' · ') + (iaParsed.gramatura ? ` (${iaParsed.gramatura})` : '')).toUpperCase(),
+        giro: iaParsed.rotatividade || 'Médio giro', categoria: iaParsed.categoria || '', confianca: 99
+      };
+    }
+  }
+  return [iaResult, bluesoft, off].map(r => r.status === 'success' ? r : { ...r, nome: 'Falha: ' + (r.error || 'Erro'), confianca: 0 });
+};
+const fetchProductSources = fetchProductSourcesOptimized;
+const callGEI = callGEIOptimized;
+const fetchIAWithConsensus = fetchIAWithConsensusOptimized;
+
+// ─── SIMILARIDADE ──────────────────────────────────────────────────────────
+const stringSimilarity = (a, b) => {
+  if (!a || !b) return 0;
+  const tokenize = s => new Set(s.toLowerCase().replace(/[^a-z0-9çãõáéíóúâêîôû\s]/g, '').split(/\s+/).filter(Boolean));
+  const sa = tokenize(a), sb = tokenize(b);
+  if (sa.size === 0 || sb.size === 0) return 0;
+  let inter = 0;
+  sa.forEach(t => { if (sb.has(t)) inter++; });
+  return inter / (sa.size + sb.size - inter);
+};
+const normalizeName = (nome) => {
+  if (!nome) return '';
+  return nome.toLowerCase().replace(/[^a-z0-9çãõáéíóúâêîôû\s]/g, ' ').replace(/\s+/g, ' ').trim();
+};
+const extractBrand = (nome) => {
+  if (!nome) return '';
+  const parts = nome.split(/[\s·]+/);
+  return parts[parts.length > 1 ? 1 : 0]?.toLowerCase() || '';
+};
+
+// ─── CAPS LOCK ─────────────────────────────────────────────────────────────
 const CapsLockDetector = ({ children, onCapsLockChange }) => {
   const [isCapsLock, setIsCapsLock] = useState(false);
   const inputRef = useRef(null);
-
   const checkCapsLock = (event) => {
     if (event.nativeEvent && typeof event.nativeEvent.key !== 'undefined') {
       const key = event.nativeEvent.key;
@@ -416,52 +668,26 @@ const CapsLockDetector = ({ children, onCapsLockChange }) => {
       }
     }
   };
-
-  return children({
-    ref: inputRef,
-    onKeyPress: checkCapsLock,
-    isCapsLock,
-  });
+  return children({ ref: inputRef, onKeyPress: checkCapsLock, isCapsLock });
 };
 
-// ─── GERADOR DE QR CODE DE ACESSO ───────────────────────────────────────────
+// ─── QR CODE ───────────────────────────────────────────────────────────────
 const QrCodeGenerator = ({ T, fontScale, userData, onClose }) => {
   const [qrValue, setQrValue] = useState('');
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [loginRapido, setLoginRapido] = useState('');
   const [expiresAt, setExpiresAt] = useState(null);
-
-  useEffect(() => {
-    generateLoginQR();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const generateLoginQR = async () => {
+  useEffect(() => { generateLoginQR(); }, []);
+  const generateLoginQR = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await secureAxiosInstance.get(
-        `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/?user_field_names=true`
-      );
-
+      const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`);
       const user = res.data.results.find(u => u.USUARIO === userData?.USUARIO);
-
-      if (!user) {
-        Alert.alert('Erro', 'Não foi possível encontrar seus dados de acesso.');
-        setLoading(false);
-        return;
-      }
-
+      if (!user) { Alert.alert('Erro', 'Não foi possível encontrar seus dados de acesso.'); setLoading(false); return; }
       const loginRapidoValue = user.LOGINRAPIDO || '';
-
-      if (!loginRapidoValue) {
-        Alert.alert('Aviso', 'Seu usuário não possui LOGINRAPIDO configurado. Contate o administrador.');
-        setLoading(false);
-        return;
-      }
-
+      if (!loginRapidoValue) { Alert.alert('Aviso', 'Seu usuário não possui LOGINRAPIDO configurado. Contate o administrador.'); setLoading(false); return; }
       setLoginRapido(loginRapidoValue);
-
       const payload = {
         usuario: userData.USUARIO,
         loginRapido: loginRapidoValue,
@@ -470,193 +696,75 @@ const QrCodeGenerator = ({ T, fontScale, userData, onClose }) => {
         timestamp: Date.now(),
         expiraEm: Date.now() + (24 * 60 * 60 * 1000),
       };
-
       const qrString = JSON.stringify(payload);
       setQrValue(qrString);
       setExpiresAt(new Date(payload.expiraEm));
-
       await SecureStore.setItemAsync('last_qr_data', qrString);
       await addAuditLog('QR_GENERATED', `QR Code gerado para ${userData.USUARIO}`, userData.id);
-
-    } catch (error) {
-      console.error('Erro ao gerar QR:', error);
-      Alert.alert('Erro', 'Falha ao gerar QR Code de acesso.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const copyToClipboard = async () => {
-    if (qrValue) {
-      await Clipboard.setStringAsync(qrValue);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  if (loading) {
-    return (
-      <View style={{ alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-        <ActivityIndicator size="large" color={T.blue} />
-        <Text style={{ marginTop: 16, color: T.textSub }}>Gerando QR Code de acesso...</Text>
-      </View>
-    );
-  }
-
-  if (!loginRapido) {
-    return (
-      <View style={{ alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center' }}>
-          <Feather name="alert-circle" size={30} color={T.amber} />
-        </View>
-        <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '700', color: T.text, textAlign: 'center' }}>
-          LOGINRAPIDO não configurado
-        </Text>
-        <Text style={{ marginTop: 8, fontSize: 13, color: T.textSub, textAlign: 'center' }}>
-          Contate o administrador para configurar o campo LOGINRAPIDO no seu perfil.
-        </Text>
-      </View>
-    );
-  }
-
+    } catch (error) { console.error('Erro ao gerar QR:', error); Alert.alert('Erro', 'Falha ao gerar QR Code de acesso.'); } finally { setLoading(false); }
+  }, [userData]);
+  const copyToClipboard = async () => { if (qrValue) { await Clipboard.setStringAsync(qrValue); setCopied(true); setTimeout(() => setCopied(false), 2000); } };
+  if (loading) return (<View style={{ alignItems: 'center', justifyContent: 'center', padding: 40 }}><ActivityIndicator size="large" color={T.blue} /><Text style={{ marginTop: 16, color: T.textSub }}>Gerando QR Code de acesso...</Text></View>);
+  if (!loginRapido) return (<View style={{ alignItems: 'center', justifyContent: 'center', padding: 40 }}><View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center' }}><Feather name="alert-circle" size={30} color={T.amber} /></View><Text style={{ marginTop: 20, fontSize: 16, fontWeight: '700', color: T.text, textAlign: 'center' }}>LOGINRAPIDO não configurado</Text><Text style={{ marginTop: 8, fontSize: 13, color: T.textSub, textAlign: 'center' }}>Contate o administrador para configurar o campo LOGINRAPIDO no seu perfil.</Text></View>);
   return (
     <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center' }}>
       <View style={{ alignItems: 'center', marginBottom: 20 }}>
-        <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
-          <Feather name="shield" size={36} color={T.blue} />
-        </View>
-        <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, textAlign: 'center' }}>
-          QR Code de Acesso Rápido
-        </Text>
-        <Text style={{ fontSize: 13 * fontScale, color: T.textSub, textAlign: 'center', marginTop: 4 }}>
-          Escaneie para fazer login em outro dispositivo
-        </Text>
+        <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}><Feather name="shield" size={36} color={T.blue} /></View>
+        <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, textAlign: 'center' }}>QR Code de Acesso Rápido</Text>
+        <Text style={{ fontSize: 13 * fontScale, color: T.textSub, textAlign: 'center', marginTop: 4 }}>Escaneie para fazer login em outro dispositivo</Text>
       </View>
-
-      <View style={{
-        backgroundColor: '#FFF',
-        padding: 20,
-        borderRadius: 24,
-        shadowColor: '#000',
-        shadowOpacity: 0.15,
-        shadowRadius: 20,
-        elevation: 10,
-        marginBottom: 20
-      }}>
-        {qrValue ? (
-          <QRCode
-            value={qrValue}
-            size={240}
-            color="#000"
-            backgroundColor="#FFF"
-          />
-        ) : null}
-      </View>
-
+      <View style={{ backgroundColor: '#FFF', padding: 20, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 20, elevation: 10, marginBottom: 20 }}>{qrValue ? <QRCode value={qrValue} size={240} color="#000" backgroundColor="#FFF" /> : null}</View>
       <View style={{ width: '100%', backgroundColor: T.bgElevated, borderRadius: 16, padding: 16, marginBottom: 20 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted }}>Login Rápido:</Text>
-          <Text style={{ fontSize: 12, fontWeight: '800', color: T.blue }}>{loginRapido}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted }}>Expira em:</Text>
-          <Text style={{ fontSize: 12, fontWeight: '600', color: expiresAt && expiresAt < new Date() ? T.red : T.green }}>
-            {expiresAt ? expiresAt.toLocaleString() : '—'}
-          </Text>
-        </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted }}>Válido por:</Text>
-          <Text style={{ fontSize: 12, fontWeight: '600', color: T.textSub }}>24 horas</Text>
-        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted }}>Login Rápido:</Text><Text style={{ fontSize: 12, fontWeight: '800', color: T.blue }}>{loginRapido}</Text></View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted }}>Expira em:</Text><Text style={{ fontSize: 12, fontWeight: '600', color: expiresAt && expiresAt < new Date() ? T.red : T.green }}>{expiresAt ? expiresAt.toLocaleString() : '—'}</Text></View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textMuted }}>Válido por:</Text><Text style={{ fontSize: 12, fontWeight: '600', color: T.textSub }}>24 horas</Text></View>
       </View>
-
-      <TouchableOpacity
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: T.bgInput, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, marginBottom: 16 }}
-        onPress={copyToClipboard}
-      >
-        <Feather name="copy" size={16} color={T.textSub} />
-        <Text style={{ fontSize: 13, fontWeight: '600', color: T.textSub }}>
-          {copied ? 'Copiado!' : 'Copiar dados do QR'}
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={{ width: '100%', backgroundColor: T.blue, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
-        onPress={onClose}
-      >
-        <Text style={{ fontSize: 15, fontWeight: '800', color: '#FFF' }}>Fechar</Text>
-      </TouchableOpacity>
+      <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: T.bgInput, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, marginBottom: 16 }} onPress={copyToClipboard}><Feather name="copy" size={16} color={T.textSub} /><Text style={{ fontSize: 13, fontWeight: '600', color: T.textSub }}>{copied ? 'Copiado!' : 'Copiar dados do QR'}</Text></TouchableOpacity>
+      <TouchableOpacity style={{ width: '100%', backgroundColor: T.blue, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }} onPress={onClose}><Text style={{ fontSize: 15, fontWeight: '800', color: '#FFF' }}>Fechar</Text></TouchableOpacity>
     </ScrollView>
   );
 };
 
-// ─── DARK TORCH PROMPT ──────────────────────────────────────────────────────
+// ─── DARK TORCH PROMPT ─────────────────────────────────────────────────────
 const DarkTorchPrompt = ({ isDarkEnv, lightLevel, torchOn, onToggleTorch, T, fontScale }) => {
   const slideA = useRef(new Animated.Value(140)).current;
   const pulseA = useRef(new Animated.Value(1)).current;
   const [dismissed, setDismissed] = useState(false);
   const darkPct = Math.round((1 - lightLevel) * 100);
-
   useEffect(() => {
     if (isDarkEnv && !torchOn && !dismissed) {
       Animated.parallel([
         Animated.spring(slideA, { toValue: 0, tension: 70, friction: 10, useNativeDriver: false }),
-        Animated.loop(Animated.sequence([
-          Animated.timing(pulseA, { toValue: 1.22, duration: 720, useNativeDriver: false }),
-          Animated.timing(pulseA, { toValue: 1, duration: 720, useNativeDriver: false }),
-        ]))
+        Animated.loop(Animated.sequence([Animated.timing(pulseA, { toValue: 1.22, duration: 720, useNativeDriver: false }), Animated.timing(pulseA, { toValue: 1, duration: 720, useNativeDriver: false })]))
       ]).start();
-    } else {
-      Animated.timing(slideA, { toValue: 140, duration: 240, easing: Easing.in(Easing.cubic), useNativeDriver: false }).start();
-    }
-  }, [isDarkEnv, torchOn, dismissed]);
-
+    } else { Animated.timing(slideA, { toValue: 140, duration: 240, easing: Easing.in(Easing.cubic), useNativeDriver: false }).start(); }
+  }, [isDarkEnv, torchOn, dismissed, slideA, pulseA]);
   if (!isDarkEnv || torchOn || dismissed) return null;
-
   return (
-    <Animated.View style={{
-      position: 'absolute', bottom: 160, left: 20, right: 20,
-      backgroundColor: T.bgCard, borderRadius: 28, padding: 22,
-      borderWidth: 2.5, borderColor: T.orange + '75',
-      shadowColor: T.orange, shadowOffset: { width: 0, height: 22 },
-      shadowOpacity: 0.5, shadowRadius: 32, elevation: 32,
-      transform: [{ translateY: slideA }], zIndex: 10000,
-    }}>
+    <Animated.View style={{ position: 'absolute', bottom: 160, left: 20, right: 20, backgroundColor: T.bgCard, borderRadius: 28, padding: 22, borderWidth: 2.5, borderColor: T.orange + '75', shadowColor: T.orange, shadowOffset: { width: 0, height: 22 }, shadowOpacity: 0.5, shadowRadius: 32, elevation: 32, transform: [{ translateY: slideA }], zIndex: 10000 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-        <Animated.View style={{
-          width: 58, height: 58, borderRadius: 18, backgroundColor: T.orange + '22',
-          justifyContent: 'center', alignItems: 'center',
-          borderWidth: 2, borderColor: T.orange + '45', transform: [{ scale: pulseA }],
-        }}>
-          <Feather name="zap" size={34} color={T.orange} />
-        </Animated.View>
+        <Animated.View style={{ width: 58, height: 58, borderRadius: 18, backgroundColor: T.orange + '22', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.orange + '45', transform: [{ scale: pulseA }] }}><Feather name="zap" size={34} color={T.orange} /></Animated.View>
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 12.5 * fontScale, fontWeight: '900', color: T.orange, textTransform: 'uppercase', letterSpacing: 1.4 }}>🌙 Ambiente muito escuro</Text>
           <Text style={{ fontSize: 17.5 * fontScale, fontWeight: '900', color: T.text, lineHeight: 23, marginTop: 3 }}>Ligue a lanterna para ler melhor!</Text>
           <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginTop: 6 }}>Luminosidade: {darkPct}% de escuridão</Text>
         </View>
       </View>
-      <View style={{ height: 7, backgroundColor: T.border, borderRadius: 999, marginTop: 18, overflow: 'hidden' }}>
-        <View style={{ height: '100%', width: `${Math.max(10, darkPct)}%`, backgroundColor: T.orange, borderRadius: 999 }} />
-      </View>
+      <View style={{ height: 7, backgroundColor: T.border, borderRadius: 999, marginTop: 18, overflow: 'hidden' }}><View style={{ height: '100%', width: `${Math.max(10, darkPct)}%`, backgroundColor: T.orange, borderRadius: 999 }} /></View>
       <View style={{ flexDirection: 'row', gap: 12, marginTop: 22 }}>
-        <TouchableOpacity onPress={onToggleTorch} style={{ flex: 1, height: 58, backgroundColor: T.orange, borderRadius: 18, justifyContent: 'center', alignItems: 'center', shadowColor: T.orange, shadowOpacity: 0.55, shadowRadius: 16, elevation: 14 }}>
-          <Text style={{ color: '#FFF', fontSize: 16.5 * fontScale, fontWeight: '900' }}>⚡ LIGAR LANTERNA</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setDismissed(true)} style={{ width: 58, height: 58, backgroundColor: T.bgInput, borderRadius: 18, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.border }}>
-          <Feather name="x" size={26} color={T.textMuted} />
-        </TouchableOpacity>
+        <TouchableOpacity onPress={onToggleTorch} style={{ flex: 1, height: 58, backgroundColor: T.orange, borderRadius: 18, justifyContent: 'center', alignItems: 'center', shadowColor: T.orange, shadowOpacity: 0.55, shadowRadius: 16, elevation: 14 }}><Text style={{ color: '#FFF', fontSize: 16.5 * fontScale, fontWeight: '900' }}>⚡ LIGAR LANTERNA</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => setDismissed(true)} style={{ width: 58, height: 58, borderRadius: 18, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.border }}><Feather name="x" size={26} color={T.textMuted} /></TouchableOpacity>
       </View>
     </Animated.View>
   );
 };
 
-// ─── AUTO-DELETE ENGINE ─────────────────────────────────────────────────────
+// ─── AUTO-DELETE ENGINE ────────────────────────────────────────────────────
 const isExpiredOver30 = vencimento => { const dt = parseDate(vencimento); if (!dt) return false; return diffDays(today(), dt) > 30; };
 const cleanShelf = async (shelfKey, tableId) => {
   const deleted = [];
   try {
-    const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true`);
+    const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true&size=200`);
     const rows = res.data.results || [];
     const toDelete = rows.filter(r => isExpiredOver30(r.VENCIMENTO));
     await Promise.all(toDelete.map(async row => {
@@ -670,8 +778,87 @@ const cleanShelf = async (shelfKey, tableId) => {
 };
 const runAutoClean = async () => { const results = await Promise.all(SHELF_KEYS.map(k => cleanShelf(k, SHELVES[k]))); return results.flat(); };
 
-// ─── DEPLETION ENGINE ───────────────────────────────────────────────────────
-const buildDepletionMetrics = (product = {}) => {
+// ==================== SISTEMA FIFO PARA MÚLTIPLOS LOTES ====================
+const groupProductsByEAN = (products) => {
+  const groups = new Map();
+  for (const prod of products) {
+    const ean = prod.codig || 'Sem EAN';
+    if (!groups.has(ean)) groups.set(ean, []);
+    groups.get(ean).push(prod);
+  }
+  for (const [ean, lotes] of groups.entries()) {
+    lotes.sort((a, b) => {
+      const dateA = parseDate(a.VENCIMENTO);
+      const dateB = parseDate(b.VENCIMENTO);
+      if (!dateA && !dateB) return 0;
+      if (!dateA) return 1;
+      if (!dateB) return -1;
+      return dateA - dateB;
+    });
+  }
+  return groups;
+};
+const calculateFIFOMetrics = (lotes, giroProduto = 'Médio giro') => {
+  if (!lotes || lotes.length === 0) return null;
+  const rateMap = { 'Grande giro': 5.2, 'Médio giro': 2.5, 'Pouco giro': 0.8 };
+  const dailyRate = rateMap[giroProduto] || 2.5;
+  const now = today();
+  let totalRemaining = 0;
+  let consumptionDays = 0;
+  let totalInitial = 0;
+  let soldEstimate = 0;
+  for (const lote of lotes) {
+    const qty = qtyToNumber(lote.quantidade);
+    totalInitial += qty;
+    const sendDate = parseDate(lote.DATAENVIO) || now;
+    const elapsedDays = Math.max(0, diffDays(now, sendDate));
+    const soldThisLote = Math.round(elapsedDays * dailyRate);
+    const remainingQty = Math.max(0, qty - soldThisLote);
+    totalRemaining += remainingQty;
+    soldEstimate += soldThisLote;
+    if (remainingQty > 0) {
+      const daysForThisLote = Math.ceil(remainingQty / dailyRate);
+      consumptionDays += daysForThisLote;
+      const depletionDate = addDays(now, consumptionDays);
+      return {
+        totalRemaining,
+        remainingQtyByLote: lotes.map(l => {
+          const q = qtyToNumber(l.quantidade);
+          const sDate = parseDate(l.DATAENVIO) || now;
+          const eDays = Math.max(0, diffDays(now, sDate));
+          const sold = Math.round(eDays * dailyRate);
+          const rem = Math.max(0, q - sold);
+          return { ...l, remainingQty: rem };
+        }),
+        depletionDate,
+        depletionDateLabel: fmt(depletionDate),
+        depletionDateFull: fmtFull(depletionDate),
+        remainingDays: consumptionDays,
+        dailyRate,
+        giro: giroProduto,
+        soldEstimate,
+        totalInitial,
+        salesPct: totalInitial > 0 ? Math.min(100, Math.round((soldEstimate / totalInitial) * 100)) : 0,
+        remainingPct: totalRemaining > 0 ? Math.round((totalRemaining / totalInitial) * 100) : 0,
+      };
+    }
+  }
+  return {
+    totalRemaining: 0,
+    remainingQtyByLote: lotes.map(l => ({ ...l, remainingQty: 0 })),
+    depletionDate: now,
+    depletionDateLabel: 'HOJE',
+    depletionDateFull: fmtFull(now),
+    remainingDays: 0,
+    dailyRate,
+    giro: giroProduto,
+    soldEstimate: totalInitial,
+    totalInitial,
+    salesPct: 100,
+    remainingPct: 0,
+  };
+};
+const buildDepletionMetricsOriginal = (product = {}) => {
   const qty = Math.max(0, qtyToNumber(product?.quantidade));
   const giro = product?.MARGEM || 'Médio giro';
   const rateMap = { 'Grande giro': 5.2, 'Médio giro': 2.5, 'Pouco giro': 0.8 };
@@ -689,13 +876,44 @@ const buildDepletionMetrics = (product = {}) => {
   const remainingPct = qty > 0 ? Math.round((remainingQty / qty) * 100) : 0;
   return { qty, giro, dailyRate, elapsedDays, remainingDays, depletionDate, depletionDateLabel: fmt(depletionDate), depletionDateFull: fmtFull(depletionDate), soldEstimate, initialEstimate, salesPct, cyclePct, remainingPct, remainingQty, cycleTotal };
 };
+const buildDepletionMetrics = (productOrLotes, fifoMode = false, allProducts = null, ean = null) => {
+  if (!fifoMode || !allProducts || !ean) {
+    return buildDepletionMetricsOriginal(productOrLotes);
+  }
+  const groups = groupProductsByEAN(allProducts);
+  const lotes = groups.get(ean);
+  if (!lotes || lotes.length === 0) return buildDepletionMetricsOriginal(productOrLotes);
+  const giroProduto = lotes[0]?.MARGEM || 'Médio giro';
+  const metrics = calculateFIFOMetrics(lotes, giroProduto);
+  if (!metrics) return buildDepletionMetricsOriginal(productOrLotes);
+  return {
+    qty: metrics.totalRemaining,
+    giro: metrics.giro,
+    dailyRate: metrics.dailyRate,
+    elapsedDays: 0,
+    remainingDays: metrics.remainingDays,
+    depletionDate: metrics.depletionDate,
+    depletionDateLabel: metrics.depletionDateLabel,
+    depletionDateFull: metrics.depletionDateFull,
+    soldEstimate: metrics.soldEstimate,
+    initialEstimate: metrics.totalInitial,
+    salesPct: metrics.salesPct,
+    cyclePct: 0,
+    remainingPct: metrics.remainingPct,
+    remainingQty: metrics.totalRemaining,
+    cycleTotal: 0,
+    lotes: metrics.remainingQtyByLote,
+    fifoMode: true,
+  };
+};
 
-const makeVENC = T => ({
-  expired: { color: T.red, glow: T.redGlow, icon: 'alert-circle', label: d => `Vencido há ${Math.abs(d)}d` },
-  warning: { color: T.amber, glow: T.amberGlow, icon: 'alert-triangle', label: d => `Vence em ${d}d` },
-  ok: { color: T.green, glow: T.greenGlow, icon: 'check-circle', label: v => `Vence: ${v}` },
+const makeVENC = (theme) => ({
+  expired: { color: theme.red, glow: theme.redGlow, icon: 'alert-circle', label: d => `Vencido há ${Math.abs(d)}d` },
+  warning: { color: theme.amber, glow: theme.amberGlow, icon: 'alert-triangle', label: d => `Vence em ${d}d` },
+  ok: { color: theme.green, glow: theme.greenGlow, icon: 'check-circle', label: v => `Vence: ${v}` },
   unknown: { color: '#888', glow: 'transparent', icon: 'clock', label: () => 'Sem data' },
 });
+
 const FILTERS = [
   { key: 'all', label: 'Todos', icon: 'list', colorKey: 'blue' },
   { key: 'ok', label: 'Seguros', icon: 'check-circle', colorKey: 'green' },
@@ -703,7 +921,6 @@ const FILTERS = [
   { key: 'expired', label: 'Vencidos', icon: 'alert-circle', colorKey: 'red' },
 ];
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
 const shlabel = k => SHELF_LABEL[k] || k || '—';
 const normShelf = raw => { if (!raw) return ''; const s = String(raw).trim().toLowerCase(); return SHELF_ALIAS[s] || (SHELF_KEYS.includes(s) ? s : ''); };
 const extractShelf = f => { if (!f) return ''; if (Array.isArray(f)) { const x = f[0]; return normShelf(typeof x === 'object' ? (x?.value || '') : String(x)); } return normShelf(String(f)); };
@@ -713,40 +930,15 @@ const isDeposito = p => p === 'Deposito' || p === 'Depósito';
 const isRepositor = p => p === 'Repositor';
 const canSwitch = p => isCoord(p) || isDeposito(p);
 const getInitials = (name = '') => { const parts = String(name).trim().split(/\s+/).filter(Boolean); if (!parts.length) return 'GE'; if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase(); return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase(); };
-const shelfPalette = (T, key) => ({
-  bebida: { accent: T.blue, glow: T.blueGlow, icon: 'droplet', emoji: '🥤' },
-  macarrao: { accent: T.amber, glow: T.amberGlow, icon: 'disc', emoji: '🍝' },
-  pesado: { accent: T.orange, glow: T.orangeGlow, icon: 'package', emoji: '📦' },
-  frios: { accent: T.teal, glow: T.tealGlow, icon: 'cloud-snow', emoji: '❄️' },
-  biscoito: { accent: T.purple, glow: T.purpleGlow, icon: 'coffee', emoji: '🍪' },
-}[key] || { accent: T.blue, glow: T.blueGlow, icon: 'grid', emoji: '🗂️' });
-const rolePal = (T, p) => { if (isCoord(p)) return { bg: T.amberGlow, fg: T.amber, icon: 'shield' }; if (isDeposito(p)) return { bg: T.orangeGlow, fg: T.orange, icon: 'archive' }; return { bg: T.blueGlow, fg: T.blue, icon: 'user' }; };
+const shelfPalette = (theme, key) => ({
+  bebida: { accent: theme.blue, glow: theme.blueGlow, icon: 'droplet', emoji: '🥤' },
+  macarrao: { accent: theme.amber, glow: theme.amberGlow, icon: 'disc', emoji: '🍝' },
+  pesado: { accent: theme.orange, glow: theme.orangeGlow, icon: 'package', emoji: '📦' },
+  frios: { accent: theme.teal, glow: theme.tealGlow, icon: 'cloud-snow', emoji: '❄️' },
+  biscoito: { accent: theme.purple, glow: theme.purpleGlow, icon: 'coffee', emoji: '🍪' },
+}[key] || { accent: theme.blue, glow: theme.blueGlow, icon: 'grid', emoji: '🗂️' });
+const rolePal = (theme, p) => { if (isCoord(p)) return { bg: theme.amberGlow, fg: theme.amber, icon: 'shield' }; if (isDeposito(p)) return { bg: theme.orangeGlow, fg: theme.orange, icon: 'archive' }; return { bg: theme.blueGlow, fg: theme.blue, icon: 'user' }; };
 
-const callIA = async (prompt, retries = 2) => {
-  if (!RT_API_KEY_IA) throw new Error('API key não carregada');
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const tid = setTimeout(() => controller.abort(), 22000);
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IA}:generateContent?key=${RT_API_KEY_IA}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }), signal: controller.signal }
-      );
-      clearTimeout(tid);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
-      const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      if (!txt && attempt < retries) { await new Promise(res => setTimeout(res, 1500)); continue; }
-      return txt;
-    } catch (e) {
-      if (attempt === retries) throw e;
-      await new Promise(res => setTimeout(res, 1500 * (attempt + 1)));
-    }
-  }
-  return '';
-};
-
-// ─── ANIMATED NUMBER HOOK ───────────────────────────────────────────────────
 const useCountUp = (target, ms = 380) => {
   const [val, setVal] = useState(target);
   const from = useRef(target); const raf = useRef();
@@ -768,20 +960,14 @@ const useCountUp = (target, ms = 380) => {
   return val;
 };
 
-// ─── AUTO-CLEAN TOAST ───────────────────────────────────────────────────────
-const TOAST_DURATION = 4000;
 const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
   const slideA = useRef(new Animated.Value(-220)).current;
   const opacA = useRef(new Animated.Value(0)).current;
   const scaleA = useRef(new Animated.Value(0.88)).current;
   const trashA = useRef(new Animated.Value(0)).current;
-  const progressAnim = useRef(new Animated.Value(1)).current;
   const [modalVis, setModalVis] = useState(false);
-  const [countdown, setCountdown] = useState(Math.ceil(TOAST_DURATION / 1000));
   const dismissedRef = useRef(false);
-  const intervalRef = useRef(null);
   const deletedCount = data.deleted?.length ?? 0;
-  const shouldAutoDismiss = !data.cleaning && deletedCount === 0;
 
   useEffect(() => {
     Animated.parallel([
@@ -789,29 +975,16 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
       Animated.timing(opacA, { toValue: 1, duration: 280, useNativeDriver: false }),
       Animated.spring(scaleA, { toValue: 1, tension: 90, friction: 10, useNativeDriver: false }),
     ]).start();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [slideA, opacA, scaleA]);
 
-  useEffect(() => {
-    if (!shouldAutoDismiss) { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } return; }
-    dismissedRef.current = false; progressAnim.setValue(1); setCountdown(Math.ceil(TOAST_DURATION / 1000));
-    Animated.timing(progressAnim, { toValue: 0, duration: TOAST_DURATION, easing: Easing.linear, useNativeDriver: false }).start(({ finished }) => { if (finished && !dismissedRef.current) dismiss(); });
-    intervalRef.current = setInterval(() => {
-      setCountdown(prev => { const next = prev - 1; if (next <= 0) { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } return 0; } return next; });
-    }, 1000);
-    return () => { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } progressAnim.stopAnimation(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldAutoDismiss]);
-
-  const dismiss = () => {
-    if (dismissedRef.current) return; dismissedRef.current = true;
-    if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-    progressAnim.stopAnimation();
+  const dismiss = useCallback(() => {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
     Animated.parallel([
       Animated.timing(slideA, { toValue: -250, duration: 260, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
       Animated.timing(opacA, { toValue: 0, duration: 220, useNativeDriver: false }),
     ]).start(() => onClose());
-  };
+  }, [slideA, opacA, onClose]);
 
   const trashRot = trashA.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-15deg', '0deg', '15deg'] });
 
@@ -825,16 +998,25 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
   }
 
   if (deletedCount === 0) {
-    const barWidthInterp = progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
     return (
-      <Animated.View style={{ position: 'absolute', top: 60 + (Platform.OS === 'android' ? 20 : 44), left: 16, right: 16, backgroundColor: T.bgCard, borderRadius: 20, padding: 16, borderWidth: 1.5, borderColor: T.green + '50', flexDirection: 'column', gap: 12, transform: [{ translateY: slideA }, { scale: scaleA }], opacity: opacA, shadowColor: T.green, shadowOpacity: 0.25, shadowRadius: 14, elevation: 12, zIndex: 9998 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.greenGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.green + '50' }}><Feather name="check-circle" size={22} color={T.green} /></View>
-          <View style={{ flex: 1 }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green, textTransform: 'uppercase', letterSpacing: 0.8 }}>Estoque limpo ✓</Text><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 1 }}>Nenhum produto vencido há +30 dias.</Text></View>
-          <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: T.greenGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.green + '40' }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green }}>{countdown}</Text></View>
+      <Animated.View style={{ position: 'absolute', top: 60 + (Platform.OS === 'android' ? 20 : 44), left: 16, right: 16, backgroundColor: T.bgCard, borderRadius: 20, padding: 16, borderWidth: 1.5, borderColor: T.green + '50', flexDirection: 'column', gap: 10, transform: [{ translateY: slideA }, { scale: scaleA }], opacity: opacA, shadowColor: T.green, shadowOpacity: 0.25, shadowRadius: 14, elevation: 12, zIndex: 9998 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: -4 }}>
+          <TouchableOpacity onPress={dismiss} style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}>
+            <Feather name="x" size={14} color={T.textMuted} />
+          </TouchableOpacity>
         </View>
-        <View style={{ height: 5, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}><Animated.View style={{ width: barWidthInterp, height: '100%', backgroundColor: T.green, borderRadius: 3 }} /></View>
-        <TouchableOpacity onPress={dismiss} style={{ position: 'absolute', top: -4, right: 8, padding: 8, backgroundColor: T.bgCard, borderRadius: 12, borderWidth: 1, borderColor: T.border, zIndex: 10 }}><Feather name="x" size={16} color={T.textMuted} /></TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.greenGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.green + '50' }}>
+            <Feather name="check-circle" size={22} color={T.green} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green, textTransform: 'uppercase', letterSpacing: 0.8 }}>Estoque limpo ✓</Text>
+            <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 1 }}>Nenhum produto vencido há +30 dias.</Text>
+          </View>
+          <TouchableOpacity onPress={dismiss} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: T.greenGlow, borderWidth: 1, borderColor: T.green + '40' }}>
+            <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green }}>Fechar</Text>
+          </TouchableOpacity>
+        </View>
       </Animated.View>
     );
   }
@@ -846,10 +1028,7 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
           <Animated.View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.red + '50', transform: [{ rotate: trashRot }] }}><Feather name="trash-2" size={22} color={T.red} /></Animated.View>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.red, textTransform: 'uppercase', letterSpacing: 0.8 }}>Limpeza automática</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
-              <Text style={{ fontSize: 28 * fontScale, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{deletedCount}</Text>
-              <Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }}>produto{deletedCount !== 1 ? 's' : ''} removido{deletedCount !== 1 ? 's' : ''}</Text>
-            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 2 }}><Text style={{ fontSize: 28 * fontScale, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{deletedCount}</Text><Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }}>produto{deletedCount !== 1 ? 's' : ''} removido{deletedCount !== 1 ? 's' : ''}</Text></View>
           </View>
           <View style={{ gap: 6, alignItems: 'flex-end' }}>
             <TouchableOpacity onPress={dismiss} style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}><Feather name="x" size={14} color={T.textMuted} /></TouchableOpacity>
@@ -882,10 +1061,7 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
               ))}
             </ScrollView>
             <View style={{ padding: 16, borderTopWidth: 1, borderColor: T.border }}>
-              <TouchableOpacity onPress={() => { setModalVis(false); dismiss(); }} style={{ height: 50, borderRadius: 14, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8 }}>
-                <Feather name="check" size={17} color="#FFF" />
-                <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: '#FFF' }}>Entendido</Text>
-              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setModalVis(false); dismiss(); }} style={{ height: 50, borderRadius: 14, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8 }}><Feather name="check" size={17} color="#FFF" /><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: '#FFF' }}>Entendido</Text></TouchableOpacity>
             </View>
           </View>
         </View>
@@ -894,14 +1070,12 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
   );
 };
 
-// ─── SUCCESS OVERLAY ────────────────────────────────────────────────────────
 const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
   const scale = useRef(new Animated.Value(0)).current;
   const rotate = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const ringScale = useRef(new Animated.Value(0.5)).current;
   const timeoutRef = useRef(null);
-
   useEffect(() => {
     if (visible) {
       scale.setValue(0); rotate.setValue(0); opacity.setValue(0); ringScale.setValue(0.5);
@@ -919,20 +1093,16 @@ const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
       timeoutRef.current = setTimeout(() => { loop.stop(); onClose(); }, 2500);
     } else { if (timeoutRef.current) clearTimeout(timeoutRef.current); }
     return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
-  }, [visible, onClose]);
-
+  }, [visible, onClose, scale, rotate, opacity, ringScale]);
   const rotateInterp = rotate.interpolate({ inputRange: [-1, 0, 1], outputRange: ['-12deg', '0deg', '12deg'] });
   if (!visible) return null;
-
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
       <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.88)', opacity }]} />
       <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center' }]}>
         <Animated.View style={{ transform: [{ scale: ringScale }] }}>
           <View style={{ width: 140, height: 140, borderRadius: 70, backgroundColor: T.green + '20', justifyContent: 'center', alignItems: 'center' }}>
-            <Animated.View style={{ width: 110, height: 110, borderRadius: 55, backgroundColor: T.green, justifyContent: 'center', alignItems: 'center', transform: [{ scale }, { rotate: rotateInterp }], shadowColor: T.green, shadowOpacity: 0.7, shadowRadius: 20, elevation: 12 }}>
-              <Feather name="check" size={60} color="#FFF" />
-            </Animated.View>
+            <Animated.View style={{ width: 110, height: 110, borderRadius: 55, backgroundColor: T.green, justifyContent: 'center', alignItems: 'center', transform: [{ scale }, { rotate: rotateInterp }], shadowColor: T.green, shadowOpacity: 0.7, shadowRadius: 20, elevation: 12 }}><Feather name="check" size={60} color="#FFF" /></Animated.View>
           </View>
         </Animated.View>
         <Animated.Text style={{ marginTop: 32, fontSize: 28 * fontScale, fontWeight: '900', color: '#FFF', textAlign: 'center', opacity, transform: [{ scale }] }}>Cadastro Concluído!</Animated.Text>
@@ -942,9 +1112,7 @@ const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
   );
 };
 
-// ─── PRODUCT DETAIL MODAL - CORRIGIDO (hooks no topo, tratamento seguro para product nulo) ──
-const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
-  // TODOS OS HOOKS DEVEM FICAR AQUI, NO TOPO DO COMPONENTE
+const ProductDetailModalContent = ({ product, visible, onClose, onDelete, T, fontScale, fifoMode, allProducts }) => {
   const slideA = useRef(new Animated.Value(WIN.height)).current;
   const opacA = useRef(new Animated.Value(0)).current;
   const headerA = useRef(new Animated.Value(0)).current;
@@ -959,25 +1127,29 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
 
   const GIRO = useMemo(() => makeGiro(T), [T]);
   const VENC = useMemo(() => makeVENC(T), [T]);
-  
-  // Métricas seguras: se product for nulo, usamos objeto vazio
-  const safeProduct = product || {};
-  const metrics = useMemo(() => buildDepletionMetrics(safeProduct), [safeProduct]);
-  const g = GIRO[safeProduct?.MARGEM] || { color: T.textSub, glow: T.bgInput, icon: 'minus', short: '—', rate: 2.5 };
-  const vs = vencStatus(safeProduct?.VENCIMENTO);
+  const metrics = useMemo(() => {
+    if (fifoMode && allProducts && product?.codig) {
+      const groups = groupProductsByEAN(allProducts);
+      const lotes = groups.get(product.codig);
+      if (lotes && lotes.length > 0) {
+        return buildDepletionMetrics(lotes[0], true, allProducts, product.codig);
+      }
+    }
+    return buildDepletionMetrics(product, false);
+  }, [product, fifoMode, allProducts]);
+  const g = GIRO[metrics.giro] || { color: T.textSub, glow: T.bgInput, icon: 'minus', short: '—', rate: 2.5 };
+  const vs = vencStatus(product?.VENCIMENTO);
   const vc = VENC[vs.status];
   const animRem = useCountUp(metrics.remainingQty, 900);
   const animSold = useCountUp(metrics.soldEstimate, 700);
   const animPct = useCountUp(metrics.remainingPct, 800);
   const stockColor = metrics.remainingPct <= 0 ? T.red : metrics.remainingPct <= 15 ? T.red : metrics.remainingPct <= 35 ? T.amber : T.green;
   
-  // Efeito para animações de entrada/saída
   useEffect(() => {
     if (visible) {
       slideA.setValue(WIN.height); opacA.setValue(0); headerA.setValue(0); 
       card1A.setValue(40); card2A.setValue(60); card3A.setValue(80); card4A.setValue(100); 
       barA.setValue(0); soldBarA.setValue(0);
-      
       Animated.parallel([
         Animated.spring(slideA, { toValue: 0, tension: 52, friction: 11, useNativeDriver: false }),
         Animated.timing(opacA, { toValue: 1, duration: 300, useNativeDriver: false }),
@@ -989,13 +1161,11 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
           Animated.spring(card3A, { toValue: 0, tension: 90, friction: 11, useNativeDriver: false }),
           Animated.spring(card4A, { toValue: 0, tension: 90, friction: 11, useNativeDriver: false }),
         ]).start();
-        
         setTimeout(() => {
           Animated.timing(barA, { toValue: metrics.remainingPct, duration: 1200, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
           Animated.timing(soldBarA, { toValue: metrics.salesPct, duration: 1400, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
         }, 350);
       });
-      
       if (metrics.remainingPct <= 15) {
         const loop = Animated.loop(Animated.sequence([
           Animated.timing(pulseA, { toValue: 1.03, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
@@ -1005,32 +1175,20 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
           Animated.timing(glowA, { toValue: 1, duration: 800, useNativeDriver: false }),
           Animated.timing(glowA, { toValue: 0, duration: 800, useNativeDriver: false }),
         ]));
-        loop.start(); 
-        glowLoop.start();
+        loop.start(); glowLoop.start();
         return () => { loop.stop(); glowLoop.stop(); };
-      } else { 
-        pulseA.setValue(1); 
-        glowA.setValue(0); 
-      }
+      } else { pulseA.setValue(1); glowA.setValue(0); }
     } else {
       Animated.parallel([
         Animated.timing(slideA, { toValue: WIN.height, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
         Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: false }),
       ]).start();
     }
-  }, [visible, metrics.remainingPct, WIN.height]);
+  }, [visible, metrics.remainingPct, metrics.salesPct, slideA, opacA, headerA, card1A, card2A, card3A, card4A, barA, soldBarA, pulseA, glowA]);
 
-  // Calcular valores derivados que serão usados em hooks e no render
-  const statusLabel = metrics.remainingPct <= 0 ? '💀 RUPTURA' : metrics.remainingPct <= 15 ? '🚨 CRÍTICO' : metrics.remainingPct <= 35 ? '⚠️ ATENÇÃO' : '✅ SEGURO';
-  const statusBg = metrics.remainingPct <= 0 ? T.redGlow : metrics.remainingPct <= 15 ? T.redGlow : metrics.remainingPct <= 35 ? T.amberGlow : T.greenGlow;
-  const sendDate = parseDate(safeProduct?.DATAENVIO);
-  const sendDateLabel = sendDate ? fmtFull(sendDate) : '—';
-
-  // useMemo DEVE ficar ANTES de qualquer return condicional
   const obs = useMemo(() => {
-    if (!product) return [];
     const list = [];
-    if (metrics.elapsedDays > 0) list.push(`📦 Lote no estoque há ${metrics.elapsedDays} dia${metrics.elapsedDays !== 1 ? 's' : ''} (desde ${sendDateLabel}).`);
+    if (metrics.elapsedDays > 0) list.push(`📦 Lote no estoque há ${metrics.elapsedDays} dia${metrics.elapsedDays !== 1 ? 's' : ''} (desde ${product?.DATAENVIO ? fmtFull(parseDate(product.DATAENVIO)) : '\u2014'}).`);
     if (metrics.soldEstimate > 0) list.push(`📉 Estimativa: ~${metrics.soldEstimate} unidade${metrics.soldEstimate !== 1 ? 's' : ''} vendida${metrics.soldEstimate !== 1 ? 's' : ''} desde a entrada.`);
     if (metrics.remainingQty <= 0) list.push(`⛔ Ruptura total estimada! Solicite reposição urgente.`);
     else if (metrics.remainingPct <= 15) list.push(`🔴 Estoque crítico — apenas ${metrics.remainingQty} unidades restantes. Solicitar reposição!`);
@@ -1040,12 +1198,14 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
     else if (vs.status === 'warning') list.push(`⚡ Validade em ${vs.days} dia${vs.days !== 1 ? 's' : ''} — priorize a venda.`);
     if (metrics.dailyRate >= 5) list.push(`⚡ Alta rotatividade — monitore o estoque diariamente.`);
     else if (metrics.dailyRate <= 1) list.push(`🐢 Baixa rotatividade — atenção ao prazo de validade.`);
+    if (fifoMode && metrics.lotes && metrics.lotes.length > 1) {
+      list.push(`📦 Modo FIFO ativo: ${metrics.lotes.length} lotes do mesmo produto. Consumo pelo mais antigo primeiro.`);
+    }
     return list;
-  }, [product, metrics, vs, sendDateLabel]);
+  }, [metrics, vs, product, fifoMode]);
 
-  // Se não houver produto, retorna null (após todos os hooks)
-  if (!product) return null;
-
+  const sendDate = parseDate(product?.DATAENVIO);
+  const sendDateLabel = sendDate ? fmtFull(sendDate) : '—';
   const barWidth = barA.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
   const soldBarWidth = soldBarA.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
 
@@ -1053,95 +1213,46 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', opacity: opacA }}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <Animated.View style={{ 
-          position: 'absolute', bottom: 0, left: 0, right: 0, 
-          backgroundColor: T.bgCard, borderTopLeftRadius: 36, borderTopRightRadius: 36, 
-          paddingBottom: 32 + NAV_BAR_H, borderTopWidth: 2, borderColor: stockColor + '60', 
-          maxHeight: WIN.height * 0.94, transform: [{ translateY: slideA }], 
-          shadowColor: '#000', shadowOffset: { width: 0, height: -16 }, 
-          shadowOpacity: 0.55, shadowRadius: 36, elevation: 32 
-        }}>
-          <View style={{ alignItems: 'center', paddingTop: 14, paddingBottom: 4 }}>
-            <Animated.View style={{ width: 50, height: 5, backgroundColor: stockColor, borderRadius: 3, opacity: glowA.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }} />
-          </View>
+        <Animated.View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: T.bgCard, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingBottom: 32 + NAV_BAR_H, borderTopWidth: 2, borderColor: stockColor + '60', maxHeight: WIN.height * 0.94, transform: [{ translateY: slideA }], shadowColor: '#000', shadowOffset: { width: 0, height: -16 }, shadowOpacity: 0.55, shadowRadius: 36, elevation: 32 }}>
+          <View style={{ alignItems: 'center', paddingTop: 14, paddingBottom: 4 }}><Animated.View style={{ width: 50, height: 5, backgroundColor: stockColor, borderRadius: 3, opacity: glowA.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }} /></View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 16 }}>
             <Animated.View style={{ opacity: headerA, transform: [{ translateY: headerA.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }], marginBottom: 20 }}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', gap: 7, marginBottom: 10, flexWrap: 'wrap' }}>
-                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: statusBg, borderWidth: 1.5, borderColor: stockColor + '50' }}>
-                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: 0.5 }}>{statusLabel}</Text>
-                    </View>
-                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: g.glow, borderWidth: 1, borderColor: g.color + '40' }}>
-                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{product.MARGEM || 'Médio giro'}</Text>
-                    </View>
-                    {vs.status !== 'unknown' && (
-                      <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: vc.glow, borderWidth: 1, borderColor: vc.color + '40' }}>
-                        <Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: vc.color }}>
-                          {vs.status === 'expired' ? `Vencido ${Math.abs(vs.days)}d` : vs.status === 'warning' ? `Vence ${vs.days}d` : 'Válido'}
-                        </Text>
-                      </View>
-                    )}
+                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: metrics.remainingPct <= 0 ? T.redGlow : metrics.remainingPct <= 15 ? T.redGlow : metrics.remainingPct <= 35 ? T.amberGlow : T.greenGlow, borderWidth: 1.5, borderColor: stockColor + '50' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: 0.5 }}>{metrics.remainingPct <= 0 ? '💀 RUPTURA' : metrics.remainingPct <= 15 ? '🚨 CRÍTICO' : metrics.remainingPct <= 35 ? '⚠️ ATENÇÃO' : '✅ SEGURO'}</Text></View>
+                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: g.glow, borderWidth: 1, borderColor: g.color + '40' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{metrics.giro}</Text></View>
+                    {vs.status !== 'unknown' && (<View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: vc.glow, borderWidth: 1, borderColor: vc.color + '40' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: vc.color }}>{vs.status === 'expired' ? `Vencido ${Math.abs(vs.days)}d` : vs.status === 'warning' ? `Vence ${vs.days}d` : 'Válido'}</Text></View>)}
                   </View>
-                  <Text style={{ fontSize: 22 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5, lineHeight: 28 * fontScale }} numberOfLines={3}>
-                    {product.produto || 'Produto sem nome'}
-                  </Text>
-                  {sendDate && (
-                    <Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 6 }}>
-                      📅 Entrada: {sendDateLabel} · {metrics.elapsedDays}d em estoque
-                    </Text>
-                  )}
+                  <Text style={{ fontSize: 22 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5, lineHeight: 28 * fontScale }} numberOfLines={3}>{product.produto || 'Produto sem nome'}</Text>
+                  {sendDate && (<Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 6 }}>📅 Entrada: {sendDateLabel} · {metrics.elapsedDays}d em estoque</Text>)}
+                  {product.PREVISAO && (<Text style={{ fontSize: 11 * fontScale, color: T.purple, fontWeight: '700', marginTop: 4 }}>📉 Previsão de ruptura: {product.PREVISAO}</Text>)}
+                  {fifoMode && metrics.lotes && metrics.lotes.length > 1 && (<Text style={{ fontSize: 11 * fontScale, color: T.blue, fontWeight: '800', marginTop: 4 }}>📦 {metrics.lotes.length} lotes agrupados (FIFO)</Text>)}
                 </View>
-                <TouchableOpacity onPress={onClose} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }}>
-                  <Feather name="x" size={18} color={T.textSub} />
-                </TouchableOpacity>
+                <TouchableOpacity onPress={onClose} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }}><Feather name="x" size={18} color={T.textSub} /></TouchableOpacity>
               </View>
             </Animated.View>
 
             <Animated.View style={{ transform: [{ translateY: card1A }], marginBottom: 14 }}>
-              <Animated.View style={{ 
-                backgroundColor: T.bgElevated, borderRadius: 28, padding: 22, 
-                borderWidth: 2, borderColor: stockColor + '50', shadowColor: stockColor, 
-                shadowOpacity: 0.25, shadowRadius: 20, elevation: 10, transform: [{ scale: pulseA }] 
-              }}>
+              <Animated.View style={{ backgroundColor: T.bgElevated, borderRadius: 28, padding: 22, borderWidth: 2, borderColor: stockColor + '50', shadowColor: stockColor, shadowOpacity: 0.25, shadowRadius: 20, elevation: 10, transform: [{ scale: pulseA }] }}>
                 <Animated.View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 28, backgroundColor: stockColor, opacity: glowA.interpolate({ inputRange: [0, 1], outputRange: [0, 0.04] }) }} />
-                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: stockColor, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 16 }}>
-                  Estoque Atual Estimado
-                </Text>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: stockColor, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 16 }}>Estoque Total Estimado</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginBottom: 18 }}>
-                  <Text style={{ fontSize: 72 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: -3, lineHeight: 72 * fontScale }}>
-                    {animRem}
-                  </Text>
-                  <View style={{ paddingBottom: 10 }}>
-                    <Text style={{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }}>un</Text>
-                    <Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted }}>restantes</Text>
-                  </View>
-                  <View style={{ flex: 1, alignItems: 'flex-end', paddingBottom: 8 }}>
-                    <Text style={{ fontSize: 36 * fontScale, fontWeight: '900', color: stockColor, opacity: 0.7 }}>{animPct}%</Text>
-                    <Text style={{ fontSize: 10 * fontScale, color: T.textMuted, fontWeight: '700' }}>do lote original</Text>
-                  </View>
+                  <Text style={{ fontSize: 72 * fontScale, fontWeight: '900', color: stockColor, letterSpacing: -3, lineHeight: 72 * fontScale }}>{animRem}</Text>
+                  <View style={{ paddingBottom: 10 }}><Text style={{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }}>un</Text><Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted }}>restantes</Text></View>
+                  <View style={{ flex: 1, alignItems: 'flex-end', paddingBottom: 8 }}><Text style={{ fontSize: 36 * fontScale, fontWeight: '900', color: stockColor, opacity: 0.7 }}>{animPct}%</Text><Text style={{ fontSize: 10 * fontScale, color: T.textMuted, fontWeight: '700' }}>do total</Text></View>
                 </View>
                 <View style={{ marginBottom: 6 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Restante</Text>
-                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor }}>{animPct}%</Text>
-                  </View>
-                  <View style={{ height: 12, backgroundColor: T.bgInput, borderRadius: 6, overflow: 'hidden' }}>
-                    <Animated.View style={{ height: '100%', borderRadius: 6, width: barWidth, backgroundColor: stockColor }} />
-                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Restante</Text><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: stockColor }}>{animPct}%</Text></View>
+                  <View style={{ height: 12, backgroundColor: T.bgInput, borderRadius: 6, overflow: 'hidden' }}><Animated.View style={{ height: '100%', borderRadius: 6, width: barWidth, backgroundColor: stockColor }} /></View>
                 </View>
                 <View style={{ marginTop: 10 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimativa vendida</Text>
-                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{animSold} un</Text>
-                  </View>
-                  <View style={{ height: 8, backgroundColor: T.bgInput, borderRadius: 4, overflow: 'hidden' }}>
-                    <Animated.View style={{ height: '100%', borderRadius: 4, width: soldBarWidth, backgroundColor: g.color + '80' }} />
-                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Estimativa vendida</Text><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: g.color }}>{animSold} un</Text></View>
+                  <View style={{ height: 8, backgroundColor: T.bgInput, borderRadius: 4, overflow: 'hidden' }}><Animated.View style={{ height: '100%', borderRadius: 4, width: soldBarWidth, backgroundColor: g.color + '80' }} /></View>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
                   {[
-                    { label: 'Entrada', val: `${metrics.qty} un`, icon: 'package', c: T.blue }, 
+                    { label: 'Total entradas', val: `${metrics.initialEstimate} un`, icon: 'package', c: T.blue }, 
                     { label: 'Vendidas ~', val: `${animSold} un`, icon: 'trending-down', c: g.color }, 
                     { label: 'Saída/dia', val: `~${metrics.dailyRate.toFixed(1)}`, icon: 'zap', c: T.purple }
                   ].map(b => (
@@ -1155,30 +1266,54 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
               </Animated.View>
             </Animated.View>
 
-            <Animated.View style={{ transform: [{ translateY: card2A }], marginBottom: 14 }}>
+            {fifoMode && metrics.lotes && metrics.lotes.length > 1 && (
+              <Animated.View style={{ transform: [{ translateY: card2A }], marginBottom: 14 }}>
+                <View style={{ backgroundColor: T.bgCard, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: T.border }}>
+                  <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>Detalhamento dos Lotes (FIFO)</Text>
+                  {metrics.lotes.map((lote, idx) => {
+                    const qty = qtyToNumber(lote.quantidade);
+                    const remaining = lote.remainingQty !== undefined ? lote.remainingQty : Math.max(0, qty - Math.max(0, diffDays(today(), parseDate(lote.DATAENVIO) || today()) * metrics.dailyRate));
+                    const vsLote = vencStatus(lote.VENCIMENTO);
+                    const vcLote = VENC[vsLote.status];
+                    return (
+                      <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: idx > 0 ? 1 : 0, borderColor: T.border }}>
+                        <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: remaining > 0 ? T.blueGlow : T.redGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: remaining > 0 ? T.blue : T.red }}>
+                          <Text style={{ fontSize: 12, fontWeight: '900', color: remaining > 0 ? T.blue : T.red }}>{idx + 1}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 12 * fontScale, fontWeight: '800', color: T.text }} numberOfLines={1}>{lote.produto}</Text>
+                          <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                            <Text style={{ fontSize: 10 * fontScale, color: T.textSub, fontWeight: '700' }}>Estoque: {Math.max(0, remaining)} un</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Feather name={vcLote.icon} size={10} color={vcLote.color} />
+                              <Text style={{ fontSize: 10 * fontScale, fontWeight: '700', color: vcLote.color }}>{lote.VENCIMENTO || '—'}</Text>
+                            </View>
+                          </View>
+                        </View>
+                        <Feather name={remaining > 0 ? "check-circle" : "x-circle"} size={16} color={remaining > 0 ? T.green : T.red} />
+                      </View>
+                    );
+                  })}
+                </View>
+              </Animated.View>
+            )}
+
+            <Animated.View style={{ transform: [{ translateY: card3A }], marginBottom: 14 }}>
               <View style={{ backgroundColor: T.bgCard, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: T.border }}>
-                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>
-                  Linha do Tempo
-                </Text>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 }}>Linha do Tempo (Ruptura Estimada)</Text>
                 <View style={{ flexDirection: 'row', gap: 12 }}>
                   <View style={{ alignItems: 'center', width: 32 }}>
-                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}>
-                      <Feather name="log-in" size={14} color={T.blue} />
-                    </View>
+                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="log-in" size={14} color={T.blue} /></View>
                     <View style={{ width: 2, flex: 1, backgroundColor: T.border, marginVertical: 4 }} />
-                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}>
-                      <Text style={{ fontSize: 8 }}>📍</Text>
-                    </View>
+                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 8 }}>📍</Text></View>
                     <View style={{ width: 2, flex: 1, backgroundColor: T.border, marginVertical: 4 }} />
-                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: stockColor + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: stockColor + '40' }}>
-                      <Feather name="alert-circle" size={14} color={stockColor} />
-                    </View>
+                    <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: stockColor + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: stockColor + '40' }}><Feather name="alert-circle" size={14} color={stockColor} /></View>
                   </View>
                   <View style={{ flex: 1, justifyContent: 'space-between' }}>
                     <View style={{ marginBottom: 18 }}>
-                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase' }}>Entrada</Text>
+                      <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase' }}>Primeiro Lote</Text>
                       <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text, marginTop: 2 }}>{sendDateLabel}</Text>
-                      <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>{metrics.qty} unidades cadastradas</Text>
+                      <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 1 }}>{metrics.initialEstimate} unidades cadastradas</Text>
                     </View>
                     <View style={{ marginBottom: 18 }}>
                       <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase' }}>Hoje</Text>
@@ -1196,16 +1331,12 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
             </Animated.View>
 
             {product.VENCIMENTO?.trim() && (
-              <Animated.View style={{ transform: [{ translateY: card3A }], marginBottom: 14 }}>
+              <Animated.View style={{ transform: [{ translateY: card4A }], marginBottom: 14 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: vc.glow, borderRadius: 18, padding: 16, borderWidth: 1.5, borderColor: vc.color + '50' }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: vc.color + '25', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: vc.color + '50' }}>
-                    <Feather name={vc.icon} size={22} color={vc.color} />
-                  </View>
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: vc.color + '25', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: vc.color + '50' }}><Feather name={vc.icon} size={22} color={vc.color} /></View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: vc.color, textTransform: 'uppercase', letterSpacing: 0.8 }}>Validade do Produto</Text>
-                    <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: vc.color, marginTop: 3 }}>
-                      {vs.status === 'expired' ? vc.label(vs.days) : vs.status === 'warning' ? vc.label(vs.days) : vc.label(product.VENCIMENTO)}
-                    </Text>
+                    <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: vc.color, textTransform: 'uppercase', letterSpacing: 0.8 }}>Validade do Lote Mais Antigo</Text>
+                    <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: vc.color, marginTop: 3 }}>{vs.status === 'expired' ? vc.label(vs.days) : vs.status === 'warning' ? vc.label(vs.days) : vc.label(product.VENCIMENTO)}</Text>
                     <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 2, fontWeight: '700' }}>Data: {product.VENCIMENTO}</Text>
                   </View>
                 </View>
@@ -1215,24 +1346,15 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
             <Animated.View style={{ transform: [{ translateY: card4A }], marginBottom: 20 }}>
               <View style={{ backgroundColor: T.bgElevated, borderRadius: 22, padding: 18, borderWidth: 1, borderColor: T.border }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                  <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}>
-                    <MaterialCommunityIcons name="robot-outline" size={16} color={T.blue} />
-                  </View>
+                  <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><MaterialCommunityIcons name="robot-outline" size={16} color={T.blue} /></View>
                   <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Observações GEI.AI</Text>
                 </View>
-                {obs.map((o, i) => (
-                  <View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 10, borderTopWidth: i > 0 ? 1 : 0, borderColor: T.border }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: T.blue, marginTop: 6, flexShrink: 0 }} />
-                    <Text style={{ flex: 1, fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', lineHeight: 19 * fontScale }}>{o}</Text>
-                  </View>
-                ))}
+                {obs.map((o, i) => (<View key={i} style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingVertical: 10, borderTopWidth: i > 0 ? 1 : 0, borderColor: T.border }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: T.blue, marginTop: 6, flexShrink: 0 }} /><Text style={{ flex: 1, fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', lineHeight: 19 * fontScale }}>{o}</Text></View>))}
               </View>
             </Animated.View>
 
-            <TouchableOpacity onPress={onClose} style={{ height: 52, borderRadius: 16, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 12, elevation: 6 }}>
-              <Feather name="check" size={18} color="#FFF" />
-              <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: '#FFF' }}>Fechar</Text>
-            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { if (onDelete && product) { Alert.alert('Apagar Produto', `Deseja apagar "${product.produto || 'este produto'}" permanentemente da prateleira?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Apagar', style: 'destructive', onPress: () => { onClose(); onDelete(product); } }]); } }} style={{ height: 52, borderRadius: 16, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8, borderWidth: 1.5, borderColor: T.red + '50', marginBottom: 10 }}><Feather name="trash-2" size={18} color={T.red} /><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.red }}>Apagar Produto</Text></TouchableOpacity>
+            <TouchableOpacity onPress={onClose} style={{ height: 52, borderRadius: 16, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 12, elevation: 6 }}><Feather name="check" size={18} color="#FFF" /><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: '#FFF' }}>Fechar</Text></TouchableOpacity>
           </ScrollView>
         </Animated.View>
       </Animated.View>
@@ -1240,52 +1362,74 @@ const ProductDetailModal = ({ product, visible, onClose, T, fontScale }) => {
   );
 };
 
-// ─── COMPONENTES BASE ────────────────────────────────────────────────────────
-const PrimaryBtn = ({ label, icon, onPress, color, outline, style, fontScale = 1, disabled = false }) => (
-  <TouchableOpacity activeOpacity={disabled ? 1 : 0.85} onPress={onPress} disabled={disabled} style={[styles.btn, { backgroundColor: outline ? 'transparent' : color, borderWidth: outline ? 1.5 : 0, borderColor: color, opacity: disabled ? 0.5 : 1 }, style]}>
-    {icon && <Feather name={icon} size={18} color={outline ? color : '#FFF'} style={{ marginRight: 10 }} />}
-    <Text style={[styles.btnTxt, { color: outline ? color : '#FFF', fontSize: 15 * fontScale }]}>{label}</Text>
-  </TouchableOpacity>
-);
-
-const ErrBanner = ({ msg, onClose }) => {
-  if (!msg) return null;
-  return (<View style={{ backgroundColor: '#DC2626', padding: 14, borderRadius: 14, marginHorizontal: 20, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10, elevation: 4 }}><Feather name="alert-circle" size={18} color="#FFF" /><Text style={{ color: '#FFF', fontWeight: '700', flex: 1, fontSize: 13 }}>{msg}</Text><TouchableOpacity onPress={onClose}><Feather name="x" size={18} color="#FFF" /></TouchableOpacity></View>);
+const ProductDetailModal = ({ product, visible, onClose, onDelete, T, fontScale, fifoMode, allProducts }) => {
+  if (!product) return null;
+  return (
+    <ProductDetailModalContent
+      product={product}
+      visible={visible}
+      onClose={onClose}
+      onDelete={onDelete}
+      T={T}
+      fontScale={fontScale}
+      fifoMode={fifoMode}
+      allProducts={allProducts}
+    />
+  );
 };
 
+const PrimaryBtn = ({ label, icon, onPress, color, outline, style, fontScale = 1, disabled = false }) => (
+  <TouchableOpacity activeOpacity={disabled ? 1 : 0.85} onPress={onPress} disabled={disabled} style={[styles.btn, { backgroundColor: outline ? 'transparent' : color, borderWidth: outline ? 1.5 : 0, borderColor: color, opacity: disabled ? 0.5 : 1 }, style]}>{icon && <Feather name={icon} size={18} color={outline ? color : '#FFF'} style={{ marginRight: 10 }} />}<Text style={[styles.btnTxt, { color: outline ? color : '#FFF', fontSize: 15 * fontScale }]}>{label}</Text></TouchableOpacity>
+);
+const ErrBanner = ({ msg, onClose }) => { if (!msg) return null; return (<View style={{ backgroundColor: '#DC2626', padding: 14, borderRadius: 14, marginHorizontal: 20, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10, elevation: 4 }}><Feather name="alert-circle" size={18} color="#FFF" /><Text style={{ color: '#FFF', fontWeight: '700', flex: 1, fontSize: 13 }}>{msg}</Text><TouchableOpacity onPress={onClose}><Feather name="x" size={18} color="#FFF" /></TouchableOpacity></View>); };
 const ShelfQuickSelector = ({ current, onOpen, T, fontScale, title, subtitle }) => {
   const pal = shelfPalette(T, current);
-  return (<TouchableOpacity activeOpacity={0.9} onPress={onOpen} style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', gap: 16, shadowColor: T.textMuted, shadowOpacity: 0.04, elevation: 2 }}><View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: pal.glow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: pal.accent + '30' }}><Feather name={pal.icon} size={26} color={pal.accent} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: pal.accent, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>{title}</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>{shlabel(current)}</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 4, fontWeight: '600' }}>{subtitle}</Text></View><Feather name="chevron-right" size={20} color={T.textMuted} /></TouchableOpacity>);
+  const canOpen = typeof onOpen === 'function';
+  const Container = canOpen ? TouchableOpacity : View;
+  const containerProps = canOpen ? { activeOpacity: 0.9, onPress: onOpen } : {};
+  return (<Container {...containerProps} style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', gap: 16, shadowColor: T.textMuted, shadowOpacity: 0.04, elevation: 2, opacity: canOpen ? 1 : 0.85 }}><View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: pal.glow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: pal.accent + '30' }}><Feather name={pal.icon} size={26} color={pal.accent} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: pal.accent, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>{title}</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>{shlabel(current)}</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 4, fontWeight: '600' }}>{subtitle}</Text></View>{canOpen ? <Feather name="chevron-right" size={20} color={T.textMuted} /> : <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted }}>FIXO</Text></View>}</Container>);
 };
 
-const CardList = ({ item, T, fontScale, onPress }) => {
-  const GIRO = makeGiro(T); const VENC = makeVENC(T);
-  const scale = useRef(new Animated.Value(1)).current; const glow = useRef(new Animated.Value(0)).current;
-  const g = GIRO[item.MARGEM] || { color: T.textSub, glow: T.bgInput, icon: 'circle', short: '—', rate: 0 };
+const isProductRecent = (dataEnvio) => { if (!dataEnvio) return false; const date = parseDate(dataEnvio); if (!date) return false; return diffDays(today(), date) === 0; };
+const isProductLast3Days = (dataEnvio) => { if (!dataEnvio) return false; const date = parseDate(dataEnvio); if (!date) return false; const diff = diffDays(today(), date); return diff >= 1 && diff <= 3; };
+
+const CardList = ({ item, T, fontScale, onPress, fifoMode, allProducts }) => {
+  const GIRO = makeGiro(T);
+  const VENC = makeVENC(T);
+  const scale = useRef(new Animated.Value(1)).current;
+  const glow = useRef(new Animated.Value(0)).current;
+  const metrics = useMemo(() => {
+    if (fifoMode && allProducts && item?.codig) {
+      const groups = groupProductsByEAN(allProducts);
+      const lotes = groups.get(item.codig);
+      if (lotes && lotes.length > 0) {
+        return buildDepletionMetrics(lotes[0], true, allProducts, item.codig);
+      }
+    }
+    return buildDepletionMetrics(item, false);
+  }, [item, fifoMode, allProducts]);
+  const g = GIRO[metrics.giro] || { color: T.textSub, glow: T.bgInput, icon: 'circle', short: '—', rate: 0 };
   const vs = vencStatus(item.VENCIMENTO); const vc = VENC[vs.status];
-  const metrics = useMemo(() => buildDepletionMetrics(item), [item]);
-  const pi = () => Animated.parallel([Animated.spring(scale, { toValue: 0.975, tension: 200, friction: 10, useNativeDriver: false }), Animated.timing(glow, { toValue: 1, duration: 150, useNativeDriver: false })]).start();
+  const isNew = isProductRecent(item.DATAENVIO);
+  const isRecent = isProductLast3Days(item.DATAENVIO);
+  const pi = () => Animated.parallel([Animated.spring(scale, { toValue: 0.98, tension: 200, friction: 10, useNativeDriver: false }), Animated.timing(glow, { toValue: 1, duration: 150, useNativeDriver: false })]).start();
   const po = () => Animated.parallel([Animated.spring(scale, { toValue: 1, tension: 200, friction: 12, useNativeDriver: false }), Animated.timing(glow, { toValue: 0, duration: 200, useNativeDriver: false })]).start();
   return (
     <TouchableOpacity activeOpacity={0.98} onPress={() => onPress(item)} onPressIn={pi} onPressOut={po}>
-      <Animated.View style={{ backgroundColor: T.bgCard, borderRadius: 22, padding: 16, marginBottom: 12, borderWidth: 1.5, borderColor: glow.interpolate({ inputRange: [0, 1], outputRange: [T.border, g.color + '50'] }), transform: [{ scale }], shadowColor: T.textMuted, shadowOpacity: 0.03, elevation: 2 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 14 }}>
-          <View style={{ flex: 1, paddingRight: 90 }}>
-            <Text style={{ fontWeight: '900', fontSize: 15.5 * fontScale, color: T.text, lineHeight: 22 * fontScale }} numberOfLines={2}>{String(item.produto || '').trim() || 'Produto sem nome'}</Text>
-            <Text style={{ marginTop: 5, color: T.textSub, fontSize: 11 * fontScale, fontWeight: '700' }}>Toque para ver análise detalhada</Text>
-          </View>
-          <View style={{ position: 'absolute', top: 0, right: 0, backgroundColor: g.glow, borderWidth: 1, borderColor: g.color + '35', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 5 }}><Feather name={g.icon} size={11} color={g.color} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: g.color }}>{g.short}</Text></View>
+      <Animated.View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 18, marginBottom: 14, borderWidth: 1.5, borderColor: glow.interpolate({ inputRange: [0, 1], outputRange: [T.border, g.color + '60'] }), transform: [{ scale }], shadowColor: g.color, shadowOffset: { width: 0, height: 4 }, shadowOpacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.03, 0.15] }), shadowRadius: 12, elevation: 4 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+          <View style={{ flex: 1, marginRight: 8, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}><View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: vs.status === 'expired' ? T.red : vs.status === 'warning' ? T.amber : T.green, marginTop: 5, shadowColor: vs.status === 'expired' ? T.red : vs.status === 'warning' ? T.amber : T.green, shadowOpacity: 0.8, shadowRadius: 4, elevation: 3 }} /><Text style={{ fontWeight: '900', fontSize: 16 * fontScale, color: T.text, lineHeight: 22, flex: 1 }} numberOfLines={2}>{String(item.produto || '').trim() || 'Produto sem nome'}</Text></View>
+          <View style={{ backgroundColor: g.glow, borderWidth: 1, borderColor: g.color + '30', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, gap: 4 }}><Feather name={g.icon} size={10} color={g.color} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: g.color }}>{g.short}</Text></View>
         </View>
-        <View style={{ gap: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: T.purpleGlow, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: T.purple + '25' }}>
-            <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: T.purple + '25', justifyContent: 'center', alignItems: 'center' }}><Feather name="calendar" size={12} color={T.purple} /></View>
-            <View style={{ flex: 1 }}><Text style={{ color: T.purple, fontSize: 10 * fontScale, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>Ruptura estimada</Text><Text style={{ color: T.purple, fontSize: 13 * fontScale, fontWeight: '900', marginTop: 1 }}>{metrics.depletionDateFull} · em {metrics.remainingDays}d</Text></View>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center' }}><Feather name="package" size={13} color={T.blue} /></View>
-            <Text style={{ color: T.textSub, fontSize: 13 * fontScale, flex: 1 }}><Text style={{ color: T.blue, fontWeight: '900' }}>{metrics.remainingQty}</Text> restantes<Text style={{ color: T.textMuted }}> de {metrics.qty} · ~{metrics.dailyRate.toFixed(1)}/dia</Text></Text>
-          </View>
-          {item.VENCIMENTO?.trim() && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: vc.glow, justifyContent: 'center', alignItems: 'center' }}><Feather name={vc.icon} size={13} color={vc.color} /></View><Text style={{ color: vc.color, fontWeight: '800', fontSize: 13 * fontScale, flex: 1 }}>{vs.status === 'expired' ? vc.label(vs.days) : vs.status === 'warning' ? vc.label(vs.days) : vc.label(item.VENCIMENTO)}</Text></View>}
+        {(isNew || isRecent) && (<View style={{ flexDirection: 'row', marginBottom: 8 }}><View style={{ backgroundColor: isNew ? T.green + '20' : T.blue + '20', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: isNew ? T.green + '50' : T.blue + '50', flexDirection: 'row', alignItems: 'center', gap: 4 }}><Feather name={isNew ? "zap" : "clock"} size={10} color={isNew ? T.green : T.blue} /><Text style={{ fontSize: 9 * fontScale, fontWeight: '800', color: isNew ? T.green : T.blue }}>{isNew ? "NOVO" : "RECENTE"}</Text></View></View>)}
+        <View style={{ height: 6, backgroundColor: T.bgInput, borderRadius: 3, marginBottom: 12, overflow: 'hidden' }}><View style={{ height: '100%', width: `${metrics.remainingPct}%`, backgroundColor: metrics.remainingPct < 20 ? T.red : T.blue, borderRadius: 3 }} /></View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <View style={{ flex: 1, minWidth: '45%', backgroundColor: T.bgElevated, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 9 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', marginBottom: 2 }}>Estoque</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.blue }}>{metrics.remainingQty} <Text style={{ fontSize: 10, color: T.textSub }}>un</Text></Text></View>
+          <View style={{ flex: 1, minWidth: '45%', backgroundColor: T.purpleGlow, borderRadius: 12, padding: 10, borderWidth: 1, borderColor: T.purple + '20' }}><Text style={{ fontSize: 9 * fontScale, fontWeight: '800', color: T.purple, textTransform: 'uppercase', marginBottom: 2 }}>Ruptura</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.purple }}>{metrics.remainingDays}d</Text></View>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderColor: T.border }}>
+          {item.VENCIMENTO?.trim() ? (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Feather name={vc.icon} size={12} color={vc.color} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: vc.color }}>{vs.status === 'expired' ? `Vencido` : vs.status === 'warning' ? `${vs.days}d` : item.VENCIMENTO}</Text></View>) : <View />}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Feather name="user" size={10} color={T.textMuted} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '700', color: T.textMuted }} numberOfLines={1}>{item.ENVIADOPORQUEM || 'Sistema'}</Text></View>
         </View>
       </Animated.View>
     </TouchableOpacity>
@@ -1293,12 +1437,22 @@ const CardList = ({ item, T, fontScale, onPress }) => {
 };
 
 const CARD_W = (W - 44) / 2;
-const CardGrid = ({ item, T, fontScale, onPress }) => {
-  const GIRO = makeGiro(T); const VENC = makeVENC(T);
+const CardGrid = ({ item, T, fontScale, onPress, fifoMode, allProducts }) => {
+  const GIRO = makeGiro(T);
+  const VENC = makeVENC(T);
   const scale = useRef(new Animated.Value(1)).current; const liftY = useRef(new Animated.Value(0)).current; const glow = useRef(new Animated.Value(0)).current;
-  const g = GIRO[item.MARGEM] || { color: T.textSub, glow: T.bgInput, icon: 'circle', short: '—', rate: 0 };
+  const metrics = useMemo(() => {
+    if (fifoMode && allProducts && item?.codig) {
+      const groups = groupProductsByEAN(allProducts);
+      const lotes = groups.get(item.codig);
+      if (lotes && lotes.length > 0) return buildDepletionMetrics(lotes[0], true, allProducts, item.codig);
+    }
+    return buildDepletionMetrics(item, false);
+  }, [item, fifoMode, allProducts]);
+  const g = GIRO[metrics.giro] || { color: T.textSub, glow: T.bgInput, icon: 'circle', short: '—', rate: 0 };
   const vs = vencStatus(item.VENCIMENTO); const vc = VENC[vs.status];
-  const metrics = useMemo(() => buildDepletionMetrics(item), [item]);
+  const isNew = isProductRecent(item.DATAENVIO);
+  const isRecent = isProductLast3Days(item.DATAENVIO);
   const pi = () => Animated.parallel([Animated.spring(scale, { toValue: 0.965, tension: 180, friction: 10, useNativeDriver: false }), Animated.spring(liftY, { toValue: -5, tension: 160, friction: 10, useNativeDriver: false }), Animated.timing(glow, { toValue: 1, duration: 160, useNativeDriver: false })]).start();
   const po = () => Animated.parallel([Animated.spring(scale, { toValue: 1, tension: 190, friction: 11, useNativeDriver: false }), Animated.spring(liftY, { toValue: 0, tension: 190, friction: 13, useNativeDriver: false }), Animated.timing(glow, { toValue: 0, duration: 220, useNativeDriver: false })]).start();
   return (
@@ -1309,10 +1463,12 @@ const CardGrid = ({ item, T, fontScale, onPress }) => {
           <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: T.bgCard, borderWidth: 1, borderColor: g.color + '30', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 9 }}><Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: g.color }}>{g.short}</Text></View>
         </View>
         <View style={{ padding: 13, gap: 7 }}>
-          <Text style={{ fontWeight: '900', fontSize: 13 * fontScale, color: T.text, lineHeight: 17 * fontScale, textAlign: 'center', height: 34 }} numberOfLines={2}>{String(item.produto || '').trim() || 'Sem nome'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}><View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: vs.status === 'expired' ? T.red : vs.status === 'warning' ? T.amber : T.green, marginTop: 3, shadowColor: vs.status === 'expired' ? T.red : vs.status === 'warning' ? T.amber : T.green, shadowOpacity: 0.8, shadowRadius: 3, elevation: 2 }} /><Text style={{ fontWeight: '900', fontSize: 13 * fontScale, color: T.text, lineHeight: 17 * fontScale, flex: 1, height: 34 }} numberOfLines={2}>{String(item.produto || '').trim() || 'Sem nome'}</Text></View>
+          {(isNew || isRecent) && (<View style={{ flexDirection: 'row' }}><View style={{ backgroundColor: isNew ? T.green + '20' : T.blue + '20', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: isNew ? T.green + '50' : T.blue + '50', flexDirection: 'row', alignItems: 'center', gap: 3 }}><Feather name={isNew ? "zap" : "clock"} size={8} color={isNew ? T.green : T.blue} /><Text style={{ fontSize: 8 * fontScale, fontWeight: '800', color: isNew ? T.green : T.blue }}>{isNew ? "NOVO" : "RECENTE"}</Text></View></View>)}
           <View style={{ backgroundColor: T.purpleGlow, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: T.purple + '22', alignItems: 'center' }}><Text style={{ fontSize: 9 * fontScale, fontWeight: '800', color: T.purple, textTransform: 'uppercase' }}>~{metrics.remainingQty} restantes</Text><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.purple, marginTop: 1 }}>Ruptura {metrics.depletionDateLabel}</Text></View>
           {item.VENCIMENTO?.trim() && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: vc.glow, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: vc.color + '22' }}><Feather name={vc.icon} size={11} color={vc.color} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: vc.color, flex: 1 }} numberOfLines={1}>{vs.status === 'expired' ? `Venc. há ${Math.abs(vs.days)}d` : vs.status === 'warning' ? `${vs.days}d` : item.VENCIMENTO}</Text></View>}
           {item.quantidade && item.quantidade !== '0' && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: T.blueGlow, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 10 }}><Feather name="package" size={11} color={T.blue} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue }}>{metrics.remainingQty} un</Text></View>}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: T.tealGlow, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 10, marginTop: 4 }}><Feather name="user" size={11} color={T.teal} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.teal, flex: 1 }} numberOfLines={1}>{item.ENVIADOPORQUEM || 'Sistema'}</Text></View>
         </View>
         <View style={{ height: 4, backgroundColor: g.color }} />
       </Animated.View>
@@ -1325,16 +1481,7 @@ const ActionCard = ({ icon, mat = false, color, title, desc, onPress, badge, T, 
   const scale = useRef(new Animated.Value(1)).current; const iconBg = useRef(new Animated.Value(0)).current;
   const pi = () => Animated.parallel([Animated.spring(scale, { toValue: 0.97, tension: 200, friction: 12, useNativeDriver: false }), Animated.timing(iconBg, { toValue: 1, duration: 120, useNativeDriver: false })]).start();
   const po = () => Animated.parallel([Animated.spring(scale, { toValue: 1, tension: 200, friction: 10, useNativeDriver: false }), Animated.timing(iconBg, { toValue: 0, duration: 200, useNativeDriver: false })]).start();
-  return (
-    <TouchableOpacity activeOpacity={0.85} onPress={onPress} onPressIn={pi} onPressOut={po}>
-      <Animated.View style={{ flexDirection: 'row', backgroundColor: T.bgCard, padding: 18, borderRadius: 20, marginBottom: 12, alignItems: 'center', borderWidth: 1, borderColor: iconBg.interpolate({ inputRange: [0, 1], outputRange: [T.border, color + '40'] }), transform: [{ scale }], shadowColor: T.textMuted, shadowOpacity: 0.04, elevation: 2 }}>
-        <Animated.View style={{ width: 50, height: 50, borderRadius: 16, backgroundColor: iconBg.interpolate({ inputRange: [0, 1], outputRange: [color + '14', color + '28'] }), justifyContent: 'center', alignItems: 'center', marginRight: 16 }}><Ic name={icon} size={24} color={color} /></Animated.View>
-        <View style={{ flex: 1 }}><Text style={{ fontWeight: '800', color: T.text, fontSize: 15 * fontScale, marginBottom: 4 }}>{title}</Text>{desc && <Text style={{ fontSize: 12.5 * fontScale, color: T.textSub, lineHeight: 17 }} numberOfLines={2}>{desc}</Text>}</View>
-        {badge && <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: color + '1A', marginRight: 10 }}><Text style={{ fontSize: 11.5 * fontScale, fontWeight: '800', color }}>{badge}</Text></View>}
-        <Feather name="chevron-right" size={18} color={T.textSub} />
-      </Animated.View>
-    </TouchableOpacity>
-  );
+  return (<TouchableOpacity activeOpacity={0.85} onPress={onPress} onPressIn={pi} onPressOut={po}><Animated.View style={{ flexDirection: 'row', backgroundColor: T.bgCard, padding: 18, borderRadius: 20, marginBottom: 12, alignItems: 'center', borderWidth: 1, borderColor: iconBg.interpolate({ inputRange: [0, 1], outputRange: [T.border, color + '40'] }), transform: [{ scale }], shadowColor: T.textMuted, shadowOpacity: 0.04, elevation: 2 }}><Animated.View style={{ width: 50, height: 50, borderRadius: 16, backgroundColor: iconBg.interpolate({ inputRange: [0, 1], outputRange: [color + '14', color + '28'] }), justifyContent: 'center', alignItems: 'center', marginRight: 16 }}><Ic name={icon} size={24} color={color} /></Animated.View><View style={{ flex: 1 }}><Text style={{ fontWeight: '800', color: T.text, fontSize: 15 * fontScale, marginBottom: 4 }}>{title}</Text>{desc && <Text style={{ fontSize: 12.5 * fontScale, color: T.textSub, lineHeight: 17 }} numberOfLines={2}>{desc}</Text>}</View>{badge && <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: color + '1A', marginRight: 10 }}><Text style={{ fontSize: 11.5 * fontScale, fontWeight: '800', color }}>{badge}</Text></View>}<Feather name="chevron-right" size={18} color={T.textSub} /></Animated.View></TouchableOpacity>);
 };
 
 const TabBtn = ({ icon, label, active, onPress, T, fontScale }) => {
@@ -1344,84 +1491,88 @@ const TabBtn = ({ icon, label, active, onPress, T, fontScale }) => {
   return (<TouchableOpacity activeOpacity={1} onPressIn={pi} onPressOut={po} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 }}><Animated.View style={{ transform: [{ scale }], alignItems: 'center' }}><View style={[{ width: 44, height: 32, borderRadius: 12, justifyContent: 'center', alignItems: 'center' }, active && { backgroundColor: T.blueMid }]}><Feather name={icon} size={20} color={active ? T.blue : T.textMuted} /></View><Text style={{ fontSize: 10 * fontScale, fontWeight: active ? '900' : '700', color: active ? T.blue : T.textMuted, marginTop: 2 }}>{label}</Text></Animated.View></TouchableOpacity>);
 };
 
-const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale, notifOn, setNotifOn, TAB_SAFE, onGenerateQR, onViewAuditLogs, onEnableBiometrics, biometricEnabled }) => (
-  <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: TAB_SAFE + 40 }} showsVerticalScrollIndicator={false}>
-    <Text style={{ fontSize: 26 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5, marginBottom: 24 }}>Configurações</Text>
-
-    <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
-      <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Segurança</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Login com Biometria</Text>
-          <Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Use FaceID/TouchID para acessar o app</Text>
-        </View>
-        <Switch value={biometricEnabled} onValueChange={onEnableBiometrics} trackColor={{ false: T.border, true: T.blue + '80' }} thumbColor={biometricEnabled ? T.blue : T.textMuted} />
-      </View>
-      <TouchableOpacity onPress={onViewAuditLogs} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderColor: T.border }}>
-        <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.purpleGlow, justifyContent: 'center', alignItems: 'center' }}><Feather name="file-text" size={20} color={T.purple} /></View>
-        <View style={{ flex: 1 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Logs de Auditoria</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub }}>Ver histórico de ações do sistema</Text></View>
-        <Feather name="chevron-right" size={18} color={T.textMuted} />
-      </TouchableOpacity>
-    </View>
-
-    <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
-      <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Aparência e Tema</Text>
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        {Object.keys(THEMES).map(k => { const th = THEMES[k]; const on = currentTheme === k; return (<TouchableOpacity key={k} onPress={() => onThemeChange(k)} style={{ flex: 1, height: 80, borderRadius: 16, backgroundColor: on ? T.blueMid : T.bgInput, borderWidth: 2, borderColor: on ? T.blue : T.border, justifyContent: 'center', alignItems: 'center', gap: 6 }}><Feather name={th.icon} size={20} color={on ? T.blue : T.textSub} /><Text style={{ fontSize: 12 * fontScale, fontWeight: on ? '900' : '700', color: on ? T.blue : T.textSub }}>{th.name}</Text></TouchableOpacity>); })}
-      </View>
-    </View>
-
-    <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
-      <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Acessibilidade</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Tamanho da Fonte</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.blue }}>{Math.round(fontScale * 100)}%</Text></View>
-      <View style={{ flexDirection: 'row', gap: 10 }}>{[0.85, 1, 1.15].map(s => (<TouchableOpacity key={s} onPress={() => setFontScale(s)} style={{ flex: 1, height: 50, borderRadius: 12, backgroundColor: fontScale === s ? T.blueMid : T.bgInput, borderWidth: 1.5, borderColor: fontScale === s ? T.blue : T.border, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 14 * s, fontWeight: '900', color: fontScale === s ? T.blue : T.textSub }}>Aa</Text></TouchableOpacity>))}</View>
-    </View>
-
-    <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
-      <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Automação e Dados</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <View style={{ flex: 1, paddingRight: 10 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Notificações de Ruptura</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Alertar quando um produto estiver próximo de acabar.</Text></View>
-        <Switch value={notifOn} onValueChange={setNotifOn} trackColor={{ false: T.border, true: T.blue + '80' }} thumbColor={notifOn ? T.blue : T.textMuted} />
-      </View>
-    </View>
-
-    <TouchableOpacity onPress={onGenerateQR} style={{ backgroundColor: T.purpleGlow, borderRadius: 24, padding: 20, borderWidth: 1.5, borderColor: T.purple + '50', marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-      <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.purple + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.purple + '50' }}><Feather name="smartphone" size={22} color={T.purple} /></View>
-      <View style={{ flex: 1 }}><Text style={{ fontSize: 13 * fontScale, fontWeight: '900', color: T.text }}>Gerar QR Code de Acesso</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 1 }}>Compartilhe acesso rápido com outros dispositivos</Text></View>
-      <Feather name="chevron-right" size={20} color={T.textMuted} />
-    </TouchableOpacity>
-
-    <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: '#5865F260', marginBottom: 16 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: '#5865F220', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#5865F240' }}>
-          <Feather name="message-circle" size={22} color="#5865F2" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text }}>Notificações de Vencimento</Text>
-          <Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Receba alertas via Discord</Text>
+const CalculatorModal = ({ visible, onClose, onResult, T, fontScale }) => {
+  const [expression, setExpression] = useState('');
+  const [result, setResult] = useState('');
+  const [lastResult, setLastResult] = useState(null);
+  const [error, setError] = useState(false);
+  const appendToExpression = (value) => { setError(false); if (lastResult !== null && /[0-9]/.test(value)) { setExpression(value); setLastResult(null); setResult(''); return; } setExpression(prev => prev + value); };
+  const clearAll = () => { setExpression(''); setResult(''); setLastResult(null); setError(false); };
+  const backspace = () => { setError(false); setExpression(prev => prev.slice(0, -1)); };
+  const calculateResult = () => { if (!expression.trim()) return; try { let expr = expression.replace(/×/g, '*').replace(/÷/g, '/'); const calcResult = new Function('return (' + expr + ')')(); if (isNaN(calcResult) || !isFinite(calcResult)) throw new Error('Resultado inválido'); const formattedResult = Math.round(calcResult * 100) / 100; setResult(String(formattedResult)); setLastResult(formattedResult); setError(false); } catch (e) { setError(true); setResult('Erro'); } };
+  const handleUseResult = () => { if (result && !error && result !== 'Erro') { onResult?.(Math.floor(parseFloat(result))); onClose(); } };
+  const buttons = [['7', '8', '9', '÷'], ['4', '5', '6', '×'], ['1', '2', '3', '-'], ['0', '.', '=', '+']];
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 16 }}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <View style={{ backgroundColor: T.bgCard, borderRadius: 32, padding: 20, borderWidth: 1, borderColor: T.border, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 20, elevation: 15 }}>
+          <View style={{ backgroundColor: T.bgElevated, borderRadius: 20, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 16 * fontScale, color: T.textMuted, textAlign: 'right', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', minHeight: 24 }}>{expression || '0'}</Text><Text style={{ fontSize: 32 * fontScale, fontWeight: '900', color: error ? T.red : T.text, textAlign: 'right', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginTop: 8 }}>{result || (lastResult !== null ? String(lastResult) : '0')}</Text></View>
+          {buttons.map((row, rowIdx) => (<View key={rowIdx} style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>{row.map((btn) => { let bgColor = T.bgInput; let textColor = T.text; let isOperator = ['÷', '×', '-', '+', '='].includes(btn); if (btn === '=') { bgColor = T.green; textColor = '#FFF'; } else if (isOperator) { bgColor = T.blueMid; textColor = T.blue; } return (<TouchableOpacity key={btn} style={{ flex: 1, paddingVertical: 16, borderRadius: 18, backgroundColor: bgColor, alignItems: 'center', borderWidth: 1, borderColor: T.border }} onPress={() => { if (btn === '=') calculateResult(); else if (btn === 'C') clearAll(); else if (btn === '⌫') backspace(); else appendToExpression(btn); }}><Text style={{ fontSize: 24 * fontScale, fontWeight: '800', color: textColor }}>{btn}</Text></TouchableOpacity>); })}</View>))}
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}><TouchableOpacity style={{ flex: 1, paddingVertical: 16, borderRadius: 18, backgroundColor: T.redGlow, alignItems: 'center', borderWidth: 1, borderColor: T.red + '50' }} onPress={clearAll}><Text style={{ fontSize: 20 * fontScale, fontWeight: '800', color: T.red }}>C</Text></TouchableOpacity><TouchableOpacity style={{ flex: 1, paddingVertical: 16, borderRadius: 18, backgroundColor: T.bgInput, alignItems: 'center', borderWidth: 1, borderColor: T.border }} onPress={backspace}><Feather name="delete" size={22} color={T.textSub} /></TouchableOpacity></View>
+          <View style={{ flexDirection: 'row', gap: 10 }}><TouchableOpacity style={{ flex: 1, paddingVertical: 14, borderRadius: 18, backgroundColor: T.bgInput, alignItems: 'center', borderWidth: 1, borderColor: T.border }} onPress={onClose}><Text style={{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }}>Cancelar</Text></TouchableOpacity><TouchableOpacity style={{ flex: 1, paddingVertical: 14, borderRadius: 18, backgroundColor: T.blue, alignItems: 'center', opacity: (result && !error && result !== 'Erro') ? 1 : 0.5 }} onPress={handleUseResult} disabled={!result || error || result === 'Erro'}><Text style={{ fontSize: 16 * fontScale, fontWeight: '900', color: '#FFF' }}>Usar Resultado</Text></TouchableOpacity></View>
         </View>
       </View>
-      <Text style={{ fontSize: 13 * fontScale, color: T.textSub, marginBottom: 16, lineHeight: 20 * fontScale }}>Entre no servidor do GEI.AI e seja notificado sempre que um produto estiver prestes a vencer.</Text>
-      <TouchableOpacity onPress={() => Linking.openURL('https://discord.gg/e6UEjdFHMS')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#5865F2', paddingVertical: 14, borderRadius: 16, marginBottom: 10, shadowColor: '#5865F2', shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 }}>
-        <Feather name="users" size={18} color="#FFF" />
-        <Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: '#FFF' }}>Entrar no Servidor Discord</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.discord&hl=pt_BR')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: T.bgInput, paddingVertical: 12, borderRadius: 16, borderWidth: 1.5, borderColor: '#5865F250' }}>
-        <Feather name="download" size={16} color="#5865F2" />
-        <Text style={{ fontSize: 14 * fontScale, fontWeight: '700', color: '#5865F2' }}>Baixar Discord (Play Store)</Text>
-      </TouchableOpacity>
-    </View>
+    </Modal>
+  );
+};
 
-    <Text style={{ textAlign: 'center', color: T.textMuted, fontSize: 11 * fontScale, fontWeight: '700', marginTop: 4 }}>GEI.AI v5.0 Secure · 2026</Text>
-  </ScrollView>
-);
+const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale, notifOn, setNotifOn, TAB_SAFE, onGenerateQR, onViewAuditLogs, onEnableBiometrics, biometricEnabled, onChangePassword, userData, fifoMode, setFifoMode }) => {
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPass, setCurrentPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [confirmPass, setConfirmPass] = useState('');
+  const [loadingPass, setLoadingPass] = useState(false);
+  const [showCurrPass, setShowCurrPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfPass, setShowConfPass] = useState(false);
+  const handleChangePassword = async () => {
+    if (!currentPass || !newPass || !confirmPass) { Alert.alert('Erro', 'Preencha todos os campos.'); return; }
+    if (newPass !== confirmPass) { Alert.alert('Erro', 'Nova senha e confirmação não coincidem.'); return; }
+    if (newPass.length < 6) { Alert.alert('Erro', 'A nova senha deve ter pelo menos 6 caracteres.'); return; }
+    setLoadingPass(true);
+    const success = await onChangePassword(currentPass, newPass);
+    setLoadingPass(false);
+    if (success) { setShowChangePassword(false); setCurrentPass(''); setNewPass(''); setConfirmPass(''); }
+  };
+  return (
+    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: TAB_SAFE + 40 }} showsVerticalScrollIndicator={false}>
+      <Text style={{ fontSize: 26 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5, marginBottom: 24 }}>Configurações</Text>
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
+        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Segurança</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}><View style={{ flex: 1 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Login com Biometria</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Use FaceID/TouchID para acessar o app</Text></View><Switch value={biometricEnabled} onValueChange={onEnableBiometrics} trackColor={{ false: T.border, true: T.blue + '80' }} thumbColor={biometricEnabled ? T.blue : T.textMuted} /></View>
+        <TouchableOpacity onPress={() => setShowChangePassword(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderColor: T.border }}><View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center' }}><Feather name="lock" size={20} color={T.blue} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Alterar Senha</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub }}>Atualize sua senha de acesso</Text></View><Feather name="chevron-right" size={18} color={T.textMuted} /></TouchableOpacity>
+        <TouchableOpacity onPress={onViewAuditLogs} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: 1, borderColor: T.border }}><View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.purpleGlow, justifyContent: 'center', alignItems: 'center' }}><Feather name="file-text" size={20} color={T.purple} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Logs de Auditoria</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub }}>Ver histórico de ações do sistema</Text></View><Feather name="chevron-right" size={18} color={T.textMuted} /></TouchableOpacity>
+      </View>
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
+        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Gerenciamento de Estoque</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><View style={{ flex: 1, paddingRight: 10 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Modo FIFO</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Agrupar lotes do mesmo produto e consumir o mais antigo primeiro.</Text></View><Switch value={fifoMode} onValueChange={setFifoMode} trackColor={{ false: T.border, true: T.blue + '80' }} thumbColor={fifoMode ? T.blue : T.textMuted} /></View>
+      </View>
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
+        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Aparência e Tema</Text>
+        <View style={{ flexDirection: 'row', gap: 10 }}>{Object.keys(THEMES).map(k => { const th = THEMES[k]; const on = currentTheme === k; return (<TouchableOpacity key={k} onPress={() => onThemeChange(k)} style={{ flex: 1, height: 80, borderRadius: 16, backgroundColor: on ? T.blueMid : T.bgInput, borderWidth: 2, borderColor: on ? T.blue : T.border, justifyContent: 'center', alignItems: 'center', gap: 6 }}><Feather name={th.icon} size={20} color={on ? T.blue : T.textSub} /><Text style={{ fontSize: 12 * fontScale, fontWeight: on ? '900' : '700', color: on ? T.blue : T.textSub }}>{th.name}</Text></TouchableOpacity>); })}</View>
+      </View>
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
+        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Acessibilidade</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Tamanho da Fonte</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.blue }}>{Math.round(fontScale * 100)}%</Text></View>
+        <View style={{ flexDirection: 'row', gap: 10 }}>{[0.85, 1, 1.15].map(s => (<TouchableOpacity key={s} onPress={() => setFontScale(s)} style={{ flex: 1, height: 50, borderRadius: 12, backgroundColor: fontScale === s ? T.blueMid : T.bgInput, borderWidth: 1.5, borderColor: fontScale === s ? T.blue : T.border, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 14 * s, fontWeight: '900', color: fontScale === s ? T.blue : T.textSub }}>Aa</Text></TouchableOpacity>))}</View>
+      </View>
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
+        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Automação e Dados</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><View style={{ flex: 1, paddingRight: 10 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Notificações de Ruptura</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Alertar quando um produto estiver próximo de acabar.</Text></View><Switch value={notifOn} onValueChange={setNotifOn} trackColor={{ false: T.border, true: T.blue + '80' }} thumbColor={notifOn ? T.blue : T.textMuted} /></View>
+      </View>
+      <TouchableOpacity onPress={onGenerateQR} style={{ backgroundColor: T.purpleGlow, borderRadius: 24, padding: 20, borderWidth: 1.5, borderColor: T.purple + '50', marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.purple + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.purple + '50' }}><Feather name="smartphone" size={22} color={T.purple} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 13 * fontScale, fontWeight: '900', color: T.text }}>Gerar QR Code de Acesso</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 1 }}>Compartilhe acesso rápido com outros dispositivos</Text></View><Feather name="chevron-right" size={20} color={T.textMuted} /></TouchableOpacity>
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: '#5865F260', marginBottom: 16 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: '#5865F220', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#5865F240' }}><Feather name="message-circle" size={22} color="#5865F2" /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text }}>Notificações de Vencimento</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Receba alertas via Discord</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, marginBottom: 16, lineHeight: 20 * fontScale }}>Entre no servidor do GEI.AI e seja notificado sempre que um produto estiver prestes a vencer.</Text><TouchableOpacity onPress={() => Linking.openURL('https://discord.gg/e6UEjdFHMS')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#5865F2', paddingVertical: 14, borderRadius: 16, marginBottom: 10, shadowColor: '#5865F2', shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 }}><Feather name="users" size={18} color="#FFF" /><Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: '#FFF' }}>Entrar no Servidor Discord</Text></TouchableOpacity><TouchableOpacity onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.discord&hl=pt_BR')} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: T.bgInput, paddingVertical: 12, borderRadius: 16, borderWidth: 1.5, borderColor: '#5865F250' }}><Feather name="download" size={16} color="#5865F2" /><Text style={{ fontSize: 14 * fontScale, fontWeight: '700', color: '#5865F2' }}>Baixar Discord (Play Store)</Text></TouchableOpacity></View>
+      <Text style={{ textAlign: 'center', color: T.textMuted, fontSize: 11 * fontScale, fontWeight: '700', marginTop: 4 }}>GEI.AI v5.0 Secure · 2026</Text>
+      <Modal visible={showChangePassword} transparent animationType="fade" onRequestClose={() => setShowChangePassword(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowChangePassword(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, marginBottom: 6 }}>Alterar Senha</Text><Text style={{ fontSize: 13 * fontScale, color: T.textSub, marginBottom: 20 }}>Digite sua senha atual e a nova senha.</Text><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 16, paddingRight: 12 }}><TextInput secureTextEntry={!showCurrPass} style={{ flex: 1, padding: 14, color: T.text }} placeholder="Senha atual" placeholderTextColor={T.textMuted} value={currentPass} onChangeText={setCurrentPass} /><TouchableOpacity onPress={() => setShowCurrPass(p => !p)}><Feather name={showCurrPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 16, paddingRight: 12 }}><TextInput secureTextEntry={!showNewPass} style={{ flex: 1, padding: 14, color: T.text }} placeholder="Nova senha" placeholderTextColor={T.textMuted} value={newPass} onChangeText={setNewPass} /><TouchableOpacity onPress={() => setShowNewPass(p => !p)}><Feather name={showNewPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 20, paddingRight: 12 }}><TextInput secureTextEntry={!showConfPass} style={{ flex: 1, padding: 14, color: T.text }} placeholder="Confirmar nova senha" placeholderTextColor={T.textMuted} value={confirmPass} onChangeText={setConfirmPass} /><TouchableOpacity onPress={() => setShowConfPass(p => !p)}><Feather name={showConfPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View><PrimaryBtn label={loadingPass ? 'Alterando...' : 'Confirmar'} onPress={handleChangePassword} color={T.blue} disabled={loadingPass} /><TouchableOpacity onPress={() => setShowChangePassword(false)} style={{ marginTop: 16, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>Cancelar</Text></TouchableOpacity></View></View></Modal>
+    </ScrollView>
+  );
+};
 
-// ─── CHAT SCREEN ────────────────────────────────────────────────────────────
 const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, scrollRef, TAB_H, NAV_BAR_H }) => {
   const keyboardAnim = useRef(new Animated.Value(0)).current;
   const [typingDots, setTypingDots] = useState(0);
   const inputRef = useRef(null);
-
   useEffect(() => {
     const onShow = e => { Animated.spring(keyboardAnim, { toValue: e.endCoordinates.height, useNativeDriver: false, tension: 65, friction: 11 }).start(); setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80); };
     const onHide = () => { Animated.spring(keyboardAnim, { toValue: 0, useNativeDriver: false, tension: 65, friction: 11 }).start(); };
@@ -1429,301 +1580,379 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
     const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', onHide);
     return () => { show.remove(); hide.remove(); };
   }, [keyboardAnim, scrollRef]);
-
-  useEffect(() => {
-    let iv;
-    if (busy) { iv = setInterval(() => setTypingDots(p => (p + 1) % 4), 380); }
-    else { setTypingDots(0); }
-    return () => clearInterval(iv);
-  }, [busy]);
-
-  useLayoutEffect(() => {
-    const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
-    return () => clearTimeout(timer);
-  }, [msgs, busy, scrollRef]);
-
+  useEffect(() => { let iv; if (busy) { iv = setInterval(() => setTypingDots(p => (p + 1) % 4), 380); } else { setTypingDots(0); } return () => clearInterval(iv); }, [busy]);
+  useLayoutEffect(() => { const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150); return () => clearTimeout(timer); }, [msgs, busy, scrollRef]);
   const handleSend = () => { if (!chatTxt.trim() || busy) return; sendChat(); inputRef.current?.focus(); };
-
   return (
     <Animated.View style={{ flex: 1, backgroundColor: T.bg, paddingBottom: keyboardAnim }}>
       <ScrollView ref={scrollRef} style={{ flex: 1, paddingHorizontal: 16 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={{ paddingTop: 16, paddingBottom: TAB_H + NAV_BAR_H + 20 }} showsVerticalScrollIndicator={false}>
-        {msgs.length === 0 && (
-          <View style={{ alignItems: 'center', paddingTop: 40, paddingBottom: 20 }}>
-            <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: T.tealGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.teal + '40', marginBottom: 16 }}><MaterialCommunityIcons name="robot-outline" size={32} color={T.teal} /></View>
-            <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text, marginBottom: 6 }}>GEI Assistant</Text>
-            <Text style={{ fontSize: 13 * fontScale, color: T.textSub, textAlign: 'center', lineHeight: 20, paddingHorizontal: 30 }}>Pergunte sobre o estoque, validades, rupturas ou qualquer dúvida.</Text>
-          </View>
-        )}
-        {msgs.map((m) => (
-          <View key={m.id} style={[{ marginBottom: 12 }, m.isAi ? { alignSelf: 'flex-start', maxWidth: '88%' } : { alignSelf: 'flex-end', maxWidth: '80%' }]}>
-            {m.isAi && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 6 }}><View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: T.tealGlow, borderWidth: 1, borderColor: T.teal + '40', justifyContent: 'center', alignItems: 'center' }}><MaterialCommunityIcons name="robot-outline" size={14} color={T.teal} /></View><Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: T.teal }}>GEI Assistant</Text></View>)}
-            {m.isAi ? (
-              <View style={{ backgroundColor: T.bgCard, borderRadius: 18, borderBottomLeftRadius: 4, padding: 14, borderWidth: 1, borderColor: T.border, shadowColor: T.teal, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}>
-                <Text style={{ fontSize: 14 * fontScale, lineHeight: 22 * fontScale, color: T.text, fontWeight: '500' }}>{m.text}</Text>
-              </View>
-            ) : (
-              <View style={{ backgroundColor: T.blue, borderRadius: 18, borderBottomRightRadius: 4, paddingHorizontal: 18, paddingVertical: 14, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 }}>
-                <Text style={{ fontSize: 14 * fontScale, lineHeight: 22 * fontScale, color: '#FFF', fontWeight: '500' }}>{m.text}</Text>
-              </View>
-            )}
-          </View>
-        ))}
-        {busy && (
-          <View style={{ marginBottom: 12, alignSelf: 'flex-start', maxWidth: '70%' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 6 }}><View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: T.tealGlow, borderWidth: 1, borderColor: T.teal + '40', justifyContent: 'center', alignItems: 'center' }}><MaterialCommunityIcons name="robot-outline" size={14} color={T.teal} /></View><Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: T.teal }}>GEI Assistant</Text></View>
-            <View style={{ backgroundColor: T.bgCard, borderRadius: 18, borderBottomLeftRadius: 4, paddingHorizontal: 18, paddingVertical: 16, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <ActivityIndicator size="small" color={T.teal} />
-              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Digitando</Text>
-              <View style={{ flexDirection: 'row', gap: 3 }}>{[0, 1, 2].map(i => (<View key={i} style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: T.teal, opacity: typingDots > i ? 1 : 0.2 }} />))}</View>
-            </View>
-          </View>
-        )}
+        {msgs.length === 0 && (<View style={{ alignItems: 'center', paddingTop: 40, paddingBottom: 20 }}><View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: T.tealGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.teal + '40', marginBottom: 16 }}><MaterialCommunityIcons name="robot-outline" size={32} color={T.teal} /></View><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text, marginBottom: 6 }}>GEI Assistant</Text><Text style={{ fontSize: 13 * fontScale, color: T.textSub, textAlign: 'center', lineHeight: 20, paddingHorizontal: 30 }}>Pergunte sobre o estoque, validades, rupturas ou qualquer dúvida.</Text></View>)}
+        {msgs.map((m) => (<View key={m.id} style={[{ marginBottom: 12 }, m.isAi ? { alignSelf: 'flex-start', maxWidth: '88%' } : { alignSelf: 'flex-end', maxWidth: '80%' }]}>{m.isAi && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 6 }}><View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: T.tealGlow, borderWidth: 1, borderColor: T.teal + '40', justifyContent: 'center', alignItems: 'center' }}><MaterialCommunityIcons name="robot-outline" size={14} color={T.teal} /></View><Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: T.teal }}>GEI Assistant</Text></View>)}{m.isAi ? (<View style={{ backgroundColor: T.bgCard, borderRadius: 18, borderBottomLeftRadius: 4, padding: 14, borderWidth: 1, borderColor: T.border, shadowColor: T.teal, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}><Text style={{ fontSize: 14 * fontScale, lineHeight: 22 * fontScale, color: T.text, fontWeight: '500' }}>{m.text}</Text></View>) : (<View style={{ backgroundColor: T.blue, borderRadius: 18, borderBottomRightRadius: 4, paddingHorizontal: 18, paddingVertical: 14, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 }}><Text style={{ fontSize: 14 * fontScale, lineHeight: 22 * fontScale, color: '#FFF', fontWeight: '500' }}>{m.text}</Text></View>)}</View>))}
+        {busy && (<View style={{ marginBottom: 12, alignSelf: 'flex-start', maxWidth: '70%' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 6 }}><View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: T.tealGlow, borderWidth: 1, borderColor: T.teal + '40', justifyContent: 'center', alignItems: 'center' }}><MaterialCommunityIcons name="robot-outline" size={14} color={T.teal} /></View><Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: T.teal }}>GEI Assistant</Text></View><View style={{ backgroundColor: T.bgCard, borderRadius: 18, borderBottomLeftRadius: 4, paddingHorizontal: 18, paddingVertical: 16, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', gap: 12 }}><ActivityIndicator size="small" color={T.teal} /><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Digitando</Text><View style={{ flexDirection: 'row', gap: 3 }}>{[0, 1, 2].map(i => (<View key={i} style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: T.teal, opacity: typingDots > i ? 1 : 0.2 }} />))}</View></View></View>)}
       </ScrollView>
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16, gap: 10, borderTopWidth: 1, borderColor: T.border, backgroundColor: T.bgCard }}>
-        <TextInput ref={inputRef} style={{ flex: 1, backgroundColor: T.bgInput, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 14, color: T.text, fontSize: 15 * fontScale, maxHeight: 120, borderWidth: 1.5, borderColor: T.border, lineHeight: 20 }} placeholder="Ex: O que vence esta semana?" placeholderTextColor={T.textSub} value={chatTxt} onChangeText={setChatTxt} onSubmitEditing={handleSend} returnKeyType="send" multiline blurOnSubmit={false} editable={!busy} />
-        <TouchableOpacity onPress={handleSend} disabled={busy || !chatTxt.trim()} style={{ width: 52, height: 52, borderRadius: 17, backgroundColor: chatTxt.trim() && !busy ? T.blue : T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: chatTxt.trim() && !busy ? 0 : 1.5, borderColor: T.border, shadowColor: T.blue, shadowOpacity: chatTxt.trim() && !busy ? 0.4 : 0, shadowRadius: 8, elevation: chatTxt.trim() && !busy ? 4 : 0 }}>
-          <Feather name="send" size={20} color={chatTxt.trim() && !busy ? '#FFF' : T.textSub} />
-        </TouchableOpacity>
-      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16, gap: 10, borderTopWidth: 1, borderColor: T.border, backgroundColor: T.bgCard }}><TextInput ref={inputRef} style={{ flex: 1, backgroundColor: T.bgInput, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 14, color: T.text, fontSize: 15 * fontScale, maxHeight: 120, borderWidth: 1.5, borderColor: T.border, lineHeight: 20 }} placeholder="Ex: O que vence esta semana?" placeholderTextColor={T.textSub} value={chatTxt} onChangeText={setChatTxt} onSubmitEditing={handleSend} returnKeyType="send" multiline blurOnSubmit={false} editable={!busy} /><TouchableOpacity onPress={handleSend} disabled={busy || !chatTxt.trim()} style={{ width: 52, height: 52, borderRadius: 17, backgroundColor: chatTxt.trim() && !busy ? T.blue : T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: chatTxt.trim() && !busy ? 0 : 1.5, borderColor: T.border, shadowColor: T.blue, shadowOpacity: chatTxt.trim() && !busy ? 0.4 : 0, shadowRadius: 8, elevation: chatTxt.trim() && !busy ? 4 : 0 }}><Feather name="send" size={20} color={chatTxt.trim() && !busy ? '#FFF' : T.textSub} /></TouchableOpacity></View>
     </Animated.View>
   );
 };
 
-// ─── CADASTRO WIZARD ─────────────────────────────────────────────────────────
 const CadastroScreen = ({ T, fontScale, perf, cadastroShelf, setCadastroShelf, activeShelf, prodName, setProdName, validade, setValidade, qtd, setQtd, giro, setGiro, wStep, setWStep, nextStep, saveProduct, TAB_SAFE, GIRO, isCoord, isDeposito, SHELF_KEYS, shlabel, shelfPalette, showErr }) => {
   const stepAnim = useRef(new Animated.Value(1)).current;
   const inputRef = useRef(null);
-
-  const fmtDate = v => {
-    const c = v.replace(/\D/g, '');
-    if (c.length <= 2) { setValidade(c); return; }
-    if (c.length <= 4) { setValidade(`${c.slice(0, 2)}/${c.slice(2)}`); return; }
-    setValidade(`${c.slice(0, 2)}/${c.slice(2, 4)}/${c.slice(4, 8)}`);
-  };
-
-  const animateStep = (fn) => {
-    Animated.sequence([
-      Animated.timing(stepAnim, { toValue: 0, duration: 110, useNativeDriver: false }),
-      Animated.timing(stepAnim, { toValue: 1, duration: 170, useNativeDriver: false }),
-    ]).start();
-    fn();
-  };
-
+  const [shakeAnim] = useState(new Animated.Value(0));
+  const [showPreview, setShowPreview] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const fmtDate = v => { const c = v.replace(/\D/g, ''); if (c.length <= 2) { setValidade(c); return; } if (c.length <= 4) { setValidade(`${c.slice(0, 2)}/${c.slice(2)}`); return; } const formatted = `${c.slice(0, 2)}/${c.slice(2, 4)}/${c.slice(4, 8)}`; setValidade(formatted); if (formatted.length === 10 && isValidDate(formatted)) { Keyboard.dismiss(); } };
+  const animateStep = (fn) => { Animated.sequence([Animated.timing(stepAnim, { toValue: 0.94, duration: 100, useNativeDriver: false }), Animated.timing(stepAnim, { toValue: 1, duration: 160, useNativeDriver: false })]).start(); fn(); };
   const getTargetShelf = () => (isCoord(perf) || isDeposito(perf)) && cadastroShelf ? cadastroShelf : activeShelf;
-  const metrics = useMemo(() => { if (!giro || !qtd) return null; return buildDepletionMetrics({ quantidade: qtd, MARGEM: giro, DATAENVIO: new Date().toLocaleDateString('pt-BR') }); }, [giro, qtd]);
+  const metrics = useMemo(() => { if (!giro || !qtd) return null; return buildDepletionMetricsOriginal({ quantidade: qtd, MARGEM: giro, DATAENVIO: new Date().toLocaleDateString('pt-BR') }); }, [giro, qtd]);
   const STEPS = ['Nome', 'Validade', 'Qtd', 'Giro'];
-
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 200); }, [wStep]);
-
-  const handleNext = () => {
-    if (wStep === 1 && !prodName.trim()) { showErr('O nome do produto é obrigatório.'); return; }
-    if (wStep === 2) { if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } }
-    if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { showErr('A quantidade deve ser um número positivo.'); return; }
-    if (wStep === 4 && !giro) { showErr('Selecione o giro estimado.'); return; }
-    animateStep(() => nextStep());
-  };
-
+  const handleNext = () => { if (wStep === 1 && !prodName.trim()) { shake(); showErr('O nome do produto é obrigatório.'); return; } if (wStep === 2) { if (!validade) { shake(); showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { shake(); showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } } if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { shake(); showErr('A quantidade deve ser um número positivo.'); return; } if (wStep === 4 && !giro) { shake(); showErr('Selecione o giro estimado.'); return; } animateStep(() => nextStep()); };
+  const shake = () => { Animated.sequence([Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }), Animated.timing(shakeAnim, { toValue: -8, duration: 50, useNativeDriver: true }), Animated.timing(shakeAnim, { toValue: 4, duration: 50, useNativeDriver: true }), Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true })]).start(); };
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: TAB_SAFE + 24 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <Text style={{ fontSize: 26 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5, marginBottom: 4 }}>Novo Produto</Text>
-        <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 20 }}>Passo {wStep} de 4</Text>
-        {(isCoord(perf) || isDeposito(perf)) && (
-          <View style={{ backgroundColor: T.bgCard, borderRadius: 20, padding: 16, marginBottom: 20, borderWidth: 1.5, borderColor: T.orange + '50' }}>
-            <Text style={{ fontSize: 12 * fontScale, fontWeight: '800', color: T.orange, textTransform: 'uppercase', marginBottom: 12 }}>Prateleira de Destino</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {SHELF_KEYS.map(k => { const on = (cadastroShelf || activeShelf) === k; const pal = shelfPalette(T, k); return (<TouchableOpacity key={k} style={[{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }, on && { backgroundColor: pal.glow, borderColor: pal.accent + '70' }]} onPress={() => setCadastroShelf(k)}><Feather name={pal.icon} size={13} color={on ? pal.accent : T.textSub} /><Text style={[{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: pal.accent, fontWeight: '900' }]}>{shlabel(k)}</Text></TouchableOpacity>); })}
-            </View>
-          </View>
-        )}
-        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 28 }}>
-          {STEPS.map((s, i) => { const done = wStep > i + 1, active = wStep === i + 1; return (<View key={s} style={{ flex: 1, alignItems: 'center', gap: 4 }}><View style={{ height: 5, width: '100%', borderRadius: 3, backgroundColor: done || active ? T.blue : T.bgInput, opacity: done ? 0.5 : 1 }} /><Text style={{ fontSize: 9 * fontScale, fontWeight: active ? '900' : '700', color: active ? T.blue : T.textMuted }}>{s}</Text></View>); })}
-        </View>
-        <Animated.View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1.5, borderColor: T.border, shadowColor: T.textMuted, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4, opacity: stepAnim }}>
-          {wStep === 1 && (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><Feather name="tag" size={20} color={T.blue} /></View>
-                <View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 1 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Nome do Produto</Text></View>
-              </View>
-              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16, lineHeight: 19 }}>Digite o nome do produto que será cadastrado na prateleira.</Text>
-              <TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 18, borderRadius: 18, fontSize: 16 * fontScale, color: T.text, fontWeight: '700', minHeight: 80, textAlignVertical: 'top' }} placeholder="Ex: Leite Integral Parmalat 1L" placeholderTextColor={T.textSub} value={prodName} onChangeText={setProdName} multiline autoCorrect />
-              {prodName.length > 0 && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 12, backgroundColor: T.blueGlow, borderRadius: 12, borderWidth: 1, borderColor: T.blue + '30' }}><Feather name="check-circle" size={14} color={T.blue} /><Text style={{ fontSize: 12 * fontScale, color: T.blue, fontWeight: '700', flex: 1 }} numberOfLines={1}>{prodName}</Text></View>)}
-            </>
-          )}
-          {wStep === 2 && (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.amber + '50' }}><Feather name="calendar" size={20} color={T.amber} /></View>
-                <View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.amber, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 2 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Data de Validade</Text></View>
-              </View>
-              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Informe a data de vencimento impressa na embalagem.</Text>
-              <TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 20, borderRadius: 18, fontSize: 28 * fontScale, color: T.text, textAlign: 'center', letterSpacing: 4, fontWeight: '900' }} keyboardType="numeric" placeholder="DD/MM/AAAA" placeholderTextColor={T.textSub} value={validade} onChangeText={fmtDate} maxLength={10} autoFocus />
-              {validade.length === 10 && (isValidDate(validade) ? (() => { const vs = vencStatus(validade); const colors = { expired: T.red, warning: T.amber, ok: T.green, unknown: T.textMuted }; const icons = { expired: 'alert-circle', warning: 'alert-triangle', ok: 'check-circle', unknown: 'clock' }; const labels = { expired: `Produto já vencido!`, warning: `Vence em ${vs.days} dia${vs.days !== 1 ? 's' : ''}`, ok: `Válido até ${validade}`, unknown: 'Data inválida' }; return (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: colors[vs.status] + '18', borderRadius: 12, borderWidth: 1, borderColor: colors[vs.status] + '40' }}><Feather name={icons[vs.status]} size={16} color={colors[vs.status]} /><Text style={{ fontSize: 13 * fontScale, color: colors[vs.status], fontWeight: '800' }}>{labels[vs.status]}</Text></View>); })() : (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: T.redGlow, borderRadius: 12, borderWidth: 1, borderColor: T.red + '40' }}><Feather name="alert-circle" size={16} color={T.red} /><Text style={{ fontSize: 13 * fontScale, color: T.red, fontWeight: '800' }}>Data inválida! Use o formato DD/MM/AAAA e uma data real.</Text></View>))}
-            </>
-          )}
-          {wStep === 3 && (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><Feather name="box" size={20} color={T.blue} /></View>
-                <View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 3 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Quantidade</Text></View>
-              </View>
-              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Quantas unidades foram colocadas nesta prateleira?</Text>
-              <TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 20, borderRadius: 18, fontSize: 36 * fontScale, color: T.text, textAlign: 'center', letterSpacing: 2, fontWeight: '900' }} keyboardType="numeric" placeholder="0" placeholderTextColor={T.textSub} value={qtd} onChangeText={setQtd} autoFocus />
-              {qtd && Number(qtd) > 0 && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: T.blueGlow, borderRadius: 12, borderWidth: 1, borderColor: T.blue + '30' }}><Feather name="package" size={14} color={T.blue} /><Text style={{ fontSize: 13 * fontScale, color: T.blue, fontWeight: '800' }}>{qtd} unidades serão registradas</Text></View>)}
-            </>
-          )}
-          {wStep === 4 && (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.purpleGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.purple + '50' }}><Feather name="refresh-cw" size={20} color={T.purple} /></View>
-                <View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.purple, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 4 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Giro Estimado</Text></View>
-              </View>
-              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Qual a velocidade de venda esperada deste produto?</Text>
-              <View style={{ gap: 10, marginBottom: 16 }}>
-                {['Grande giro', 'Médio giro', 'Pouco giro'].map(g => { const cfg = GIRO[g]; const on = giro === g; return (<TouchableOpacity key={g} style={[{ flexDirection: 'row', alignItems: 'center', padding: 18, borderRadius: 18, borderWidth: 2, borderColor: T.border, backgroundColor: T.bgInput, gap: 14 }, on && { backgroundColor: cfg.glow, borderColor: cfg.color + '80' }]} onPress={() => setGiro(g)}><View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: on ? cfg.color + '25' : T.bgElevated, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: on ? cfg.color + '50' : T.border }}><Feather name={cfg.icon} size={20} color={cfg.color} /></View><View style={{ flex: 1 }}><Text style={[{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: cfg.color, fontWeight: '900' }]}>{g}</Text><Text style={{ fontSize: 11 * fontScale, color: T.textMuted, marginTop: 3 }}>~{cfg.rate.toFixed(1)} unidades/dia</Text></View>{on && <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: cfg.color, justifyContent: 'center', alignItems: 'center' }}><Feather name="check" size={14} color="#FFF" /></View>}</TouchableOpacity>); })}
-              </View>
-              {metrics && (<View style={{ padding: 16, borderRadius: 16, backgroundColor: T.purpleGlow, borderWidth: 1, borderColor: T.purple + '35' }}><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.purple, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Previsão Automática</Text><View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1, backgroundColor: T.bgCard, borderRadius: 12, padding: 10, alignItems: 'center' }}><Text style={{ fontSize: 8 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase' }}>Ruptura</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.purple, marginTop: 3 }}>{metrics.depletionDateFull}</Text></View><View style={{ flex: 1, backgroundColor: T.bgCard, borderRadius: 12, padding: 10, alignItems: 'center' }}><Text style={{ fontSize: 8 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase' }}>Em</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.purple, marginTop: 3 }}>{metrics.remainingDays} dias</Text></View></View></View>)}
-            </>
-          )}
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
-            {wStep > 1 && (<TouchableOpacity style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => animateStep(() => setWStep(p => p - 1))}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity>)}
-            <PrimaryBtn label={wStep < 4 ? 'Avançar →' : '✓ Finalizar Cadastro'} onPress={handleNext} style={{ flex: 1 }} color={T.blue} fontScale={fontScale} />
-          </View>
-        </Animated.View>
-        {(prodName || validade || qtd || giro) && (
-          <View style={{ marginTop: 20, backgroundColor: T.bgCard, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: T.border }}>
-            <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 }}>Resumo do Cadastro</Text>
-            {[{ label: 'Produto', val: prodName, icon: 'tag', c: T.blue }, { label: 'Validade', val: validade, icon: 'calendar', c: T.amber }, { label: 'Quantidade', val: qtd ? `${qtd} un` : '', icon: 'package', c: T.green }, { label: 'Giro', val: giro, icon: 'refresh-cw', c: T.purple }, { label: 'Destino', val: shlabel(getTargetShelf?.() || cadastroShelf || activeShelf), icon: 'layers', c: T.orange }].filter(i => i.val).map(i => (
-              <View key={i.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, borderTopWidth: 1, borderColor: T.border }}>
-                <Feather name={i.icon} size={13} color={i.c} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted, width: 64 }}>{i.label}</Text><Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.text, flex: 1 }} numberOfLines={1}>{i.val}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: T.bg }}>
+      <Animated.View style={{ flex: 1, transform: [{ translateX: shakeAnim }] }}>
+        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: TAB_SAFE + 24 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, justifyContent: 'space-between' }}><Text style={{ fontSize: 28 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5 }}>Novo Produto</Text><TouchableOpacity onPress={() => setShowPreview(!showPreview)} style={{ padding: 8, backgroundColor: T.bgInput, borderRadius: 20 }}><Feather name={showPreview ? 'eye-off' : 'eye'} size={22} color={T.blue} /></TouchableOpacity></View>
+          <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 20 }}>Passo {wStep} de 4</Text>
+          {(isCoord(perf) || isDeposito(perf)) && (<View style={{ backgroundColor: T.bgCard, borderRadius: 20, padding: 16, marginBottom: 20, borderWidth: 1.5, borderColor: T.orange + '50' }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '800', color: T.orange, textTransform: 'uppercase', marginBottom: 12 }}>Prateleira de Destino</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{SHELF_KEYS.map(k => { const on = (cadastroShelf || activeShelf) === k; const pal = shelfPalette(T, k); return (<TouchableOpacity key={k} style={[{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }, on && { backgroundColor: pal.glow, borderColor: pal.accent + '70' }]} onPress={() => setCadastroShelf(k)}><Feather name={pal.icon} size={13} color={on ? pal.accent : T.textSub} /><Text style={[{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: pal.accent, fontWeight: '900' }]}>{shlabel(k)}</Text></TouchableOpacity>); })}</View></View>)}
+          <View style={{ flexDirection: 'row', gap: 6, marginBottom: 28 }}>{STEPS.map((s, i) => { const done = wStep > i + 1, active = wStep === i + 1; return (<View key={s} style={{ flex: 1, alignItems: 'center', gap: 4 }}><View style={{ height: 5, width: '100%', borderRadius: 3, backgroundColor: done || active ? T.blue : T.bgInput, opacity: done ? 0.5 : 1 }} /><Text style={{ fontSize: 9 * fontScale, fontWeight: active ? '900' : '700', color: active ? T.blue : T.textMuted }}>{s}</Text></View>); })}</View>
+          <Animated.View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1.5, borderColor: T.border, shadowColor: T.textMuted, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4, opacity: stepAnim }}>
+            {wStep === 1 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><Feather name="tag" size={20} color={T.blue} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 1 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Nome do Produto</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16, lineHeight: 19 }}>Digite o nome do produto que será cadastrado na prateleira.</Text><TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 18, borderRadius: 18, fontSize: 16 * fontScale, color: T.text, fontWeight: '700', minHeight: 80, textAlignVertical: 'top' }} placeholder="Ex: Leite Integral Parmalat 1L" placeholderTextColor={T.textSub} value={prodName} onChangeText={setProdName} multiline autoCorrect />{prodName.length > 0 && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 12, backgroundColor: T.blueGlow, borderRadius: 12, borderWidth: 1, borderColor: T.blue + '30' }}><Feather name="check-circle" size={14} color={T.blue} /><Text style={{ fontSize: 12 * fontScale, color: T.blue, fontWeight: '700', flex: 1 }} numberOfLines={1}>{prodName}</Text></View>)}</>)}
+            {wStep === 2 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.amber + '50' }}><Feather name="calendar" size={20} color={T.amber} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.amber, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 2 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Data de Validade</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Informe a data de vencimento impressa na embalagem.</Text><TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 20, borderRadius: 18, fontSize: 28 * fontScale, color: T.text, textAlign: 'center', letterSpacing: 4, fontWeight: '900' }} keyboardType="numeric" placeholder="DD/MM/AAAA" placeholderTextColor={T.textSub} value={validade} onChangeText={fmtDate} maxLength={10} autoFocus />{validade.length === 10 && (isValidDate(validade) ? (() => { const vs = vencStatus(validade); const colors = { expired: T.red, warning: T.amber, ok: T.green, unknown: T.textMuted }; const icons = { expired: 'alert-circle', warning: 'alert-triangle', ok: 'check-circle', unknown: 'clock' }; const labels = { expired: `Produto já vencido!`, warning: `Vence em ${vs.days} dia${vs.days !== 1 ? 's' : ''}`, ok: `Válido até ${validade}`, unknown: 'Data inválida' }; return (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: colors[vs.status] + '18', borderRadius: 12, borderWidth: 1, borderColor: colors[vs.status] + '40' }}><Feather name={icons[vs.status]} size={16} color={colors[vs.status]} /><Text style={{ fontSize: 13 * fontScale, color: colors[vs.status], fontWeight: '800' }}>{labels[vs.status]}</Text></View>); })() : (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: T.redGlow, borderRadius: 12, borderWidth: 1, borderColor: T.red + '40' }}><Feather name="alert-circle" size={16} color={T.red} /><Text style={{ fontSize: 13 * fontScale, color: T.red, fontWeight: '800' }}>Data inválida! Use o formato DD/MM/AAAA e uma data real.</Text></View>))}</>)}
+            {wStep === 3 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><Feather name="box" size={20} color={T.blue} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 3 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Quantidade</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Quantas unidades foram colocadas nesta prateleira?</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><TextInput ref={inputRef} style={{ flex: 1, backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 20, borderRadius: 18, fontSize: 36 * fontScale, color: T.text, textAlign: 'center', letterSpacing: 2, fontWeight: '900' }} keyboardType="numeric" placeholder="0" placeholderTextColor={T.textSub} value={qtd} onChangeText={setQtd} autoFocus /><TouchableOpacity onPress={() => setShowCalculator(true)} style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue }}><Feather name="calculator" size={28} color={T.blue} /></TouchableOpacity></View>{qtd && Number(qtd) > 0 && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: T.blueGlow, borderRadius: 12, borderWidth: 1, borderColor: T.blue + '30' }}><Feather name="package" size={14} color={T.blue} /><Text style={{ fontSize: 13 * fontScale, color: T.blue, fontWeight: '800' }}>{qtd} unidades serão registradas</Text></View>)}</>)}
+            {wStep === 4 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.purpleGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.purple + '50' }}><Feather name="refresh-cw" size={20} color={T.purple} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.purple, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 4 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Giro Estimado</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Qual a velocidade de venda esperada deste produto?</Text><View style={{ gap: 10, marginBottom: 16 }}>{['Grande giro', 'Médio giro', 'Pouco giro'].map(g => { const cfg = GIRO[g]; const on = giro === g; return (<TouchableOpacity key={g} style={[{ flexDirection: 'row', alignItems: 'center', padding: 18, borderRadius: 18, borderWidth: 2, borderColor: T.border, backgroundColor: T.bgInput, gap: 14 }, on && { backgroundColor: cfg.glow, borderColor: cfg.color + '80' }]} onPress={() => setGiro(g)}><View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: on ? cfg.color + '25' : T.bgElevated, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: on ? cfg.color + '50' : T.border }}><Feather name={cfg.icon} size={20} color={cfg.color} /></View><View style={{ flex: 1 }}><Text style={[{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: cfg.color, fontWeight: '900' }]}>{g}</Text><Text style={{ fontSize: 11 * fontScale, color: T.textMuted, marginTop: 3 }}>~{cfg.rate.toFixed(1)} unidades/dia</Text></View>{on && <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: cfg.color, justifyContent: 'center', alignItems: 'center' }}><Feather name="check" size={14} color="#FFF" /></View>}</TouchableOpacity>); })}</View>{metrics && (<View style={{ padding: 16, borderRadius: 16, backgroundColor: T.purpleGlow, borderWidth: 1, borderColor: T.purple + '35' }}><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.purple, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Previsão Automática</Text><View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1, backgroundColor: T.bgCard, borderRadius: 12, padding: 10, alignItems: 'center' }}><Text style={{ fontSize: 8 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase' }}>Ruptura</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.purple, marginTop: 3 }}>{metrics.depletionDateFull}</Text></View><View style={{ flex: 1, backgroundColor: T.bgCard, borderRadius: 12, padding: 10, alignItems: 'center' }}><Text style={{ fontSize: 8 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase' }}>Em</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.purple, marginTop: 3 }}>{metrics.remainingDays} dias</Text></View></View></View>)}</>)}
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>{wStep > 1 && (<TouchableOpacity style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => animateStep(() => setWStep(p => p - 1))}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity>)}<PrimaryBtn label={wStep < 4 ? 'Avançar →' : '✓ Finalizar Cadastro'} onPress={handleNext} style={{ flex: 1 }} color={T.blue} fontScale={fontScale} /></View>
+          </Animated.View>
+          {showPreview && (prodName || validade || qtd || giro) && (<View style={{ marginTop: 20, backgroundColor: T.bgCard, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 }}>Resumo do Cadastro</Text>{[{ label: 'Produto', val: prodName, icon: 'tag', c: T.blue }, { label: 'Validade', val: validade, icon: 'calendar', c: T.amber }, { label: 'Quantidade', val: qtd ? `${qtd} un` : '', icon: 'package', c: T.green }, { label: 'Giro', val: giro, icon: 'refresh-cw', c: T.purple }, { label: 'Destino', val: shlabel(getTargetShelf?.() || cadastroShelf || activeShelf), icon: 'layers', c: T.orange }].filter(i => i.val).map(i => (<View key={i.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, borderTopWidth: 1, borderColor: T.border }}><Feather name={i.icon} size={13} color={i.c} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted, width: 64 }}>{i.label}</Text><Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.text, flex: 1 }} numberOfLines={1}>{i.val}</Text></View>))}</View>)}
+        </ScrollView>
+      </Animated.View>
+      <CalculatorModal visible={showCalculator} onClose={() => setShowCalculator(false)} onResult={(val) => setQtd(String(val))} T={T} fontScale={fontScale} />
     </KeyboardAvoidingView>
   );
 };
 
-// ─── PRODUCT SOURCE MODAL ────────────────────────────────────────────────────
 const ProductSourceModal = ({ visible, sources, onSelect, onClose, T, fontScale }) => {
   const [selected, setSelected] = useState(0);
+  const [thinkingPhase, setThinkingPhase] = useState(true);
+  const [thinkingSeconds, setThinkingSeconds] = useState(3);
+  const [showFailed, setShowFailed] = useState(false);
   const slideA = useRef(new Animated.Value(WIN.height)).current;
   const opacA = useRef(new Animated.Value(0)).current;
+  const pulseThinkA = useRef(new Animated.Value(1)).current;
+  const rotateThinkA = useRef(new Animated.Value(0)).current;
+  const thinkingTimerRef = useRef(null);
+  const countdownRef = useRef(null);
+  const pulseLoopRef = useRef(null);
+  const rotateLoopRef = useRef(null);
 
-  const sourceColors = (src) => ({
-    ia: { color: T.purple, glow: T.purpleGlow, icon: 'cpu' },
-    bluesoft: { color: T.blue, glow: T.blueGlow, icon: 'database' },
-    openfoodfacts: { color: T.teal, glow: T.tealGlow, icon: 'globe' },
-    manual: { color: T.textSub, glow: T.bgInput, icon: 'alert-circle' },
-  }[src] || { color: T.blue, glow: T.blueGlow, icon: 'info' });
+  const sourceColors = (src) => {
+    const map = {
+      ia: { color: T.purple, glow: T.purpleGlow, icon: 'cpu', label: 'GEI.IA' },
+      groq: { color: T.orange, glow: T.orangeGlow, icon: 'zap', label: 'GEI-GROK' },
+      bluesoft: { color: T.blue, glow: T.blueGlow, icon: 'database', label: 'Bluesoft' },
+      openfoodfacts: { color: T.teal, glow: T.tealGlow, icon: 'globe', label: 'Open Food Facts' },
+      manual: { color: T.textSub, glow: T.bgInput, icon: 'alert-circle', label: 'Manual' },
+      error: { color: T.red, glow: T.redGlow, icon: 'alert-triangle', label: 'Erro na Fonte' },
+    };
+    return map[src] || { color: T.blue, glow: T.blueGlow, icon: 'info', label: 'Desconhecido' };
+  };
 
   useEffect(() => {
     if (visible) {
-      setSelected(0); slideA.setValue(WIN.height); opacA.setValue(0);
+      setThinkingPhase(true);
+      setThinkingSeconds(3);
+      setShowFailed(false);
+      const offIdx = sources.findIndex(s => s.status === 'success' && s.source === 'openfoodfacts');
+      const firstValid = sources.findIndex(s => s.status === 'success');
+      const preferred = offIdx !== -1 ? offIdx : (firstValid !== -1 ? firstValid : 0);
+      setSelected(preferred);
+      slideA.setValue(WIN.height); opacA.setValue(0);
       Animated.parallel([
         Animated.spring(slideA, { toValue: 0, tension: 52, friction: 11, useNativeDriver: false }),
         Animated.timing(opacA, { toValue: 1, duration: 280, useNativeDriver: false }),
       ]).start();
+      pulseLoopRef.current = Animated.loop(Animated.sequence([
+        Animated.timing(pulseThinkA, { toValue: 1.18, duration: 750, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+        Animated.timing(pulseThinkA, { toValue: 1, duration: 750, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+      ]));
+      pulseLoopRef.current.start();
+      rotateThinkA.setValue(0);
+      rotateLoopRef.current = Animated.loop(Animated.timing(rotateThinkA, { toValue: 1, duration: 1400, easing: Easing.linear, useNativeDriver: false }));
+      rotateLoopRef.current.start();
+      let secs = 3;
+      countdownRef.current = setInterval(() => { secs = secs - 1; setThinkingSeconds(secs); if (secs <= 0) { clearInterval(countdownRef.current); countdownRef.current = null; } }, 1000);
+      thinkingTimerRef.current = setTimeout(() => {
+        setThinkingPhase(false);
+        if (pulseLoopRef.current) { pulseLoopRef.current.stop(); pulseLoopRef.current = null; }
+        if (rotateLoopRef.current) { rotateLoopRef.current.stop(); rotateLoopRef.current = null; }
+        pulseThinkA.setValue(1);
+      }, 3000);
     } else {
+      if (thinkingTimerRef.current) { clearTimeout(thinkingTimerRef.current); thinkingTimerRef.current = null; }
+      if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+      if (pulseLoopRef.current) { pulseLoopRef.current.stop(); pulseLoopRef.current = null; }
+      if (rotateLoopRef.current) { rotateLoopRef.current.stop(); rotateLoopRef.current = null; }
       Animated.parallel([
         Animated.timing(slideA, { toValue: WIN.height, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
         Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: false }),
       ]).start();
     }
-  }, [visible]);
+    return () => {
+      if (thinkingTimerRef.current) { clearTimeout(thinkingTimerRef.current); thinkingTimerRef.current = null; }
+      if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+    };
+  }, [visible, sources, slideA, opacA, pulseThinkA, rotateThinkA]);
 
   if (!visible || !sources?.length) return null;
 
-  const handleConfirm = () => { const item = sources[selected]; onSelect({ nome: item.nome, giro: item.giro }); };
+  const visibleSources = sources.filter(s => s.status === 'success');
+  const failedSources = sources.filter(s => s.status !== 'success');
+
+  const handleConfirm = () => {
+    const item = visibleSources[selected];
+    if (!item || item.status === 'error') {
+      Alert.alert('Fonte com erro', 'Não é possível usar uma fonte que falhou na análise.');
+      return;
+    }
+    onSelect({ nome: item.nome, giro: item.giro });
+  };
+
   const confidenceBadge = (c) => {
     if (c >= 85) return { label: 'Alta confiança', color: T.green };
     if (c >= 60) return { label: 'Média confiança', color: T.amber };
     return { label: 'Baixa confiança', color: T.red };
   };
 
+  const spinInterp = rotateThinkA.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const AI_SOURCES_LIST = [
+    { label: 'GEI.IA Gemini', icon: 'cpu', color: T.purple },
+    { label: 'Bluesoft Cosmos', icon: 'database', color: T.blue },
+    { label: 'GEI-SUPER', icon: 'star', color: T.amber },
+    { label: 'GEI-LOGIC', icon: 'zap', color: T.orange },
+    { label: 'Open Food Facts', icon: 'globe', color: T.teal },
+  ];
+
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', opacity: opacA }}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <Animated.View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: T.bgCard, borderTopLeftRadius: 36, borderTopRightRadius: 36, paddingBottom: 28 + NAV_BAR_H, borderTopWidth: 2, borderColor: T.blue + '60', maxHeight: WIN.height * 0.99, transform: [{ translateY: slideA }], shadowColor: '#000', shadowOffset: { width: 0, height: -12 }, shadowOpacity: 0.5, shadowRadius: 30, elevation: 28 }}>
+          <View style={{ alignItems: 'center', paddingTop: 14, paddingBottom: 4 }}><View style={{ width: 48, height: 5, backgroundColor: T.blue + '60', borderRadius: 3 }} /></View>
+          {thinkingPhase ? (
+            <View style={{ padding: 28, alignItems: 'center', minHeight: 400, justifyContent: 'center' }}>
+              <Animated.View style={{ width: 108, height: 108, borderRadius: 54, backgroundColor: T.purple + '16', borderWidth: 3, borderColor: T.purple + '55', justifyContent: 'center', alignItems: 'center', marginBottom: 26, shadowColor: T.purple, shadowOpacity: 0.45, shadowRadius: 24, elevation: 14, transform: [{ scale: pulseThinkA }] }}>
+                <Animated.View style={{ transform: [{ rotate: spinInterp }] }}><MaterialCommunityIcons name="brain" size={54} color={T.purple} /></Animated.View>
+              </Animated.View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: T.purple + '15', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginBottom: 14, borderWidth: 1, borderColor: T.purple + '30' }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.purple }} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.purple, letterSpacing: 1.4, textTransform: 'uppercase' }}>GEI.AI · Processando</Text></View>
+              <Text style={{ fontSize: 21 * fontScale, fontWeight: '900', color: T.text, marginBottom: 8, textAlign: 'center', letterSpacing: -0.3 }}>IA está pensando...</Text>
+              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', textAlign: 'center', lineHeight: 20, marginBottom: 26, paddingHorizontal: 24 }}>O Gemini está aprimorando as descrições encontradas na Bluesoft e Open Food Facts para você</Text>
+              <View style={{ width: 76, height: 76, borderRadius: 38, backgroundColor: T.bgElevated, borderWidth: 3.5, borderColor: thinkingSeconds <= 1 ? T.green + '80' : T.blue + '60', justifyContent: 'center', alignItems: 'center', marginBottom: 24, shadowColor: T.blue, shadowOpacity: 0.2, shadowRadius: 12, elevation: 6 }}>
+                <Text style={{ fontSize: 30 * fontScale, fontWeight: '900', color: thinkingSeconds <= 1 ? T.green : T.blue, lineHeight: 34 * fontScale }}>{Math.max(0, thinkingSeconds)}</Text>
+                <Text style={{ fontSize: 9 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>seg</Text>
+              </View>
+              <View style={{ width: '100%', height: 7, backgroundColor: T.border, borderRadius: 4, overflow: 'hidden', marginBottom: 26 }}>
+                <View style={{ height: '100%', borderRadius: 4, backgroundColor: thinkingSeconds <= 1 ? T.green : T.purple, width: `${Math.min(100, ((3 - Math.max(0, thinkingSeconds)) / 3) * 100)}%` }} />
+              </View>
+              <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 14 }}>Consultando {AI_SOURCES_LIST.length} fontes</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>{AI_SOURCES_LIST.map((ai, idx) => (<View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, backgroundColor: ai.color + '12', borderColor: ai.color + '35' }}><ActivityIndicator size="small" color={ai.color} style={{ transform: [{ scale: 0.65 }] }} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: ai.color }}>{ai.label}</Text></View>))}</View>
+            </View>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+                <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><MaterialCommunityIcons name="text-search" size={24} color={T.blue} /></View>
+                <View style={{ flex: 1 }}><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Fontes encontradas</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Selecione o nome do produto</Text></View>
+              </View>
+              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 20, lineHeight: 19 }}>{visibleSources.length > 0 ? `Consultamos ${sources.length} fonte${sources.length !== 1 ? 's' : ''}. ${visibleSources.length} responderam com sucesso. Escolha o melhor nome:` : 'Nenhuma fonte retornou resultado. Tente novamente.'}</Text>
+              {visibleSources.length === 0 && (<View style={{ alignItems: 'center', paddingVertical: 32 }}><Feather name="alert-circle" size={40} color={T.red} /><Text style={{ color: T.textSub, marginTop: 12, fontSize: 14 * fontScale, fontWeight: '700', textAlign: 'center' }}>Todas as fontes falharam. Tente escanear novamente.</Text></View>)}
+              <View style={{ gap: 12, marginBottom: 16 }}>{visibleSources.map((src, i) => { const pal = sourceColors(src.status === 'error' ? 'error' : src.source); const conf = confidenceBadge(src.confianca); const isSelected = selected === i; return (<TouchableOpacity key={`${src.source}-${i}`} activeOpacity={0.85} onPress={() => setSelected(i)}><Animated.View style={{ borderRadius: 22, borderWidth: isSelected ? 2.5 : 1.5, borderColor: isSelected ? pal.color : T.border, backgroundColor: isSelected ? pal.glow : T.bgElevated, overflow: 'hidden' }}>{isSelected && <View style={{ height: 3, backgroundColor: pal.color }} />}<View style={{ padding: 16 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}><View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: isSelected ? pal.color + '25' : T.bgCard, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: isSelected ? pal.color + '50' : T.border }}><Feather name={pal.icon} size={16} color={isSelected ? pal.color : T.textSub} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: isSelected ? pal.color : T.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 }}>{src.sourceLabel}</Text>{src.source === 'openfoodfacts' && <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '800', color: T.green }}>⭐ Prioritário</Text>}</View>{src.status !== 'error' && (<View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: conf.color + '18', borderWidth: 1, borderColor: conf.color + '40' }}><Text style={{ fontSize: 9.5 * fontScale, fontWeight: '900', color: conf.color }}>{src.confianca}%</Text></View>)}{isSelected ? (<View style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: pal.color, justifyContent: 'center', alignItems: 'center' }}><Feather name="check" size={14} color="#FFF" /></View>) : (<View style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: T.bgCard, borderWidth: 1.5, borderColor: T.border }} />)}</View><View style={{ backgroundColor: isSelected ? pal.color + '12' : T.bgCard, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: isSelected ? pal.color + '30' : T.border }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '800', color: isSelected ? T.text : T.textSub, lineHeight: 21 * fontScale }}>{src.nome}</Text>{src.status === 'error' && <Text style={{ fontSize: 12 * fontScale, fontWeight: '700', color: T.red, marginTop: 5 }}>Motivo: {src.error}</Text>}{src.categoria ? <Text style={{ fontSize: 10.5 * fontScale, fontWeight: '700', color: T.textMuted, marginTop: 5 }}>Categoria: {src.categoria}</Text> : null}</View>{src.giro && src.status !== 'error' && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 }}><Feather name="refresh-cw" size={11} color={T.textMuted} /><Text style={{ fontSize: 11 * fontScale, color: T.textMuted, fontWeight: '700' }}>Giro sugerido: <Text style={{ color: isSelected ? pal.color : T.textSub, fontWeight: '900' }}>{src.giro}</Text></Text></View>)}</View></Animated.View></TouchableOpacity>); })}</View>
+              {failedSources.length > 0 && (<><TouchableOpacity onPress={() => setShowFailed(v => !v)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1.5, borderColor: T.textMuted + '45', backgroundColor: T.bgElevated, marginBottom: showFailed ? 12 : 20 }} activeOpacity={0.75}><Feather name={showFailed ? 'chevron-up' : 'chevron-down'} size={16} color={T.textMuted} /><Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }}>{showFailed ? 'Ocultar resultados' : 'Visualizar mais resultados'}</Text><View style={{ paddingHorizontal: 7, paddingVertical: 3, borderRadius: 8, backgroundColor: T.red + '18', borderWidth: 1, borderColor: T.red + '35' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.red }}>{failedSources.length} sem resposta</Text></View></TouchableOpacity>{showFailed && (<View style={{ gap: 8, marginBottom: 20 }}>{failedSources.map((src, i) => (<View key={`failed-${i}`} style={{ borderRadius: 16, borderWidth: 1, borderColor: T.red + '28', backgroundColor: T.redGlow, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}><View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: T.red + '18', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.red + '38' }}><Feather name="alert-triangle" size={15} color={T.red} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>{src.sourceLabel}</Text><Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600', marginTop: 2 }} numberOfLines={2}>{src.error || 'Fonte não respondeu nesta consulta'}</Text></View></View>))}</View>)}</>)}
+              {visibleSources.length > 0 && (<TouchableOpacity onPress={handleConfirm} style={{ height: 54, borderRadius: 16, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 10, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 14, elevation: 6, marginBottom: 8 }}><Feather name="check-circle" size={18} color="#FFF" /><Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: '#FFF' }}>Usar este nome</Text></TouchableOpacity>)}
+              <TouchableOpacity onPress={onClose} style={{ height: 48, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 14 * fontScale, fontWeight: '700', color: T.textSub }}>Digitar manualmente</Text></TouchableOpacity>
+            </ScrollView>
+          )}
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+};
+
+// 🆕 NOVO COMPONENTE: EXPIRY ANALYSIS MODAL (ANÁLISE DE VENCIMENTOS POR MÊS)
+const ExpiryAnalysisModal = ({ visible, onClose, products, T, fontScale }) => {
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const slideA = useRef(new Animated.Value(WIN.height)).current;
+  const opacA = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Agrupa produtos por mês/ano (próximos 30 dias)
+  const expiryGroups = useMemo(() => {
+    const now = today();
+    const thirtyDaysLater = addDays(now, 30);
+    const filtered = products.filter(prod => {
+      const dt = parseDate(prod.VENCIMENTO);
+      if (!dt) return false;
+      const diff = diffDays(dt, now);
+      return diff >= 0 && diff <= 30;
+    });
+    const groups = new Map();
+    filtered.forEach(prod => {
+      const dt = parseDate(prod.VENCIMENTO);
+      if (!dt) return;
+      const monthKey = `${dt.getFullYear()}-${dt.getMonth() + 1}`;
+      const monthName = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(dt);
+      if (!groups.has(monthKey)) {
+        groups.set(monthKey, { monthName, products: [], total: 0 });
+      }
+      groups.get(monthKey).products.push(prod);
+      groups.get(monthKey).total++;
+    });
+    // Ordenar por data crescente
+    const sorted = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    return sorted.map(([key, value]) => ({ key, ...value }));
+  }, [products]);
+
+  const totalItems = expiryGroups.reduce((acc, g) => acc + g.total, 0);
+
+  useEffect(() => {
+    if (visible) {
+      slideA.setValue(WIN.height);
+      opacA.setValue(0);
+      Animated.parallel([
+        Animated.spring(slideA, { toValue: 0, tension: 52, friction: 11, useNativeDriver: false }),
+        Animated.timing(opacA, { toValue: 1, duration: 280, useNativeDriver: false }),
+      ]).start();
+      Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: false }).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideA, { toValue: WIN.height, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: false }),
+      ]).start();
+      setSelectedMonth(null);
+    }
+  }, [visible]);
+
+  const getMonthColor = (daysUntilExpiry) => {
+    if (daysUntilExpiry <= 7) return T.red;
+    if (daysUntilExpiry <= 15) return T.amber;
+    return T.green;
+  };
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', opacity: opacA }}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
         <Animated.View style={{
           position: 'absolute', bottom: 0, left: 0, right: 0,
-          backgroundColor: T.bgCard, borderTopLeftRadius: 36, borderTopRightRadius: 36,
-          paddingBottom: 28 + NAV_BAR_H, borderTopWidth: 2, borderColor: T.blue + '60',
-          maxHeight: WIN.height * 0.88, transform: [{ translateY: slideA }],
-          shadowColor: '#000', shadowOffset: { width: 0, height: -12 }, shadowOpacity: 0.5, shadowRadius: 30, elevation: 28,
+          backgroundColor: T.bgCard,
+          borderTopLeftRadius: 32, borderTopRightRadius: 32,
+          paddingBottom: 20 + NAV_BAR_H,
+          borderTopWidth: 2.5, borderColor: T.orange + '80',
+          maxHeight: WIN.height * 0.95,
+          transform: [{ translateY: slideA }],
+          shadowColor: '#000', shadowOffset: { width: 0, height: -10 },
+          shadowOpacity: 0.35, shadowRadius: 28, elevation: 28,
         }}>
-          <View style={{ alignItems: 'center', paddingTop: 14, paddingBottom: 4 }}>
-            <View style={{ width: 48, height: 5, backgroundColor: T.blue + '60', borderRadius: 3 }} />
+          <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 2 }}>
+            <View style={{ width: 48, height: 5, backgroundColor: T.orange + '80', borderRadius: 3 }} />
           </View>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 8 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-              <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}>
-                <MaterialCommunityIcons name="text-search" size={24} color={T.blue} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Fontes encontradas</Text>
-                <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Selecione o nome do produto</Text>
-              </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderColor: T.border }}>
+            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.orangeGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.orange + '60', marginRight: 12 }}>
+              <Feather name="calendar" size={24} color={T.orange} />
             </View>
-            <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 20, lineHeight: 19 }}>
-              Consultamos {sources.length} fonte{sources.length !== 1 ? 's' : ''}. O resultado com maior confiança foi pré-selecionado. Escolha o melhor nome:
-            </Text>
-            <View style={{ gap: 12, marginBottom: 20 }}>
-              {sources.map((src, i) => {
-                const pal = sourceColors(src.source);
-                const conf = confidenceBadge(src.confianca);
-                const isSelected = selected === i;
-                return (
-                  <TouchableOpacity key={`${src.source}-${i}`} activeOpacity={0.85} onPress={() => setSelected(i)}>
-                    <Animated.View style={{ borderRadius: 22, borderWidth: isSelected ? 2.5 : 1.5, borderColor: isSelected ? pal.color : T.border, backgroundColor: isSelected ? pal.glow : T.bgElevated, overflow: 'hidden' }}>
-                      {isSelected && <View style={{ height: 3, backgroundColor: pal.color }} />}
-                      <View style={{ padding: 16 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                          <View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: isSelected ? pal.color + '25' : T.bgCard, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: isSelected ? pal.color + '50' : T.border }}>
-                            <Feather name={pal.icon} size={16} color={isSelected ? pal.color : T.textSub} />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: isSelected ? pal.color : T.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 }}>{src.sourceLabel}</Text>
-                            {i === 0 && <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '800', color: T.green }}>⭐ Recomendado</Text>}
-                          </View>
-                          <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: conf.color + '18', borderWidth: 1, borderColor: conf.color + '40' }}>
-                            <Text style={{ fontSize: 9.5 * fontScale, fontWeight: '900', color: conf.color }}>{src.confianca}%</Text>
-                          </View>
-                          {isSelected ? (
-                            <View style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: pal.color, justifyContent: 'center', alignItems: 'center' }}>
-                              <Feather name="check" size={14} color="#FFF" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.orange, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 2 }}>Previsão de Vencimentos</Text>
+              <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.4 }}>Próximos 30 dias</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.border }}>
+              <Feather name="x" size={17} color={T.textSub} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
+            {totalItems === 0 ? (
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                <Feather name="check-circle" size={60} color={T.green} />
+                <Text style={{ fontSize: 16 * fontScale, fontWeight: '900', color: T.text, marginTop: 16 }}>Nenhum produto vence nos próximos 30 dias</Text>
+                <Text style={{ fontSize: 13 * fontScale, color: T.textSub, marginTop: 8, textAlign: 'center' }}>Todos os produtos estão dentro do prazo de validade.</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={{ fontSize: 13 * fontScale, color: T.textSub, marginBottom: 16, fontWeight: '600' }}>
+                  📊 {totalItems} produto{totalItems !== 1 ? 's' : ''} vence{totalItems !== 1 ? 'm' : ''} nos próximos 30 dias
+                </Text>
+                <Animated.View style={{ opacity: fadeAnim }}>
+                  {expiryGroups.map(group => {
+                    const monthDate = parseDate(`01/${group.key.split('-')[1]}/${group.key.split('-')[0]}`);
+                    const daysToFirstExpiry = monthDate ? diffDays(monthDate, today()) : 0;
+                    const urgency = daysToFirstExpiry <= 7 ? 'critical' : daysToFirstExpiry <= 15 ? 'warning' : 'normal';
+                    const urgencyColor = urgency === 'critical' ? T.red : urgency === 'warning' ? T.amber : T.blue;
+                    return (
+                      <TouchableOpacity key={group.key} activeOpacity={0.8} onPress={() => setSelectedMonth(selectedMonth?.key === group.key ? null : group)}>
+                        <Animated.View style={{
+                          backgroundColor: T.bgElevated,
+                          borderRadius: 20,
+                          marginBottom: 12,
+                          borderWidth: 2,
+                          borderColor: selectedMonth?.key === group.key ? urgencyColor : T.border,
+                          overflow: 'hidden',
+                        }}>
+                          <View style={{ padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                              <View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: urgencyColor + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: urgencyColor + '50' }}>
+                                <Text style={{ fontSize: 20, fontWeight: '900', color: urgencyColor }}>{group.key.split('-')[1]}</Text>
+                              </View>
+                              <View>
+                                <Text style={{ fontSize: 16 * fontScale, fontWeight: '900', color: T.text }}>{group.monthName}</Text>
+                                <Text style={{ fontSize: 12 * fontScale, color: T.textMuted, fontWeight: '600' }}>{group.total} produto{group.total !== 1 ? 's' : ''}</Text>
+                              </View>
                             </View>
-                          ) : (
-                            <View style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: T.bgCard, borderWidth: 1.5, borderColor: T.border }} />
-                          )}
-                        </View>
-                        <View style={{ backgroundColor: isSelected ? pal.color + '12' : T.bgCard, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: isSelected ? pal.color + '30' : T.border }}>
-                          <Text style={{ fontSize: 15 * fontScale, fontWeight: '800', color: isSelected ? T.text : T.textSub, lineHeight: 21 * fontScale }}>{src.nome}</Text>
-                          {src.categoria ? <Text style={{ fontSize: 10.5 * fontScale, fontWeight: '700', color: T.textMuted, marginTop: 5 }}>Categoria: {src.categoria}</Text> : null}
-                        </View>
-                        {src.giro && (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 }}>
-                            <Feather name="refresh-cw" size={11} color={T.textMuted} />
-                            <Text style={{ fontSize: 11 * fontScale, color: T.textMuted, fontWeight: '700' }}>
-                              Giro sugerido: <Text style={{ color: isSelected ? pal.color : T.textSub, fontWeight: '900' }}>{src.giro}</Text>
-                            </Text>
+                            <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: urgencyColor + '20', borderWidth: 1, borderColor: urgencyColor + '50' }}>
+                              <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: urgencyColor }}>
+                                {urgency === 'critical' ? 'URGENTE' : urgency === 'warning' ? 'ATENÇÃO' : 'NORMAL'}
+                              </Text>
+                            </View>
                           </View>
-                        )}
-                      </View>
-                    </Animated.View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <TouchableOpacity onPress={handleConfirm} style={{ height: 54, borderRadius: 16, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 10, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 14, elevation: 6, marginBottom: 8 }}>
-              <Feather name="check-circle" size={18} color="#FFF" />
-              <Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: '#FFF' }}>Usar este nome</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onClose} style={{ height: 48, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}>
-              <Text style={{ fontSize: 14 * fontScale, fontWeight: '700', color: T.textSub }}>Digitar manualmente</Text>
-            </TouchableOpacity>
+                          <Animated.View style={{ maxHeight: selectedMonth?.key === group.key ? 400 : 0, overflow: 'hidden' }}>
+                            <View style={{ borderTopWidth: 1, borderColor: T.border, paddingHorizontal: 16, paddingVertical: 12, gap: 10 }}>
+                              {group.products.map(prod => {
+                                const dt = parseDate(prod.VENCIMENTO);
+                                const days = dt ? diffDays(dt, today()) : 0;
+                                const barColor = getMonthColor(days);
+                                return (
+                                  <View key={prod.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.text }} numberOfLines={1}>
+                                        {prod.produto || 'Produto sem nome'}
+                                      </Text>
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                        <Feather name="alert-triangle" size={12} color={barColor} />
+                                        <Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: barColor }}>
+                                          {days <= 0 ? 'Vence hoje' : `Vence em ${days} dia${days !== 1 ? 's' : ''}`}
+                                        </Text>
+                                        <Text style={{ fontSize: 10 * fontScale, color: T.textMuted }}>· {prod.VENCIMENTO}</Text>
+                                      </View>
+                                    </View>
+                                    <View style={{ width: 60, height: 6, backgroundColor: T.bgInput, borderRadius: 3, overflow: 'hidden' }}>
+                                      <View style={{ height: '100%', width: `${Math.min(100, (days / 30) * 100)}%`, backgroundColor: barColor, borderRadius: 3 }} />
+                                    </View>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </Animated.View>
+                        </Animated.View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </Animated.View>
+                <View style={{ backgroundColor: T.blueGlow, borderRadius: 16, padding: 14, marginTop: 8, borderWidth: 1, borderColor: T.blue + '40', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <Feather name="info" size={20} color={T.blue} />
+                  <Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600', flex: 1 }}>Produtos vencendo nos próximos 30 dias. Toque em um mês para expandir e ver os detalhes.</Text>
+                </View>
+              </>
+            )}
           </ScrollView>
         </Animated.View>
       </Animated.View>
@@ -1731,17 +1960,13 @@ const ProductSourceModal = ({ visible, sources, onSelect, onClose, T, fontScale 
   );
 };
 
-// ─── DARK ENVIRONMENT HOOK ───────────────────────────────────────────────────
 const useDarkEnvironment = (isScanning = false) => {
   const systemScheme = Appearance.getColorScheme();
   const [state, setState] = useState({ isDarkEnv: systemScheme === 'dark', lightLevel: systemScheme === 'dark' ? 0 : 1, source: 'system' });
   const subRef = useRef(null); const sensorSubRef = useRef(null);
   const sensorAvailable = useRef(false); const pollRef = useRef(null);
-
   useEffect(() => {
-    subRef.current = Appearance.addChangeListener(({ colorScheme }) => {
-      if (!sensorAvailable.current) setState({ isDarkEnv: colorScheme === 'dark', lightLevel: colorScheme === 'dark' ? 0.1 : 0.9, source: 'system' });
-    });
+    subRef.current = Appearance.addChangeListener(({ colorScheme }) => { if (!sensorAvailable.current) setState({ isDarkEnv: colorScheme === 'dark', lightLevel: colorScheme === 'dark' ? 0.1 : 0.9, source: 'system' }); });
     const tryLightSensor = async () => {
       try {
         const { LightSensor } = await import('expo-sensors');
@@ -1749,21 +1974,1141 @@ const useDarkEnvironment = (isScanning = false) => {
         if (!isAvail) return;
         sensorAvailable.current = true;
         LightSensor.setUpdateInterval(isScanning ? 650 : 1500);
-        sensorSubRef.current = LightSensor.addListener(({ illuminance }) => {
-          const normalized = Math.min(1, illuminance / 300);
-          setState({ isDarkEnv: illuminance < 40, lightLevel: normalized, source: 'sensor' });
-        });
+        sensorSubRef.current = LightSensor.addListener(({ illuminance }) => { const normalized = Math.min(1, illuminance / 300); setState({ isDarkEnv: illuminance < 40, lightLevel: normalized, source: 'sensor' }); });
       } catch (_) { /* noop */ }
     };
     tryLightSensor();
     if (isScanning && !pollRef.current) { pollRef.current = setInterval(() => setState(prev => ({ ...prev })), 700); }
-    return () => {
-      subRef.current?.remove(); sensorSubRef.current?.remove();
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    };
+    return () => { subRef.current?.remove(); sensorSubRef.current?.remove(); if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [isScanning]);
-
   return state;
+};
+
+const Block3D = ({ sz, anim, topColor, frontColor, rightColor }) => (
+  <Animated.View style={{
+    width: sz, height: sz, margin: 1.5,
+    opacity: anim,
+    transform: [
+      { scale: anim.interpolate({ inputRange: [0, 0.5, 0.85, 1], outputRange: [0, 1.22, 0.94, 1] }) },
+      { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-sz * 5, 0] }) },
+    ],
+    shadowColor: '#000', shadowOpacity: 0.45, shadowRadius: 6, shadowOffset: { width: 0, height: 4 }, elevation: 8,
+  }}>
+    <View style={{ position: 'absolute', inset: 0, backgroundColor: frontColor, borderRadius: 7, overflow: 'hidden' }}>
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: sz * 0.32, backgroundColor: topColor, borderTopLeftRadius: 7, borderTopRightRadius: 7 }} />
+      <View style={{ position: 'absolute', top: 3, left: 5, width: sz * 0.28, height: sz * 0.13, backgroundColor: 'rgba(255,255,255,0.55)', borderRadius: 4 }} />
+      <View style={{ position: 'absolute', top: 0, left: 0, width: sz * 0.14, bottom: 0, backgroundColor: rightColor, borderTopLeftRadius: 7, borderBottomLeftRadius: 7 }} />
+      <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: sz * 0.18, backgroundColor: 'rgba(0,0,0,0.28)', borderBottomLeftRadius: 7, borderBottomRightRadius: 7 }} />
+      <View style={{ position: 'absolute', inset: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', borderRadius: 7 }} />
+    </View>
+  </Animated.View>
+);
+
+const Pinha3DScene = ({ pyramidAnims, PYRAMID_ROWS, T, resultado }) => {
+  const rotateZ   = useRef(new Animated.Value(0)).current;
+  const sceneOpac = useRef(new Animated.Value(0)).current;
+  const loopRef   = useRef(null);
+
+  useEffect(() => {
+    Animated.timing(sceneOpac, { toValue: 1, duration: 400, useNativeDriver: false }).start();
+    loopRef.current = Animated.loop(
+      Animated.timing(rotateZ, { toValue: 1, duration: 9000, easing: Easing.linear, useNativeDriver: false })
+    );
+    loopRef.current.start();
+    return () => { if (loopRef.current) loopRef.current.stop(); };
+  }, []);
+
+  const spin = rotateZ.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  const ROW_PALETTES = [
+    { top: '#FF7A45', front: '#D44B16', right: 'rgba(0,0,0,0.3)' },
+    { top: '#FFB347', front: '#D97706', right: 'rgba(0,0,0,0.28)' },
+    { top: '#34D399', front: '#059669', right: 'rgba(0,0,0,0.26)' },
+    { top: '#38BDF8', front: '#0284C7', right: 'rgba(0,0,0,0.24)' },
+    { top: '#C084FC', front: '#7C3AED', right: 'rgba(0,0,0,0.22)' },
+  ];
+
+  const SZ = 38;
+  let animIdx = 0;
+
+  return (
+    <Animated.View style={{ alignItems: 'center', opacity: sceneOpac }}>
+      <View style={{ position: 'absolute', width: 260, height: 120, borderRadius: 130, backgroundColor: T.teal + '18', bottom: 0, alignSelf: 'center', shadowColor: T.teal, shadowOpacity: 0.6, shadowRadius: 30, elevation: 0 }} />
+      <Animated.View style={{
+        transform: [
+          { perspective: 700 },
+          { rotateX: '56deg' },
+          { rotateZ: spin },
+        ],
+        marginBottom: -10,
+      }}>
+        <View style={{ alignItems: 'center', paddingBottom: 8 }}>
+          <View style={{
+            position: 'absolute',
+            width: SZ * 7, height: SZ * 7,
+            borderRadius: 12,
+            backgroundColor: T.bgElevated,
+            bottom: 0,
+            borderWidth: 1.5, borderColor: T.teal + '30',
+            shadowColor: T.teal, shadowOpacity: 0.2, shadowRadius: 14, elevation: 3,
+          }}>
+            {[1, 2, 3, 4, 5, 6].map(i => (<View key={`h${i}`} style={{ position: 'absolute', top: `${(i / 7) * 100}%`, left: 0, right: 0, height: 1, backgroundColor: T.teal + '20' }} />))}
+            {[1, 2, 3, 4, 5, 6].map(i => (<View key={`v${i}`} style={{ position: 'absolute', left: `${(i / 7) * 100}%`, top: 0, bottom: 0, width: 1, backgroundColor: T.teal + '20' }} />))}
+          </View>
+          <View style={{ alignItems: 'center', paddingBottom: SZ * 0.5 }}>
+            {PYRAMID_ROWS.map((count, ri) => {
+              const pal = ROW_PALETTES[Math.min(ri, ROW_PALETTES.length - 1)];
+              const row = [];
+              for (let ci = 0; ci < count; ci++) {
+                const curIdx = animIdx++;
+                row.push(
+                  <Block3D
+                    key={ci}
+                    sz={SZ}
+                    anim={pyramidAnims[curIdx]}
+                    topColor={pal.top}
+                    frontColor={pal.front}
+                    rightColor={pal.right}
+                  />
+                );
+              }
+              return (
+                <View key={ri} style={{ flexDirection: 'row', justifyContent: 'center', zIndex: PYRAMID_ROWS.length - ri }}>
+                  {row}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      </Animated.View>
+      <View style={{ width: 180, height: 18, borderRadius: 90, backgroundColor: 'rgba(0,0,0,0.22)', marginTop: 4, alignSelf: 'center' }} />
+      <View style={{ flexDirection: 'row', gap: 6, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {ROW_PALETTES.slice(0, PYRAMID_ROWS.length).map((pal, i) => (
+          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, backgroundColor: pal.front + '22', borderWidth: 1, borderColor: pal.front + '55' }}>
+            <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: pal.front }} />
+            <Text style={{ fontSize: 10, fontWeight: '800', color: pal.front }}>Camada {i + 1}</Text>
+          </View>
+        ))}
+      </View>
+      {resultado && resultado.total > 15 && (
+        <View style={{ marginTop: 10, backgroundColor: T.teal + '18', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 8, borderWidth: 1, borderColor: T.teal + '50' }}>
+          <Text style={{ fontSize: 12, fontWeight: '800', color: T.teal, textAlign: 'center' }}>
+            + {Math.ceil(resultado.total) - 15} unidades adicionais nesta pinha
+          </Text>
+        </View>
+      )}
+    </Animated.View>
+  );
+};
+
+const PinhasCalculatorModal = ({ visible, onClose, T, fontScale }) => {
+  const [step, setStep] = useState(1);
+  const [largura, setLargura] = useState('');
+  const [comprimento, setComprimento] = useState('');
+  const [altura, setAltura] = useState('');
+  const [fardoQtd, setFardoQtd] = useState('');
+  const [estoqueAtual, setEstoqueAtual] = useState('');
+  const [resultado, setResultado] = useState(null);
+  const [activeTab, setActiveTab] = useState('resultado');
+
+  const slideA       = useRef(new Animated.Value(WIN.height)).current;
+  const opacA        = useRef(new Animated.Value(0)).current;
+  const resultScaleA = useRef(new Animated.Value(0)).current;
+  const pulseA       = useRef(new Animated.Value(1)).current;
+  const glowA        = useRef(new Animated.Value(0)).current;
+  const pulseLoopRef = useRef(null);
+  const glowLoopRef  = useRef(null);
+
+  const PYRAMID_ROWS = [5, 4, 3, 2, 1];
+  const TOTAL_PYRAMID = 15;
+  const pyramidAnims = useRef([...Array(TOTAL_PYRAMID)].map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.spring(slideA, { toValue: 0, tension: 52, friction: 11, useNativeDriver: false }),
+        Animated.timing(opacA, { toValue: 1, duration: 300, useNativeDriver: false }),
+      ]).start();
+    } else {
+      if (pulseLoopRef.current) { pulseLoopRef.current.stop(); pulseLoopRef.current = null; }
+      if (glowLoopRef.current) { glowLoopRef.current.stop(); glowLoopRef.current = null; }
+      Animated.parallel([
+        Animated.timing(slideA, { toValue: WIN.height, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: false }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const reset = () => {
+    setStep(1); setLargura(''); setComprimento(''); setAltura('');
+    setFardoQtd(''); setEstoqueAtual(''); setResultado(null); setActiveTab('resultado');
+    pyramidAnims.forEach(a => a.setValue(0));
+    resultScaleA.setValue(0); pulseA.setValue(1); glowA.setValue(0);
+    if (pulseLoopRef.current) { pulseLoopRef.current.stop(); pulseLoopRef.current = null; }
+    if (glowLoopRef.current) { glowLoopRef.current.stop(); glowLoopRef.current = null; }
+  };
+
+  const handleClose = () => { reset(); onClose(); };
+
+  const calcular = () => {
+    const l = parseFloat(largura) || 0;
+    const c = parseFloat(comprimento) || 0;
+    const a = parseFloat(altura) || 0;
+    const f = parseInt(fardoQtd) || 0;
+    const estoque = parseInt(estoqueAtual) || 0;
+    const total = l * c * a * f;
+    const totalCeil = Math.ceil(total);
+    const pinhasNecessarias = estoque > 0 && totalCeil > 0 ? Math.ceil(estoque / totalCeil) : 0;
+    const ocupacao = estoque > 0 && totalCeil > 0 ? Math.min(100, (estoque / totalCeil) * 100) : 0;
+    setResultado({ total, totalCeil, l, c, a, f, estoque, pinhasNecessarias, ocupacao });
+    setStep(3);
+    setTimeout(() => {
+      pyramidAnims.forEach(aa => aa.setValue(0));
+      resultScaleA.setValue(0);
+      let idx = 0;
+      const rowAnims = [];
+      for (let ri = 0; ri < PYRAMID_ROWS.length; ri++) {
+        for (let ci = 0; ci < PYRAMID_ROWS[ri]; ci++) {
+          rowAnims.push({ anim: pyramidAnims[idx], delay: ri * 100 + ci * 40 });
+          idx++;
+        }
+      }
+      const animations = rowAnims.map(({ anim, delay }) =>
+        Animated.sequence([Animated.delay(delay), Animated.spring(anim, { toValue: 1, tension: 130, friction: 7, useNativeDriver: false })])
+      );
+      Animated.parallel(animations).start(() => {
+        Animated.spring(resultScaleA, { toValue: 1, tension: 80, friction: 8, useNativeDriver: false }).start();
+        pulseLoopRef.current = Animated.loop(Animated.sequence([
+          Animated.timing(pulseA, { toValue: 1.06, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+          Animated.timing(pulseA, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+        ]));
+        pulseLoopRef.current.start();
+        glowLoopRef.current = Animated.loop(Animated.sequence([
+          Animated.timing(glowA, { toValue: 1, duration: 1200, useNativeDriver: false }),
+          Animated.timing(glowA, { toValue: 0, duration: 1200, useNativeDriver: false }),
+        ]));
+        glowLoopRef.current.start();
+      });
+    }, 120);
+  };
+
+  const handleNext = () => {
+    if (step === 1) {
+      if (!largura.trim() || !comprimento.trim() || !altura.trim()) {
+        Alert.alert('⚠️ Atenção', 'Preencha largura, comprimento e altura para continuar.'); return;
+      }
+      if (parseFloat(largura) <= 0 || parseFloat(comprimento) <= 0 || parseFloat(altura) <= 0) {
+        Alert.alert('⚠️ Valores inválidos', 'Os valores devem ser maiores que zero.'); return;
+      }
+      setStep(2);
+    } else if (step === 2) {
+      if (!fardoQtd.trim() || parseInt(fardoQtd) <= 0) {
+        Alert.alert('⚠️ Atenção', 'Informe quantos produtos vêm no fardo (deve ser maior que zero).'); return;
+      }
+      calcular();
+    }
+  };
+
+  const MiniBarChart = ({ data, T, fontScale }) => {
+    const maxVal = Math.max(...data.map(d => d.value), 1);
+    const barColors = ['#3B5BFF', '#14B8A6', '#F59E0B', '#8B5CF6', '#EF4444'];
+    return (
+      <View style={{ width: '100%' }}>
+        {data.map((item, i) => (
+          <View key={i} style={{ marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textSub }}>{item.label}</Text>
+              <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: barColors[i % barColors.length] }}>{item.value}</Text>
+            </View>
+            <View style={{ height: 8, backgroundColor: T.border, borderRadius: 4, overflow: 'hidden' }}>
+              <View style={{ height: '100%', width: `${(item.value / maxVal) * 100}%`, backgroundColor: barColors[i % barColors.length], borderRadius: 4 }} />
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  if (!visible) return null;
+
+  const STEPS = ['Dimensões', 'Fardo', 'Resultado'];
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose} statusBarTranslucent>
+      <Animated.View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', opacity: opacA }}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
+        <Animated.View style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          backgroundColor: T.bgCard,
+          borderTopLeftRadius: 32, borderTopRightRadius: 32,
+          paddingBottom: 20 + NAV_BAR_H,
+          borderTopWidth: 2.5, borderColor: T.teal + '80',
+          maxHeight: WIN.height * 0.95,
+          transform: [{ translateY: slideA }],
+          shadowColor: T.teal, shadowOffset: { width: 0, height: -10 },
+          shadowOpacity: 0.35, shadowRadius: 28, elevation: 28,
+        }}>
+          <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 2 }}>
+            <View style={{ width: 48, height: 5, backgroundColor: T.teal + '80', borderRadius: 3 }} />
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderColor: T.border }}>
+            <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.tealGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.teal + '60', marginRight: 12, shadowColor: T.teal, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 }}>
+              <MaterialCommunityIcons name="calculator-variant" size={24} color={T.teal} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.teal, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 2 }}>Simulação 3D · GEI.AI</Text>
+              <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.4 }}>Calculadora de Pinhas</Text>
+            </View>
+            <TouchableOpacity onPress={handleClose} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.border }}>
+              <Feather name="x" size={17} color={T.textSub} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 10, borderBottomWidth: 1, borderColor: T.border }}>
+            {STEPS.map((label, idx) => {
+              const n = idx + 1;
+              const isActive = step === n;
+              const isDone = step > n;
+              return (
+                <React.Fragment key={label}>
+                  <View style={{ alignItems: 'center' }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: isDone ? T.teal : isActive ? T.tealGlow : T.bgInput, borderWidth: 2, borderColor: isDone || isActive ? T.teal : T.border, justifyContent: 'center', alignItems: 'center' }}>
+                      {isDone ? <Feather name="check" size={14} color="#FFF" /> : <Text style={{ fontSize: 13, fontWeight: '900', color: isActive ? T.teal : T.textMuted }}>{n}</Text>}
+                    </View>
+                    <Text style={{ fontSize: 8 * fontScale, fontWeight: '800', color: isActive || isDone ? T.teal : T.textMuted, marginTop: 4 }}>{label}</Text>
+                  </View>
+                  {idx < 2 && (<View style={{ flex: 1, height: 2, marginHorizontal: 5, marginBottom: 14, borderRadius: 2, backgroundColor: step > idx + 1 ? T.teal : T.border }} />)}
+                </React.Fragment>
+              );
+            })}
+          </View>
+
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 20 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+              {step === 1 && (
+                <View style={{ gap: 14 }}>
+                  <View style={{ backgroundColor: T.bgElevated, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: T.teal + '35', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <MaterialCommunityIcons name="cube-outline" size={20} color={T.teal} />
+                    <Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub, flex: 1 }}>Informe as dimensões de cada unidade em <Text style={{ color: T.teal, fontWeight: '900' }}>centímetros</Text></Text>
+                  </View>
+
+                  {[
+                    { label: 'Largura', value: largura, set: setLargura, icon: 'arrow-left-right', hint: 'esq ↔ dir' },
+                    { label: 'Comprimento', value: comprimento, set: setComprimento, icon: 'arrow-expand-horizontal', hint: 'frente ↔ fundo' },
+                    { label: 'Altura', value: altura, set: setAltura, icon: 'arrow-expand-vertical', hint: 'baixo ↑ cima' },
+                  ].map(({ label, value, set, icon, hint }) => (
+                    <View key={label}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.textSub, textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</Text>
+                        <Text style={{ fontSize: 10 * fontScale, fontWeight: '600', color: T.textMuted }}>{hint}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderRadius: 14, borderWidth: 2, borderColor: value ? T.teal + '80' : T.border, paddingHorizontal: 12, gap: 8 }}>
+                        <MaterialCommunityIcons name={icon} size={17} color={value ? T.teal : T.textMuted} />
+                        <TextInput style={{ flex: 1, paddingVertical: 12, fontSize: 18 * fontScale, color: T.text, fontWeight: '900' }} placeholder="0" placeholderTextColor={T.textMuted} value={value} onChangeText={set} keyboardType="decimal-pad" />
+                        <View style={{ backgroundColor: value ? T.teal + '20' : T.bgElevated, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: value ? T.teal + '50' : T.border }}>
+                          <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: value ? T.teal : T.textMuted }}>cm</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+
+                  {largura && comprimento && altura && (
+                    <View style={{ backgroundColor: T.tealGlow, borderRadius: 14, padding: 12, borderWidth: 1.5, borderColor: T.teal + '60', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <MaterialCommunityIcons name="cube-scan" size={22} color={T.teal} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.teal, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 2 }}>Volume unitário</Text>
+                        <Text style={{ fontSize: 17 * fontScale, fontWeight: '900', color: T.text }}>{(parseFloat(largura) * parseFloat(comprimento) * parseFloat(altura)).toFixed(2)} cm³</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  <TouchableOpacity onPress={handleNext} style={{ height: 52, borderRadius: 16, backgroundColor: T.teal, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8, marginTop: 4, shadowColor: T.teal, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 }}>
+                    <Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: '#FFF' }}>Próximo</Text>
+                    <Feather name="arrow-right" size={18} color="#FFF" />
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {step === 2 && (
+                <View style={{ gap: 14 }}>
+                  <View style={{ backgroundColor: T.bgElevated, borderRadius: 16, padding: 12, borderWidth: 1.5, borderColor: T.teal + '45' }}>
+                    <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.teal, textTransform: 'uppercase', letterSpacing: 1.1, marginBottom: 10 }}>Dimensões confirmadas</Text>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {[['L', largura], ['C', comprimento], ['A', altura]].map(([k, v]) => (
+                        <View key={k} style={{ flex: 1, alignItems: 'center', backgroundColor: T.bgCard, borderRadius: 12, padding: 10, borderWidth: 1.5, borderColor: T.teal + '55' }}>
+                          <Text style={{ fontSize: 8 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', marginBottom: 3 }}>{k}</Text>
+                          <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.teal }}>{v}</Text>
+                          <Text style={{ fontSize: 8 * fontScale, fontWeight: '700', color: T.textMuted }}>cm</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+
+                  <View style={{ backgroundColor: T.bgElevated, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: T.border }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                      <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.orange + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.orange + '50' }}>
+                        <MaterialCommunityIcons name="package-variant-closed" size={20} color={T.orange} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.orange, textTransform: 'uppercase', letterSpacing: 0.7 }}>Fardo / Caixa</Text>
+                        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.text }}>Quantos vêm por embalagem?</Text>
+                      </View>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderRadius: 14, borderWidth: 2.5, borderColor: fardoQtd ? T.orange + '80' : T.border, paddingHorizontal: 14, gap: 10 }}>
+                      <MaterialCommunityIcons name="calculator" size={20} color={fardoQtd ? T.orange : T.textMuted} />
+                      <TextInput style={{ flex: 1, paddingVertical: 14, fontSize: 24 * fontScale, color: T.text, fontWeight: '900' }} placeholder="ex: 12" placeholderTextColor={T.textMuted} value={fardoQtd} onChangeText={setFardoQtd} keyboardType="numeric" autoFocus />
+                      <Text style={{ fontSize: 12 * fontScale, fontWeight: '700', color: T.textMuted }}>un/fardo</Text>
+                    </View>
+                  </View>
+
+                  <View style={{ backgroundColor: T.bgElevated, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: T.blue + '40' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                      <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}>
+                        <Feather name="layers" size={18} color={T.blue} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.7 }}>Estoque Atual <Text style={{ color: T.textMuted, fontWeight: '600', fontSize: 9 * fontScale }}>(opcional)</Text></Text>
+                        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.text }}>Quantas unidades você tem?</Text>
+                      </View>
+                    </View>
+                    <Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 10, lineHeight: 16 }}>Informe o estoque atual para calcular quantas pinhas são necessárias e gerar gráficos.</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderRadius: 14, borderWidth: 2, borderColor: estoqueAtual ? T.blue + '80' : T.border, paddingHorizontal: 14, gap: 10 }}>
+                      <Feather name="box" size={18} color={estoqueAtual ? T.blue : T.textMuted} />
+                      <TextInput style={{ flex: 1, paddingVertical: 12, fontSize: 22 * fontScale, color: T.text, fontWeight: '900' }} placeholder="0" placeholderTextColor={T.textMuted} value={estoqueAtual} onChangeText={setEstoqueAtual} keyboardType="numeric" />
+                      <Text style={{ fontSize: 12 * fontScale, fontWeight: '700', color: T.textMuted }}>un</Text>
+                    </View>
+                  </View>
+
+                  {fardoQtd && largura && comprimento && altura && parseInt(fardoQtd) > 0 && (
+                    <View style={{ backgroundColor: T.orange + '15', borderRadius: 14, padding: 12, borderWidth: 1.5, borderColor: T.orange + '55', flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.orange + '25', justifyContent: 'center', alignItems: 'center' }}>
+                        <MaterialCommunityIcons name="calculator-variant" size={20} color={T.orange} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.orange, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 3 }}>Pré-visualização</Text>
+                        <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text }}>{Math.ceil(parseFloat(largura) * parseFloat(comprimento) * parseFloat(altura) * parseInt(fardoQtd))} un por pinha</Text>
+                        <Text style={{ fontSize: 10 * fontScale, color: T.textSub, fontWeight: '600', marginTop: 2 }}>{largura} × {comprimento} × {altura} × {fardoQtd}</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity onPress={() => setStep(1)} style={{ flex: 1, height: 50, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.border, flexDirection: 'row', gap: 6 }}>
+                      <Feather name="arrow-left" size={15} color={T.textSub} />
+                      <Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }}>Voltar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleNext} style={{ flex: 2.2, height: 50, borderRadius: 14, backgroundColor: T.teal, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8, shadowColor: T.teal, shadowOpacity: 0.4, shadowRadius: 12, elevation: 8 }}>
+                      <MaterialCommunityIcons name="calculator-variant" size={18} color="#FFF" />
+                      <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: '#FFF' }}>Calcular Pinha 3D</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {step === 3 && resultado && (
+                <View style={{ gap: 14 }}>
+                  <View style={{ flexDirection: 'row', backgroundColor: T.bgElevated, borderRadius: 14, padding: 4, gap: 2 }}>
+                    {[
+                      { key: 'resultado', label: '3D', icon: 'cube-outline' },
+                      { key: 'grafico', label: 'Gráfico', icon: 'bar-chart-2' },
+                      { key: 'estoque', label: 'Estoque', icon: 'layers' },
+                    ].map(tab => (
+                      <TouchableOpacity key={tab.key} onPress={() => setActiveTab(tab.key)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, borderRadius: 11, backgroundColor: activeTab === tab.key ? T.teal : 'transparent' }}>
+                        <Feather name={tab.icon} size={13} color={activeTab === tab.key ? '#FFF' : T.textSub} />
+                        <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: activeTab === tab.key ? '#FFF' : T.textSub }}>{tab.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  {activeTab === 'resultado' && (
+                    <View style={{ gap: 12 }}>
+                      <View style={{ backgroundColor: T.bgElevated, borderRadius: 24, paddingTop: 16, paddingBottom: 14, paddingHorizontal: 8, borderWidth: 2, borderColor: T.teal + '55', shadowColor: T.teal, shadowOpacity: 0.2, shadowRadius: 18, elevation: 8, overflow: 'hidden' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12, paddingHorizontal: 8 }}>
+                          <Animated.View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: glowA.interpolate({ inputRange: [0, 1], outputRange: [T.teal, T.green] }), shadowColor: T.teal, shadowOpacity: 0.9, shadowRadius: 5 }} />
+                          <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.teal, textTransform: 'uppercase', letterSpacing: 1.4 }}>Pinha 3D · Perspectiva orbital</Text>
+                        </View>
+                        <Pinha3DScene pyramidAnims={pyramidAnims} PYRAMID_ROWS={PYRAMID_ROWS} T={T} resultado={resultado} />
+                      </View>
+
+                      <Animated.View style={{ backgroundColor: T.tealGlow, borderRadius: 22, padding: 20, borderWidth: 2, borderColor: glowA.interpolate({ inputRange: [0, 1], outputRange: [T.teal + '70', T.green + '90'] }), alignItems: 'center', transform: [{ scale: resultScaleA }], shadowColor: T.teal, shadowOpacity: 0.25, shadowRadius: 18, elevation: 10 }}>
+                        <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.teal, textTransform: 'uppercase', letterSpacing: 1.8, marginBottom: 6 }}>Total da Pinha</Text>
+                        <Animated.Text style={{ fontSize: 70 * fontScale, fontWeight: '900', color: T.teal, letterSpacing: -3, lineHeight: 74 * fontScale, transform: [{ scale: pulseA }], textShadowColor: T.teal + '40', textShadowOffset: { width: 0, height: 3 }, textShadowRadius: 10 }}>
+                          {resultado.totalCeil}
+                        </Animated.Text>
+                        <Text style={{ fontSize: 13 * fontScale, color: T.teal, fontWeight: '700', marginTop: 6, opacity: 0.85 }}>unidades calculadas</Text>
+                      </Animated.View>
+
+                      <View style={{ backgroundColor: T.bgElevated, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: T.border }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                          <MaterialCommunityIcons name="function-variant" size={16} color={T.blue} />
+                          <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textSub, textTransform: 'uppercase', letterSpacing: 0.7 }}>Fórmula: L × C × A × Fardo</Text>
+                        </View>
+                        <View style={{ backgroundColor: T.bgCard, borderRadius: 11, padding: 12, borderWidth: 1, borderColor: T.border }}>
+                          <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '800' }}>{resultado.l} × {resultado.c} × {resultado.a} × {resultado.f} = <Text style={{ color: T.teal, fontSize: 17 * fontScale }}>{resultado.totalCeil} un</Text></Text>
+                        </View>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        {[['📦', 'Larg.', `${resultado.l}cm`], ['📏', 'Comp.', `${resultado.c}cm`], ['📐', 'Alt.', `${resultado.a}cm`], ['🧮', 'Fardo', `${resultado.f}un`]].map(([emoji, k, v]) => (
+                          <View key={k} style={{ flex: 1, backgroundColor: T.bgElevated, borderRadius: 12, padding: 8, alignItems: 'center', borderWidth: 1, borderColor: T.border }}>
+                            <Text style={{ fontSize: 14 }}>{emoji}</Text>
+                            <Text style={{ fontSize: 8 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', marginTop: 2 }}>{k}</Text>
+                            <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.text, marginTop: 1 }}>{v}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {activeTab === 'grafico' && (
+                    <View style={{ gap: 12 }}>
+                      <View style={{ backgroundColor: T.bgElevated, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: T.blue + '40' }}>
+                        <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 14 }}>Composição da Pinha</Text>
+                        {MiniBarChart({
+                          data: [
+                            { label: `Largura (${resultado.l} cm)`, value: parseFloat(resultado.l) },
+                            { label: `Comprimento (${resultado.c} cm)`, value: parseFloat(resultado.c) },
+                            { label: `Altura (${resultado.a} cm)`, value: parseFloat(resultado.a) },
+                            { label: `Fardo (${resultado.f} un)`, value: parseFloat(resultado.f) },
+                          ],
+                          T,
+                          fontScale
+                        })}
+                      </View>
+
+                      <View style={{ backgroundColor: T.bgElevated, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: T.purple + '40' }}>
+                        <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.purple, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 }}>Comparativo de Volume</Text>
+                        {[
+                          { label: 'Unidade (cm³)', value: parseFloat(resultado.l) * parseFloat(resultado.c) * parseFloat(resultado.a), color: '#8B5CF6' },
+                          { label: 'Fardo total (cm³)', value: parseFloat(resultado.l) * parseFloat(resultado.c) * parseFloat(resultado.a) * resultado.f, color: '#14B8A6' },
+                        ].map((item, i) => {
+                          const maxV = parseFloat(resultado.l) * parseFloat(resultado.c) * parseFloat(resultado.a) * resultado.f;
+                          return (
+                            <View key={i} style={{ marginBottom: i === 0 ? 10 : 0 }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                                <Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textSub }}>{item.label}</Text>
+                                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: item.color }}>{item.value.toFixed(1)}</Text>
+                              </View>
+                              <View style={{ height: 10, backgroundColor: T.border, borderRadius: 5, overflow: 'hidden' }}>
+                                <View style={{ height: '100%', width: `${(item.value / maxV) * 100}%`, backgroundColor: item.color, borderRadius: 5 }} />
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        {[
+                          { label: 'Volume unitário', value: (parseFloat(resultado.l) * parseFloat(resultado.c) * parseFloat(resultado.a)).toFixed(1) + ' cm³', color: T.blue },
+                          { label: 'Total na pinha', value: resultado.totalCeil + ' un', color: T.teal },
+                        ].map((s, i) => (
+                          <View key={i} style={{ flex: 1, backgroundColor: T.bgElevated, borderRadius: 14, padding: 14, borderWidth: 1.5, borderColor: s.color + '40', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 10 * fontScale, fontWeight: '700', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, textAlign: 'center' }}>{s.label}</Text>
+                            <Text style={{ fontSize: 16 * fontScale, fontWeight: '900', color: s.color }}>{s.value}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {activeTab === 'estoque' && (
+                    <View style={{ gap: 12 }}>
+                      {resultado.estoque > 0 ? (
+                        <>
+                          <View style={{ backgroundColor: T.tealGlow, borderRadius: 20, padding: 16, borderWidth: 2, borderColor: T.teal + '60', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.teal, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 }}>Pinhas Necessárias</Text>
+                            <Text style={{ fontSize: 56 * fontScale, fontWeight: '900', color: T.teal, letterSpacing: -2, lineHeight: 60 * fontScale }}>{resultado.pinhasNecessarias}</Text>
+                            <Text style={{ fontSize: 12 * fontScale, color: T.teal, fontWeight: '700', marginTop: 4, opacity: 0.8 }}>para acomodar {resultado.estoque} unidades</Text>
+                          </View>
+
+                          <View style={{ backgroundColor: T.bgElevated, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: T.border }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                              <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.text }}>Ocupação da última pinha</Text>
+                              <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: resultado.ocupacao >= 80 ? T.green : resultado.ocupacao >= 40 ? T.amber : T.red }}>{resultado.ocupacao.toFixed(1)}%</Text>
+                            </View>
+                            <View style={{ height: 16, backgroundColor: T.border, borderRadius: 8, overflow: 'hidden' }}>
+                              <View style={{ height: '100%', width: `${resultado.ocupacao}%`, backgroundColor: resultado.ocupacao >= 80 ? T.green : resultado.ocupacao >= 40 ? T.amber : T.red, borderRadius: 8 }} />
+                            </View>
+                            <Text style={{ fontSize: 10 * fontScale, color: T.textMuted, fontWeight: '600', marginTop: 8 }}>
+                              {resultado.ocupacao >= 80 ? '✅ Pinha bem aproveitada' : resultado.ocupacao >= 40 ? '⚠️ Pinha parcialmente ocupada' : '❌ Pinha pouco aproveitada — considere ajustar o fardo'}
+                            </Text>
+                          </View>
+
+                          <View style={{ backgroundColor: T.bgElevated, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: T.blue + '35' }}>
+                            <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 1.1, marginBottom: 12 }}>Detalhamento do Estoque</Text>
+                            {MiniBarChart({
+                              data: [
+                                { label: 'Capacidade por pinha', value: resultado.totalCeil },
+                                { label: 'Estoque atual (un)', value: resultado.estoque },
+                                { label: 'Pinhas necessárias', value: resultado.pinhasNecessarias },
+                              ],
+                              T,
+                              fontScale
+                            })}
+                          </View>
+
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            {[
+                              { icon: 'package', label: 'Por pinha', value: resultado.totalCeil + ' un', color: T.teal },
+                              { icon: 'layers', label: 'Estoque', value: resultado.estoque + ' un', color: T.blue },
+                              { icon: 'grid', label: 'Pinhas', value: resultado.pinhasNecessarias, color: T.purple },
+                            ].map((s, i) => (
+                              <View key={i} style={{ flex: 1, backgroundColor: T.bgElevated, borderRadius: 13, padding: 10, borderWidth: 1.5, borderColor: s.color + '40', alignItems: 'center' }}>
+                                <Feather name={s.icon} size={16} color={s.color} style={{ marginBottom: 5 }} />
+                                <Text style={{ fontSize: 8 * fontScale, fontWeight: '700', color: T.textMuted, textTransform: 'uppercase', marginBottom: 4, textAlign: 'center' }}>{s.label}</Text>
+                                <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: s.color }}>{s.value}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </>
+                      ) : (
+                        <View style={{ alignItems: 'center', backgroundColor: T.bgElevated, borderRadius: 20, padding: 30, borderWidth: 1, borderColor: T.border }}>
+                          <Feather name="layers" size={44} color={T.textMuted} style={{ marginBottom: 14 }} />
+                          <Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 6 }}>Estoque não informado</Text>
+                          <Text style={{ fontSize: 12 * fontScale, color: T.textSub, fontWeight: '600', textAlign: 'center', lineHeight: 18, marginBottom: 18 }}>Volte para o passo 2 e informe o estoque atual para calcular as pinhas necessárias e ver os gráficos.</Text>
+                          <TouchableOpacity onPress={() => { reset(); setStep(2); }} style={{ height: 44, borderRadius: 13, backgroundColor: T.blue, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8 }}>
+                            <Feather name="edit-2" size={14} color="#FFF" />
+                            <Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: '#FFF' }}>Informar estoque</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  )}
+
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                    <TouchableOpacity onPress={() => { reset(); setStep(1); }} style={{ flex: 1, height: 50, borderRadius: 15, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.border, flexDirection: 'row', gap: 7 }}>
+                      <Feather name="refresh-cw" size={14} color={T.textSub} />
+                      <Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }}>Recalcular</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleClose} style={{ flex: 1.6, height: 50, borderRadius: 15, backgroundColor: T.teal, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 7, shadowColor: T.teal, shadowOpacity: 0.4, shadowRadius: 12, elevation: 8 }}>
+                      <Feather name="check-circle" size={16} color="#FFF" />
+                      <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: '#FFF' }}>Concluído</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+};
+
+const RegisterScreen = ({ T, fontScale, onBack, onRegisterSuccess, showErr }) => {
+  const [nome, setNome] = useState('');
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [confirmSenha, setConfirmSenha] = useState('');
+  const [perfil, setPerfil] = useState('Repositor');
+  const [area, setArea] = useState('bebida');
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+
+  const handleRegister = async () => {
+    if (!nome.trim() || !email.trim() || !senha.trim()) { showErr('Preencha todos os campos.'); return; }
+    if (!isValidEmail(email)) { showErr('E-mail inválido.'); return; }
+    if (senha !== confirmSenha) { showErr('As senhas não coincidem.'); return; }
+    if (senha.length < 6) { showErr('A senha deve ter pelo menos 6 caracteres.'); return; }
+    if (perfil === 'Repositor' && !area) { showErr('Selecione a prateleira do repositor.'); return; }
+    setLoading(true);
+    try {
+      const randomDigits = Math.floor(1000 + Math.random() * 9000);
+      const rastreio = `cordeiro${randomDigits}`;
+      const checkRes = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true&filter__USUARIO__equal=${encodeURIComponent(email)}`);
+      if (checkRes.data.results.length > 0) { showErr('E-mail já cadastrado.'); setLoading(false); return; }
+      const newUser = { USUARIO: email, SENHA: senha, NOME: nome, PERFIL: perfil, AREA: perfil === 'Repositor' ? area : '', ACESSO: false, RASTREIO: rastreio, LOGINRAPIDO: '', TOKEN_BIOMETRICO: '', UTIMOLOGIN: '' };
+      await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`, newUser);
+      await addAuditLog('USER_REGISTERED', `Novo cadastro: ${email} (${perfil}) com rastreio ${rastreio}`);
+      Alert.alert('Cadastro realizado!', `Seu código de rastreio: ${rastreio}\n\nAnote-o para verificar seu acesso. Aguarde aprovação do administrador.`, [{ text: 'OK', onPress: () => onRegisterSuccess() }]);
+    } catch (error) { console.error(error); showErr('Erro ao cadastrar. Verifique sua conexão.'); } finally { setLoading(false); }
+  };
+
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: T.bg }}>
+      <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24 }}><TouchableOpacity onPress={onBack} style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', marginRight: 12 }}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity><Text style={{ fontSize: 26 * fontScale, fontWeight: '900', color: T.text }}>Cadastro</Text></View>
+        <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border }}>
+          <TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, padding: 14, marginBottom: 16, color: T.text, fontSize: 15 }} placeholder="Nome completo" placeholderTextColor={T.textMuted} value={nome} onChangeText={setNome} />
+          <TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, padding: 14, marginBottom: 16, color: T.text, fontSize: 15 }} placeholder="E-mail" placeholderTextColor={T.textMuted} value={email} onChangeText={v => setEmail(v.toLowerCase())} autoCapitalize="none" keyboardType="email-address" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 16, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 14, color: T.text, fontSize: 15 }} placeholder="Senha" placeholderTextColor={T.textMuted} secureTextEntry={!showPass} value={senha} onChangeText={setSenha} /><TouchableOpacity onPress={() => setShowPass(!showPass)}><Feather name={showPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 16, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 14, color: T.text, fontSize: 15 }} placeholder="Confirmar senha" placeholderTextColor={T.textMuted} secureTextEntry={!showPass} value={confirmSenha} onChangeText={setConfirmSenha} /><TouchableOpacity onPress={() => setShowPass(!showPass)}><Feather name={showPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View>
+          <Text style={{ fontSize: 14, fontWeight: '800', color: T.textSub, marginBottom: 8 }}>Função</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>{ALL_ROLES.map(r => (<TouchableOpacity key={r} style={{ flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: perfil === r ? T.blue : T.bgInput, borderWidth: 1, borderColor: perfil === r ? T.blue : T.border }} onPress={() => setPerfil(r)}><Text style={{ textAlign: 'center', fontWeight: '700', color: perfil === r ? '#FFF' : T.textSub }}>{roleLabel(r)}</Text></TouchableOpacity>))}</View>
+          {perfil === 'Repositor' && (<><Text style={{ fontSize: 14, fontWeight: '800', color: T.textSub, marginBottom: 8 }}>Prateleira</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12, backgroundColor: area === k ? T.blueGlow : T.bgInput, borderWidth: 1, borderColor: area === k ? T.blue : T.border }} onPress={() => setArea(k)}><Text style={{ fontWeight: '700', color: area === k ? T.blue : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View></>)}
+          <PrimaryBtn label={loading ? 'Cadastrando...' : 'Cadastrar'} onPress={handleRegister} color={T.blue} style={{ marginTop: 24 }} disabled={loading} />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};
+
+const AdminPanel = ({ T, fontScale, onBack }) => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedShelfForDelete, setSelectedShelfForDelete] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+  const [adminPass, setAdminPass] = useState('');
+  const [showAdminLogin, setShowAdminLogin] = useState(true);
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => { if (adminAuthenticated) { loadUsers(); Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: false }).start(); } }, [adminAuthenticated, fadeAnim, loadUsers]);
+  const loadUsers = useCallback(async () => { setLoading(true); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); setUsers(res.data.results); } catch (error) { Alert.alert('Erro', 'Não foi possível carregar os usuários.'); } finally { setLoading(false); } }, []);
+  const toggleAccess = async (user) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { ACESSO: !user.ACESSO }); await addAuditLog('ADMIN_TOGGLE_ACCESS', `Acesso do usuário ${user.USUARIO} alterado para ${!user.ACESSO}`); loadUsers(); } catch (error) { Alert.alert('Erro', 'Falha ao alterar acesso.'); } };
+  const changeArea = async (user, newArea) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { AREA: newArea }); await addAuditLog('ADMIN_CHANGE_AREA', `Área do usuário ${user.USUARIO} alterada para ${newArea}`); loadUsers(); } catch (error) { Alert.alert('Erro', 'Falha ao alterar área.'); } };
+  const deleteUser = async (user) => { Alert.alert('Deletar colaborador', `Tem certeza que deseja deletar permanentemente ${user.NOME}? Essa ação é irreversível.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Deletar', style: 'destructive', onPress: async () => { try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/`); await addAuditLog('ADMIN_DELETE_USER', `Usuário ${user.USUARIO} deletado`); loadUsers(); Alert.alert('Sucesso', 'Colaborador removido.'); } catch (error) { Alert.alert('Erro', 'Não foi possível deletar o colaborador.'); } } }]); };
+  const deleteAllProductsFromShelf = async () => { if (!selectedShelfForDelete) { Alert.alert('Selecione uma prateleira'); return; } const tableId = SHELVES[selectedShelfForDelete]; if (!tableId) return; Alert.alert('Apagar todos os produtos', `Tem certeza que deseja apagar TODOS os produtos da prateleira ${shlabel(selectedShelfForDelete)}? Essa ação é irreversível.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Apagar tudo', style: 'destructive', onPress: async () => { setDeleting(true); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true&size=200`); const rows = res.data.results; for (const row of rows) { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${row.id}/`); } await addAuditLog('ADMIN_DELETE_ALL_PRODUCTS', `Todos os produtos da prateleira ${selectedShelfForDelete} foram apagados`); Alert.alert('Sucesso', `Todos os produtos da prateleira ${shlabel(selectedShelfForDelete)} foram removidos.`); } catch (error) { Alert.alert('Erro', 'Falha ao apagar produtos.'); } finally { setDeleting(false); } } }]); };
+  const handleAdminLogin = () => { if (adminPass === 'cordeiroadmin') { setAdminAuthenticated(true); setShowAdminLogin(false); } else { Alert.alert('Acesso negado', 'Senha de admin incorreta.'); } };
+  const renderUserItem = ({ item }) => (<View style={{ backgroundColor: T.bgCard, borderRadius: 20, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}><View style={{ flex: 1, marginRight: 8 }}><Text style={{ fontSize: 16, fontWeight: '900', color: T.text }} numberOfLines={1}>{item.NOME}</Text><Text style={{ fontSize: 13, color: T.textSub }} numberOfLines={1}>{item.USUARIO}</Text></View><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Acesso:</Text><Switch value={item.ACESSO} onValueChange={() => toggleAccess(item)} trackColor={{ false: T.border, true: T.green }} thumbColor={item.ACESSO ? T.green : T.textMuted} /><TouchableOpacity onPress={() => deleteUser(item)} style={{ padding: 8, backgroundColor: T.redGlow, borderRadius: 12 }}><Feather name="trash-2" size={18} color={T.red} /></TouchableOpacity></View></View><View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 12, flexWrap: 'wrap' }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Função: {roleLabel(item.PERFIL)}</Text><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Área: {shlabel(item.AREA)}</Text></View>{item.PERFIL === 'Repositor' && (<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} onPress={() => changeArea(item, k)} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: item.AREA === k ? T.blueGlow : T.bgInput, borderWidth: 1, borderColor: item.AREA === k ? T.blue : T.border }}><Text style={{ fontSize: 10, fontWeight: '700', color: item.AREA === k ? T.blue : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View>)}{item.RASTREIO && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 8 }}>Código Rastreio: {item.RASTREIO}</Text>)}{item.UTIMOLOGIN && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Último login: {item.UTIMOLOGIN}</Text>)}</View>);
+
+  if (!adminAuthenticated) {
+    return (<View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', padding: 24 }}><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 24, fontWeight: '900', color: T.text, marginBottom: 8 }}>Admin GEI.AI</Text><Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24 }}>Digite a senha de administrador para acessar o painel.</Text><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 20, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 16, color: T.text, fontSize: 15 }} placeholder="Senha" secureTextEntry={!showAdminPassword} value={adminPass} onChangeText={setAdminPass} /><TouchableOpacity onPress={() => setShowAdminPassword(!showAdminPassword)}><Feather name={showAdminPassword ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View><PrimaryBtn label="Acessar Painel" onPress={handleAdminLogin} color={T.blue} /><TouchableOpacity onPress={onBack} style={{ marginTop: 20, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>← Voltar ao login</Text></TouchableOpacity></View></View>);
+  }
+  return (<View style={{ flex: 1, backgroundColor: T.bg }}><View style={{ paddingHorizontal: 20, paddingTop: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}><TouchableOpacity onPress={onBack} style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity><Text style={{ fontSize: 20, fontWeight: '900', color: T.text }}>Painel Admin</Text><View style={{ width: 44 }} /></View><Animated.ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false} style={{ opacity: fadeAnim }}><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 16, fontWeight: '900', color: T.text, marginBottom: 12 }}>Apagar todos os produtos de uma prateleira</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: selectedShelfForDelete === k ? T.redGlow : T.bgInput, borderWidth: 1, borderColor: selectedShelfForDelete === k ? T.red : T.border }} onPress={() => setSelectedShelfForDelete(k)}><Text style={{ fontWeight: '700', color: selectedShelfForDelete === k ? T.red : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View><PrimaryBtn label={deleting ? 'Apagando...' : 'Apagar todos os produtos'} onPress={deleteAllProductsFromShelf} color={T.red} disabled={deleting} /></View><Text style={{ fontSize: 18, fontWeight: '900', color: T.text, marginBottom: 12 }}>Colaboradores</Text>{loading ? <ActivityIndicator /> : (<FlatList data={users} keyExtractor={(item) => item.id.toString()} renderItem={({ item }) => renderUserItem({ item })} scrollEnabled={false} />)}</Animated.ScrollView></View>);
+};
+
+const RastreioModal = ({ visible, onClose, T, fontScale }) => {
+  const [codigo, setCodigo] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const checkRastreio = async () => { if (!codigo.trim()) return; setLoading(true); setResult(null); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true&filter__RASTREIO__equal=${encodeURIComponent(codigo.trim())}`); if (res.data.results.length === 0) { setResult({ success: false, message: 'Código de rastreio não encontrado.' }); } else { const user = res.data.results[0]; if (user.ACESSO) { setResult({ success: true, message: `✅ Acesso liberado! Você pode fazer login com e-mail e senha.` }); } else { setResult({ success: false, message: `⏳ Acesso ainda não liberado pelo administrador. Aguarde aprovação.` }); } } } catch (error) { setResult({ success: false, message: 'Erro ao consultar. Tente novamente.' }); } finally { setLoading(false); } };
+  return (<Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} /><View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, marginBottom: 8 }}>Verificar Acesso</Text><Text style={{ fontSize: 14 * fontScale, color: T.textSub, marginBottom: 20 }}>Digite o código de rastreio fornecido no cadastro.</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, padding: 16, marginBottom: 20, color: T.text }} placeholder="cordeiroXXXX" value={codigo} onChangeText={setCodigo} autoCapitalize="none" /><PrimaryBtn label={loading ? 'Consultando...' : 'Consultar'} onPress={checkRastreio} color={T.blue} disabled={loading} />{result && (<View style={{ marginTop: 16, padding: 12, borderRadius: 12, backgroundColor: result.success ? T.greenGlow : T.redGlow, borderWidth: 1, borderColor: result.success ? T.green : T.red }}><Text style={{ color: result.success ? T.green : T.red, fontWeight: '700', textAlign: 'center' }}>{result.message}</Text></View>)}<TouchableOpacity onPress={onClose} style={{ marginTop: 20, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>Fechar</Text></TouchableOpacity></View></View></Modal>);
+};
+
+// 🆕 NOVO COMPONENTE: ASSISTENTE DE VOZ
+const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, activeShelf, cadastroShelf, setProdName, setGiro, setValidade, setQtd, setWStep, setCadastroShelf, setIsVoiceActive }) => {
+  const [listening, setListening] = useState(false);
+  const [step, setStep] = useState(0); 
+  const [tempProdName, setTempProdName] = useState('');
+  const [tempQtd, setTempQtd] = useState('');
+  const [tempValidade, setTempValidade] = useState('');
+  const [tempGiro, setTempGiro] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const slideA = useRef(new Animated.Value(WIN.height)).current;
+  const opacA = useRef(new Animated.Value(0)).current;
+
+  const speak = useCallback((text, callback) => {
+    Speech.stop();
+    Speech.speak(text, {
+      language: 'pt-BR',
+      pitch: 1.0,
+      rate: 1.0,
+      onDone: callback,
+    });
+  }, []);
+
+  // Refs para evitar closures obsoletos sem re-registrar handlers
+  const stepRef = useRef(0);
+  const tempProdNameRef = useRef('');
+  const tempQtdRef = useRef('');
+  const tempValidadeRef = useRef('');
+  const listeningRef = useRef(false);
+
+  const startListening = async () => {
+    if (listeningRef.current) {
+      console.log('⚠️ Microfone já está ativo, ignorando nova chamada');
+      return; // evita dupla chamada
+    }
+
+    // 1. Verificar se reconhecimento de voz está disponível no dispositivo
+    try {
+      const available = await Voice.isAvailable();
+      if (!available) {
+        const errorMessage = 'Reconhecimento de voz não disponível neste dispositivo.';
+        console.error('❌', errorMessage);
+        setErrorMsg(errorMessage);
+        Alert.alert('Recurso Indisponível', errorMessage, [{ text: 'OK' }]);
+        return;
+      }
+    } catch (err) {
+      console.error('❌ Erro ao verificar disponibilidade do Voice:', err);
+    }
+
+    // 2. Pedir permissão ANTES de qualquer coisa
+    console.log('🎤 Verificando permissão de microfone...');
+    const hasPermission = await requestMicPermission();
+    
+    if (!hasPermission) {
+      const errorMessage = 'Permissão de microfone negada. Para habilitar, vá em:\nConfigurações > Aplicativos > GEI.AI > Permissões > Microfone';
+      console.error('❌', errorMessage);
+      setErrorMsg('Sem permissão de microfone');
+      
+      Alert.alert(
+        'Permissão Necessária',
+        errorMessage,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Abrir Configurações',
+            onPress: () => {
+              if (Platform.OS === 'android') {
+                Linking.openSettings();
+              }
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    console.log('✅ Permissão de microfone OK, iniciando gravação...');
+
+    try {
+      setTranscript('');
+      setErrorMsg('');
+      
+      // 3. Cancelar qualquer sessão anterior antes de iniciar nova
+      try { 
+        await Voice.cancel(); 
+        console.log('🔄 Voice.cancel() executado');
+      } catch (_) {}
+      
+      try { 
+        await Voice.stop(); 
+        console.log('🔄 Voice.stop() executado');
+      } catch (_) {}
+      
+      // Pequeno delay para garantir que o microfone foi liberado
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      console.log('🎤 Iniciando Voice.start("pt-BR")...');
+      await Voice.start('pt-BR');
+      console.log('✅ Voice.start() executado com sucesso');
+      
+      // setListening é feito pelo onSpeechStart para garantir sincronismo
+    } catch (e) {
+      console.error('❌ ERRO em Voice.start:', e);
+      const code = e?.code || e?.message || '';
+      
+      let errorMessage = 'Erro ao abrir microfone.';
+      
+      if (String(code).includes('busy') || String(code).includes('recognizer')) {
+        errorMessage = 'Microfone ocupado. Aguarde um momento e tente novamente.';
+      } else if (String(code).includes('permission')) {
+        errorMessage = 'Permissão de microfone negada. Verifique as configurações.';
+      }
+      
+      setErrorMsg(errorMessage);
+      Alert.alert('Erro no Microfone', errorMessage, [{ text: 'OK' }]);
+    }
+  };
+
+  const stopListening = async () => {
+    listeningRef.current = false;
+    try { await Voice.stop(); } catch (_) {}
+    setListening(false);
+  };
+
+  useEffect(() => {
+    // Registrar handlers UMA vez — usar refs para acessar valores atuais
+    Voice.onSpeechStart = () => {
+      console.log('🎤 Voice.onSpeechStart - Microfone ATIVO');
+      listeningRef.current = true;
+      setListening(true);
+      setErrorMsg(''); // Limpa mensagem de erro quando começa a escutar
+    };
+    
+    Voice.onSpeechEnd = () => {
+      console.log('🔇 Voice.onSpeechEnd - Microfone PARADO');
+      listeningRef.current = false;
+      setListening(false);
+    };
+    
+    Voice.onSpeechError = (e) => {
+      console.error('❌ Voice.onSpeechError:', e);
+      listeningRef.current = false;
+      setListening(false);
+      
+      const code = String(e?.error?.code || e?.error || '');
+      const message = String(e?.error?.message || '');
+      
+      console.log('Código do erro:', code);
+      console.log('Mensagem do erro:', message);
+      
+      // Código 7 = "no match", código "client" = timeout normal → reiniciar silenciosamente
+      if (code === '7' || code.includes('no-match') || code.includes('client')) {
+        console.log('⚠️ Timeout normal (nenhuma fala detectada), reiniciando...');
+        setTimeout(() => startListening(), 800);
+      } else if (code.includes('busy') || code.includes('recognizer')) {
+        console.log('⚠️ Microfone ocupado, tentando novamente em 2.5s...');
+        setErrorMsg('Microfone ocupado, tentando novamente...');
+        setTimeout(() => startListening(), 2500);
+      } else if (code.includes('permission') || code.includes('audio')) {
+        console.log('❌ Erro de permissão detectado');
+        setErrorMsg('Sem permissão de microfone. Toque no microfone para tentar novamente.');
+      } else {
+        console.log('⚠️ Erro genérico, permitindo retry manual');
+        setErrorMsg('Microfone parou. Toque para falar novamente.');
+      }
+    };
+    
+    Voice.onSpeechResults = (e) => {
+      console.log('📝 Voice.onSpeechResults:', e.value);
+      if (e.value && e.value.length > 0) {
+        const text = e.value[0];
+        setTranscript(text);
+        processCommand(text);
+      }
+    };
+
+    return () => {
+      console.log('🧹 Limpando Voice listeners...');
+      listeningRef.current = false;
+      Voice.destroy().then(() => Voice.removeAllListeners()).catch(() => {});
+    };
+  }, []); // [] = registrar handlers apenas uma vez
+
+  const processCommand = (text) => {
+    const lower = text.toLowerCase();
+    const currentStep = stepRef.current;
+
+    if (currentStep === 0 && (lower.includes('gei') || lower.includes('painel') || lower.includes('olá') || lower.includes('ola'))) {
+      speak('Estou ouvindo. Diga o nome do produto.');
+      stepRef.current = 1;
+      setStep(1);
+      setTimeout(() => startListening(), 1800);
+      return;
+    }
+
+    if (currentStep === 1) {
+      if (lower.includes('cadastrar') || lower.includes('produto')) {
+        speak('Diga o nome do produto.');
+        setTimeout(() => startListening(), 1500);
+        return;
+      }
+      tempProdNameRef.current = text;
+      setTempProdName(text);
+      speak(`${text} anotado. Qual a quantidade?`);
+      stepRef.current = 2;
+      setStep(2);
+      setTimeout(() => startListening(), 2000);
+      return;
+    }
+
+    if (currentStep === 2) {
+      const qty = text.replace(/[^0-9]/g, '') || text;
+      tempQtdRef.current = qty;
+      setTempQtd(qty);
+      speak(`${qty} unidades. Qual a validade?`);
+      stepRef.current = 3;
+      setStep(3);
+      setTimeout(() => startListening(), 2000);
+      return;
+    }
+
+    if (currentStep === 3) {
+      tempValidadeRef.current = text;
+      setTempValidade(text);
+      speak('Qual o giro: pouco, médio ou grande?');
+      stepRef.current = 4;
+      setStep(4);
+      setTimeout(() => startListening(), 2000);
+      return;
+    }
+
+    if (currentStep === 4) {
+      let giro = 'Médio giro';
+      if (lower.includes('grande')) giro = 'Grande giro';
+      else if (lower.includes('pouco')) giro = 'Pouco giro';
+      setTempGiro(giro);
+      speak('Produto cadastrado com sucesso!');
+      setTimeout(() => {
+        onComplete({
+          nome: tempProdNameRef.current,
+          qtd: tempQtdRef.current,
+          validade: tempValidadeRef.current,
+          giro,
+        });
+        onClose();
+      }, 1500);
+    }
+  };
+
+  useEffect(() => {
+    if (visible) {
+      // Resetar tudo ao abrir
+      stepRef.current = 0;
+      tempProdNameRef.current = '';
+      tempQtdRef.current = '';
+      tempValidadeRef.current = '';
+      setStep(0);
+      setTranscript('');
+      setErrorMsg('');
+      slideA.setValue(WIN.height);
+      opacA.setValue(0);
+      
+      console.log('📱 VoiceAssistant ABERTO');
+      
+      Animated.parallel([
+        Animated.spring(slideA, { toValue: 0, useNativeDriver: false, bounciness: 10 }),
+        Animated.timing(opacA, { toValue: 1, duration: 300, useNativeDriver: false }),
+      ]).start();
+      
+      speak('GEI Assistant pronto. Diga "Olá GEI" para começar.');
+      
+      // Espera a animação e o áudio antes de pedir permissão/iniciar
+      setTimeout(async () => {
+        console.log('🎤 Iniciando processo de ativação do microfone...');
+        
+        // Verificar permissão ANTES de chamar startListening
+        const hasPermission = await requestMicPermission();
+        
+        if (hasPermission) {
+          console.log('✅ Permissão OK, iniciando escuta...');
+          startListening();
+        } else {
+          console.log('❌ Permissão NEGADA, mostrando erro ao usuário');
+          setErrorMsg('Permissão de microfone necessária. Toque no microfone para tentar novamente.');
+        }
+      }, 2500);
+
+      // Listener para detectar quando app volta do background
+      // (útil quando usuário vai em configurações e volta)
+      const subscription = AppState.addEventListener('change', async (nextAppState) => {
+        if (nextAppState === 'active' && !listeningRef.current && errorMsg.includes('permissão')) {
+          console.log('📱 App voltou ao foreground, verificando permissão novamente...');
+          
+          // Pequeno delay para garantir que o app está totalmente ativo
+          setTimeout(async () => {
+            const hasPermission = await requestMicPermission();
+            if (hasPermission) {
+              console.log('✅ Permissão concedida! Reiniciando microfone...');
+              setErrorMsg('');
+              setTimeout(() => startListening(), 500);
+            }
+          }, 500);
+        }
+      });
+
+      return () => {
+        subscription.remove();
+      };
+    } else {
+      console.log('📱 VoiceAssistant FECHADO, limpando Voice...');
+      stopListening();
+      try { Voice.cancel(); } catch (_) {}
+    }
+  }, [visible, errorMsg]);
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Animated.View style={{ 
+          width: '90%', backgroundColor: T.bgCard, borderRadius: 35, padding: 30, alignItems: 'center',
+          transform: [{ translateY: slideA }], opacity: opacA,
+          borderWidth: 1, borderColor: T.blue + '30',
+          elevation: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 15
+        }}>
+          <TouchableOpacity 
+            onPress={startListening}
+            activeOpacity={0.7}
+            style={{ 
+              width: 110, 
+              height: 110, 
+              borderRadius: 55, 
+              backgroundColor: errorMsg && errorMsg.includes('permissão') ? T.red : (listening ? T.blue : T.bgInput),
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              marginBottom: 25,
+              borderWidth: 4, 
+              borderColor: errorMsg && errorMsg.includes('permissão') ? T.red + '60' : (listening ? T.blue + '40' : T.border)
+            }}
+          >
+            {errorMsg && errorMsg.includes('permissão') ? (
+              <Feather name="alert-circle" size={55} color="#FFF" />
+            ) : (
+              <MaterialCommunityIcons 
+                name={listening ? "microphone" : "microphone-off"} 
+                size={55} 
+                color={listening ? "#FFF" : T.textSub} 
+              />
+            )}
+            {listening && (
+              <Animated.View style={{ 
+                position: 'absolute', width: 130, height: 130, borderRadius: 65, 
+                borderWidth: 2, borderColor: T.blue, opacity: 0.5,
+                transform: [{ scale: 1.1 }]
+              }} />
+            )}
+          </TouchableOpacity>
+
+          <Text style={{ fontSize: 26, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 5 }}>
+            {errorMsg && errorMsg.includes('permissão') ? 'Permissão Negada' : (listening ? 'Pode falar...' : 'GEI Assistant')}
+          </Text>
+          <Text style={{ fontSize: 14, color: T.textSub, textAlign: 'center' }}>
+            {errorMsg && errorMsg.includes('permissão') ? 'Toque para solicitar novamente' : (listening ? 'Estou processando sua voz' : 'Toque no microfone para falar')}
+          </Text>
+
+          <View style={{ height: 100, justifyContent: 'center', marginVertical: 20, width: '100%', backgroundColor: T.bgInput + '50', borderRadius: 20, padding: 15 }}>
+            {transcript ? (
+              <Text style={{ fontSize: 18, color: T.blue, textAlign: 'center', fontWeight: '800', fontStyle: 'italic' }}>
+                "{transcript}"
+              </Text>
+            ) : (
+              <>
+                <Text style={{ fontSize: 14, color: T.textMuted, textAlign: 'center', fontWeight: '600' }}>
+                  {errorMsg || 'Aguardando comando...'}
+                </Text>
+                {errorMsg && errorMsg.includes('permissão') && Platform.OS === 'android' && (
+                  <TouchableOpacity 
+                    onPress={() => Linking.openSettings()} 
+                    style={{ 
+                      marginTop: 12, 
+                      paddingVertical: 8, 
+                      paddingHorizontal: 16, 
+                      backgroundColor: T.blue, 
+                      borderRadius: 12, 
+                      alignSelf: 'center',
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8
+                    }}
+                  >
+                    <Feather name="settings" size={14} color="#FFF" />
+                    <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>
+                      Abrir Configurações
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
+
+          <View style={{ width: '100%', backgroundColor: T.bgInput, borderRadius: 22, padding: 18, marginBottom: 25 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              {['Ativar', 'Produto', 'Qtd', 'Data', 'Giro'].map((l, i) => (
+                <View key={i} style={{ alignItems: 'center', flex: 1 }}>
+                  <View style={{ 
+                    width: 32, height: 32, borderRadius: 16, 
+                    backgroundColor: step > i ? T.green : (step === i ? T.blue : T.bgElevated),
+                    justifyContent: 'center', alignItems: 'center',
+                    borderWidth: 2, borderColor: step === i ? T.blue + '40' : 'transparent'
+                  }}>
+                    {step > i ? <Feather name="check" size={16} color="#FFF" /> : <Text style={{ fontSize: 12, fontWeight: 'bold', color: step === i ? "#FFF" : T.textMuted }}>{i+1}</Text>}
+                  </View>
+                  <Text style={{ fontSize: 9, color: step >= i ? T.text : T.textMuted, marginTop: 6, fontWeight: step === i ? 'bold' : 'normal' }}>{l}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <TouchableOpacity 
+            onPress={onClose}
+            style={{ width: '100%', height: 55, borderRadius: 18, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.red + '20' }}
+          >
+            <Text style={{ color: T.red, fontWeight: '900', fontSize: 16 }}>FECHAR ASSISTENTE</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -1771,11 +3116,50 @@ const styles = StyleSheet.create({
   btnTxt: { fontWeight: '800', letterSpacing: 0.3 },
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// APP PRINCIPAL
-// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── ELEVEN LABS CONFIG ──────────────────────────────────────────────────────
+const ELEVEN_LABS_API_KEY = 'sk_5eeaa17369322e234f74a50aff06a52d6e6a2c5edb3878b9';
+const ELEVEN_LABS_VOICE_ID = 'pNInz6obpg8n9I4mqIBk';
+
+const speakWithAI = async (text) => {
+  try {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'xi-api-key': ELEVEN_LABS_API_KEY },
+      body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.5 } }),
+    });
+    Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0 });
+  } catch (error) {
+    Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0 });
+  }
+};
+
+// ─── VOICE MODALS ────────────────────────────────────────────────────────────
+const VoicePermissionModal = ({ visible, onAccept, onClose, T, fontScale }) => {
+  const slideA = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+  useEffect(() => {
+    if (visible) Animated.spring(slideA, { toValue: 0, tension: 50, friction: 10, useNativeDriver: true }).start();
+    else Animated.timing(slideA, { toValue: Dimensions.get('window').height, duration: 300, useNativeDriver: true }).start();
+  }, [visible]);
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+        <Animated.View style={{ backgroundColor: T.bgCard, borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 30, transform: [{ translateY: slideA }] }}>
+          <View style={{ width: 60, height: 6, backgroundColor: T.border, borderRadius: 3, alignSelf: 'center', marginBottom: 25 }} />
+          <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', alignSelf: 'center', marginBottom: 20 }}>
+            <Feather name="mic" size={40} color={T.blue} />
+          </View>
+          <Text style={{ fontSize: 24 * fontScale, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 10 }}>Comandos de Voz</Text>
+          <Text style={{ fontSize: 16 * fontScale, color: T.textSub, textAlign: 'center', marginBottom: 30, lineHeight: 22 }}>Ative o microfone para controlar o GEI.AI apenas com a sua voz.</Text>
+          <TouchableOpacity onPress={onAccept} style={{ backgroundColor: T.blue, paddingVertical: 18, borderRadius: 20, alignItems: 'center', marginBottom: 12 }}><Text style={{ color: '#FFF', fontSize: 18 * fontScale, fontWeight: '800' }}>Ativar Agora</Text></TouchableOpacity>
+          <TouchableOpacity onPress={onClose} style={{ paddingVertical: 15, alignItems: 'center' }}><Text style={{ color: T.textMuted, fontSize: 15 * fontScale, fontWeight: '600' }}>Talvez depois</Text></TouchableOpacity>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function App() {
-  const [permission, requestPermission] = useCameraPermissions();
   const [currentTheme, setCurrentTheme] = useState('light');
   const [fontScale, setFontScale] = useState(1);
   const [notifOn, setNotifOn] = useState(true);
@@ -1786,7 +3170,6 @@ export default function App() {
   const [erro, setErro] = useState('');
   const showErr = useCallback(m => { setErro(m); setTimeout(() => setErro(''), 6000); }, []);
 
-  // ── AUTH & LOCKOUT STATE ──────────────────────────────────────────────────
   const [isLogged, setIsLogged] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [userData, setUserData] = useState(null);
@@ -1800,101 +3183,12 @@ export default function App() {
   const [capsLockActive, setCapsLockActive] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [initialized, setInitialized] = useState(false);
-
-  // ── INICIALIZAÇÃO SEGURA ──────────────────────────────────────────────────
-  useEffect(() => {
-    let done = false;
-    const forceInit = () => { if (!done) { done = true; setInitialized(true); } };
-    const timeout = setTimeout(forceInit, 8000);
-
-    const init = async () => {
-      try {
-        await Promise.race([
-          initializeSecureToken(),
-          new Promise(r => setTimeout(r, 5000)),
-        ]);
-      } catch (_) { /* noop */ }
-
-      try {
-        await Promise.race([
-          loadSecrets(),
-          new Promise(r => setTimeout(r, 5000)),
-        ]);
-      } catch (_) { /* noop */ }
-
-      try {
-        const bioPref = await SecureStore.getItemAsync('biometric_enabled');
-        if (bioPref === 'true') setBiometricEnabled(true);
-      } catch (_) { /* noop */ }
-
-      clearTimeout(timeout);
-      forceInit();
-    };
-
-    init();
-  }, []);
-
-  // ── SESSION TIMEOUT ───────────────────────────────────────────────────────
-  const sessionTimerRef = useRef(null);
-  
-  const resetSessionTimer = useCallback(() => {
-    if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
-    sessionTimerRef.current = setTimeout(() => {
-      if (isLogged) {
-        Alert.alert('Sessão expirada', 'Sua sessão expirou por inatividade. Faça login novamente.', [
-          { text: 'OK', onPress: () => {
-            addAuditLog('SESSION_TIMEOUT', 'Sessão expirada por inatividade', userData?.id);
-            setIsLogged(false);
-            setUserData(null);
-            setEmailIn('');
-            setPassIn('');
-            setStockData([]);
-            setActiveShelf('');
-            setCadastroShelf('');
-          }}
-        ]);
-      }
-    }, SESSION_TIMEOUT_MS);
-  }, [isLogged, userData]);
-
-  useEffect(() => {
-    if (isLogged) {
-      resetSessionTimer();
-      const sub = AppState.addEventListener('change', state => {
-        if (state === 'active') resetSessionTimer();
-      });
-      return () => {
-        if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
-        sub.remove();
-      };
-    }
-  }, [isLogged, resetSessionTimer]);
-
-  // ── LOCKOUT ───────────────────────────────────────────────────────────────
-  const [failedAttempts, setFailedAttempts] = useState(0);
-  const [lockedOut, setLockedOut] = useState(false);
-  const [lockoutRemaining, setLockoutRemaining] = useState(0);
-  const lockoutTimerRef = useRef(null);
-
-  const startLockout = useCallback(() => {
-    setLockedOut(true);
-    setLockoutRemaining(LOCKOUT_SECS);
-    let remaining = LOCKOUT_SECS;
-    lockoutTimerRef.current = setInterval(() => {
-      remaining -= 1;
-      setLockoutRemaining(remaining);
-      if (remaining <= 0) {
-        clearInterval(lockoutTimerRef.current);
-        setLockedOut(false);
-        setFailedAttempts(0);
-        setLockoutRemaining(0);
-      }
-    }, 1000);
-  }, []);
-
-  useEffect(() => () => { if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }, []);
-
-  // ── APP STATE ─────────────────────────────────────────────────────────────
+  const [showRastreioModal, setShowRastreioModal] = useState(false);
+  const [showAchandoGif, setShowAchandoGif] = useState(false);
+  const [showRoboGif, setShowRoboGif] = useState(false);
+  const [roboMsg, setRoboMsg] = useState('');
+  const gifTimeoutRef = useRef(null);
+  const [fifoMode, setFifoMode] = useState(true);
   const [activeShelf, setActiveShelf] = useState('');
   const [stockData, setStockData] = useState([]);
   const [shelfModal, setShelfModal] = useState(false);
@@ -1914,14 +3208,20 @@ export default function App() {
   const [msgs, setMsgs] = useState([{ id: 1, text: 'Olá! Sou o GEI Assistant. Como posso ajudar com o estoque hoje?', isAi: true }]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [viewMode, setViewMode] = useState('list');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [currentSources, setCurrentSources] = useState([]);
   const [scannedEAN, setScannedEAN] = useState('');
   const [cleanToast, setCleanToast] = useState(null);
+  const [showPinhasModal, setShowPinhasModal] = useState(false);
   const [showAuditLogs, setShowAuditLogs] = useState(false);
-  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLogs, setAuditLogs] = useState({ logs: [], loginHistory: [] });
+  const [showExpiryModal, setShowExpiryModal] = useState(false);
+  const [voiceAssistantVisible, setVoiceAssistantVisible] = useState(false);
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scanAnim = useRef(new Animated.Value(0)).current;
@@ -1930,7 +3230,7 @@ export default function App() {
   const camRef = useRef(null);
   const lastScan = useRef(Date.now());
 
-  const GIRO = useMemo(() => makeGiro(T), [T, currentTheme]);
+  const GIRO = useMemo(() => makeGiro(T), [T]);
   const perf = userData?.PERFIL || '';
   const canSw = canSwitch(perf);
   const initials = getInitials(userData?.NOME || 'Usuário');
@@ -1938,369 +3238,222 @@ export default function App() {
   const TAB_H = 70, TAB_SAFE = TAB_H + NAV_BAR_H;
   const fcol = { blue: T.blue, green: T.green, amber: T.amber, red: T.red };
 
-  useEffect(() => {
-    const hide = () => { StatusBar.setHidden(true, 'none'); StatusBar.setTranslucent(true); StatusBar.setBackgroundColor('transparent', false); };
-    hide(); const sub = AppState.addEventListener('change', s => { if (s === 'active') hide(); }); return () => sub.remove();
-  }, []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (Platform.OS === 'android') { NavigationBar.setVisibilityAsync('hidden').catch(() => { /* noop */ }); NavigationBar.setBackgroundColorAsync('transparent').catch(() => { /* noop */ }); } }, []);
-  useEffect(() => {
-    if (scanning && scanMode === 'barcode') { Animated.loop(Animated.sequence([Animated.timing(scanAnim, { toValue: 1, duration: 2000, useNativeDriver: false }), Animated.timing(scanAnim, { toValue: 0, duration: 2000, useNativeDriver: false })])).start(); } else scanAnim.setValue(0);
-  }, [scanning, scanMode]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (scanning && scanMode === 'aiVision') { Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.07, duration: 800, useNativeDriver: false }), Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false })])).start(); } else pulseAnim.setValue(1);
-  }, [scanning, scanMode]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    let t;
-    if (scanning && scanMode === 'aiVision') { if (countdown > 0) t = setTimeout(() => setCountdown(c => c - 1), 1000); else if (countdown === 0) captureVision(); }
-    return () => clearTimeout(t);
-  }, [countdown, scanning]);
+  useEffect(() => { const hide = () => { StatusBar.setHidden(true, 'none'); StatusBar.setTranslucent(true); StatusBar.setBackgroundColor('transparent', false); }; hide(); const sub = AppState.addEventListener('change', s => { if (s === 'active') hide(); }); return () => sub.remove(); }, []);
+  useEffect(() => { if (Platform.OS === 'android') { NavigationBar.setVisibilityAsync('hidden').catch(() => {}); NavigationBar.setBackgroundColorAsync('transparent').catch(() => {}); } }, []);
+  useEffect(() => { if (scanning && scanMode === 'barcode') { Animated.loop(Animated.sequence([Animated.timing(scanAnim, { toValue: 1, duration: 2000, useNativeDriver: false }), Animated.timing(scanAnim, { toValue: 0, duration: 2000, useNativeDriver: false })])).start(); } else scanAnim.setValue(0); }, [scanning, scanMode, scanAnim]);
+  useEffect(() => { if (scanning && scanMode === 'aiVision') { Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.07, duration: 800, useNativeDriver: false }), Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false })])).start(); } else pulseAnim.setValue(1); }, [scanning, scanMode, pulseAnim]);
 
+  const aiVisionTriggeredRef = useRef(false);
+  const onAIVisionCameraReady = useCallback(() => { if (aiVisionTriggeredRef.current) return; aiVisionTriggeredRef.current = true; setTimeout(() => { captureVision(); }, 1200); }, [captureVision]);
+
+  const sortProductsByDate = (products) => { return [...products].sort((a, b) => { const dateA = parseDate(a.DATAENVIO); const dateB = parseDate(b.DATAENVIO); if (!dateA && !dateB) return 0; if (!dateA) return 1; if (!dateB) return -1; return dateB - dateA; }); };
   const filteredStock = useMemo(() => {
     const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN'));
-    if (activeFilter === 'all') return base;
-    return base.filter(i => vencStatus(i.VENCIMENTO).status === activeFilter);
-  }, [stockData, activeFilter]);
+    let filtered = activeFilter === 'all' ? base : base.filter(i => vencStatus(i.VENCIMENTO).status === activeFilter);
+    if (searchQuery.trim()) { const q = searchQuery.trim().toLowerCase(); filtered = filtered.filter(i => String(i.produto || '').toLowerCase().includes(q)); }
+    return sortProductsByDate(filtered);
+  }, [stockData, activeFilter, searchQuery]);
+  const counts = useMemo(() => { const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN')); return { all: base.length, ok: base.filter(i => vencStatus(i.VENCIMENTO).status === 'ok').length, warning: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').length, expired: base.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').length }; }, [stockData]);
+  const triggerAutoClean = useCallback(async () => { setCleanToast({ cleaning: true }); try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); } catch (_) { setCleanToast({ cleaning: false, deleted: [] }); } }, [activeShelf, userData]);
+  const loadStock = useCallback(async shelf => { const tid = SHELVES[shelf]; if (!tid) return; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true&size=200`); const products = res.data.results || []; setStockData(sortProductsByDate(products)); } catch (ex) { showErr('Erro ao carregar dados da prateleira.'); } }, [showErr]);
+  const deleteProduct = useCallback(async (product) => { if (!product?.id) return; const tableId = SHELVES[activeShelf]; if (!tableId) { showErr('Nenhuma prateleira ativa para apagar o produto.'); return; } setBusy(true); setBusyMsg('Apagando produto...'); try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${product.id}/`); await addAuditLog('PRODUCT_DELETED', `Produto "${product.produto}" apagado da prateleira ${activeShelf}`, userData?.id); setStockData(prev => sortProductsByDate(prev.filter(p => p.id !== product.id))); } catch (ex) { showErr('Não foi possível apagar o produto. Verifique a conexão.'); } finally { setBusy(false); } }, [activeShelf, showErr, userData]);
 
-  const counts = useMemo(() => {
-    const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN'));
-    return { all: base.length, ok: base.filter(i => vencStatus(i.VENCIMENTO).status === 'ok').length, warning: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').length, expired: base.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').length };
-  }, [stockData]);
+  const updateLastLogin = async (userId) => { try { const now = new Date(); const novoLogin = { data: now.toLocaleDateString('pt-BR'), hora: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), iso: now.toISOString() }; let historicoAtual = []; try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { historicoAtual = JSON.parse(utimologin); } else if (utimologin) { historicoAtual = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { historicoAtual = []; } const historicoAtualizado = [novoLogin, ...historicoAtual].slice(0, 3); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`, { UTIMOLOGIN: JSON.stringify(historicoAtualizado) }); } catch (error) { console.warn('Nao foi possivel atualizar ultimo login', error); } };
+  const handleChangePassword = async (currentPass, newPass) => { if (!userData) return false; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.id === userData.id); if (!user || user.SENHA !== currentPass) { Alert.alert('Erro', 'Senha atual incorreta.'); return false; } await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { SENHA: newPass }); await addAuditLog('PASSWORD_CHANGED', 'Senha alterada com sucesso', userData.id); Alert.alert('Sucesso', 'Sua senha foi alterada.'); return true; } catch (error) { Alert.alert('Erro', 'Não foi possível alterar a senha. Tente novamente.'); return false; } };
+  const onBarcode = async ({ data }) => { if (Date.now() - lastScan.current < 2000) return; lastScan.current = Date.now(); if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); setScanning(false); setShowAchandoGif(true); setScannedEAN(data); try { const sources = await fetchProductSources(data); setShowAchandoGif(false); if (!sources || sources.length === 0) { showErr('Nenhum produto encontrado ou todas as fontes falharam.'); setScanning(true); setCurrentSources([]); setSourceModalVisible(false); } else { setCurrentSources(sources); setSourceModalVisible(true); } } catch (ex) { setShowAchandoGif(false); console.error('Erro ao buscar fontes:', ex); showErr('Erro ao consultar fontes de dados.'); setScanning(true); } };
+  const onSourceSelected = ({ nome, giro }) => { setProdName(nome); setGiro(giro); setSourceModalVisible(false); setCurrentSources([]); navTo('cadastro'); };
+  const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SecureStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass); if (!user) { const newAttempts = failedAttempts + 1; setFailedAttempts(newAttempts); const remaining = MAX_LOGIN_ATTEMPTS - newAttempts; await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} para ${sanitizedEmail}`, null); if (newAttempts >= MAX_LOGIN_ATTEMPTS) { startLockout(); showErr(`Acesso bloqueado por ${LOCKOUT_SECS} segundos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`); } else { showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`); } return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SecureStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
+  const onQR = async ({ data }) => { if (!data) return; try { const payload = JSON.parse(data); if (!payload.usuario || !payload.loginRapido || !payload.timestamp || !payload.expiraEm) { showErr('QR Code inválido ou corrompido.'); await addAuditLog('QR_INVALID', 'QR Code inválido', null); return; } if (Date.now() > payload.expiraEm) { showErr('QR Code expirado. Gere um novo.'); await addAuditLog('QR_EXPIRED', 'QR Code expirado', null); return; } const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === payload.usuario); if (!user) { showErr('Usuário não encontrado.'); await addAuditLog('QR_USER_NOT_FOUND', `Usuário ${payload.usuario} não encontrado`, null); return; } if (user.LOGINRAPIDO !== payload.loginRapido) { showErr('QR Code inválido - código de acesso não corresponde.'); await addAuditLog('QR_MISMATCH', `LOGINRAPIDO não confere para ${payload.usuario}`, user.id); return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('QR_ACCESS_DENIED', `Acesso negado para ${payload.usuario} via QR`, user.id); return; } user.PERFIL = qrRole; await addAuditLog('QR_LOGIN_SUCCESS', `Login via QR bem-sucedido para ${payload.usuario}`, user.id); await updateLastLogin(user.id); onOk(user); } catch (e) { showErr('QR Code inválido.'); await addAuditLog('QR_ERROR', `Erro ao processar QR: ${e.message}`, null); } };
+  const onOk = useCallback(user => { setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role'); const area = extractShelf(user.AREA); const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.()); const prat = !ehPerfil && SHELVES[area] ? area : ''; let def = ''; if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); } else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); } setActiveShelf(def); if (def) loadStock(def); setTimeout(() => triggerAutoClean(), 1500); }, [loadStock, triggerAutoClean]);
+  const switchShelf = async shelf => { setActiveShelf(shelf); setCadastroShelf(shelf); await loadStock(shelf); setShelfModal(false); };
+  const startScan = async mode => { if (!permission?.granted) { const { granted } = await requestPermission(); if (!granted) { showErr('Câmera necessária.'); return; } } setScanMode(mode); setTorchOn(false); setScanning(true); if (mode === 'aiVision') aiVisionTriggeredRef.current = false; };
+  const captureVision = useCallback(async () => {
+    if (!camRef.current) { showErr('Câmera não iniciada.'); return; }
+    setCountdown(null); setBusy(true); setBusyMsg('IA Vision analisando imagem...');
+    try {
+      const foto = await camRef.current.takePictureAsync({ base64: true, quality: 0.88, exif: false });
+      if (!foto?.base64) { throw new Error('Foto não capturada corretamente'); }
+      const visionPrompt = 
+        "Você é um especialista sênior em produtos de supermercado brasileiro. " +
+        "Analise DETALHADAMENTE esta embalagem: examine rótulo, logotipo, código EAN, " +
+        "peso/volume, sabor, variante e todos os textos visíveis. " +
+        "Use conhecimento sobre marcas brasileiras (Nestlé, Unilever, BRF, JBS, Ambev, " +
+        "Coca-Cola, Pepsico, Mondelez, Camil, etc.). " +
+        "Retorne APENAS JSON válido sem markdown: " +
+        '{"descricao":"nome comercial completo","marca":"fabricante exato",' +
+        '"tipo":"subcategoria específica","gramatura":"peso ou volume com unidade",' +
+        '"rotatividade":"Grande giro"|"Médio giro"|"Pouco giro",' +
+        '"detalhes":"sabor, variante ou info extra"}';
+      let resultText = '';
+      if (RT_API_KEY_IA) {
+        const visionModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+        for (const vModel of visionModels) {
+          try {
+            const r = await fetchWithTimeout(
+              `https://generativelanguage.googleapis.com/v1beta/models/${vModel}:generateContent?key=${RT_API_KEY_IA}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{
+                    parts: [
+                      { text: visionPrompt },
+                      { inline_data: { mime_type: 'image/jpeg', data: foto.base64 } }
+                    ]
+                  }],
+                  generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
+                })
+              },
+              32000
+            );
+            if (r.ok) {
+              const d = await r.json();
+              const txt = d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              if (txt) { resultText = txt; console.log(`[Vision] Gemini ${vModel} OK`); break; }
+            } else {
+              const errMsg = await parseApiError(r);
+              console.warn(`[Vision] Gemini ${vModel} falhou: ${errMsg}`);
+              if (r.status === 429 || r.status === 503) { await sleep(300); continue; }
+              break;
+            }
+          } catch (geminiErr) { console.warn(`[Vision] Gemini ${vModel} erro:`, geminiErr.message); }
+        }
+      }
+      if (!resultText && GROQ_API_KEY) {
+        const groqVisionModels = ['meta-llama/llama-4-scout-17b-16e-instruct', 'llava-v1.5-7b-4096-preview'];
+        for (const gModel of groqVisionModels) {
+          try {
+            const r = await fetchWithTimeout(
+              'https://api.groq.com/openai/v1/chat/completions',
+              {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  model: gModel,
+                  messages: [{
+                    role: 'user',
+                    content: [
+                      { type: 'text', text: `Analise esta embalagem de produto de supermercado brasileiro. ${visionPrompt}` },
+                      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${foto.base64}` } }
+                    ]
+                  }],
+                  temperature: 0.05,
+                  max_tokens: 512
+                })
+              },
+              28000
+            );
+            if (r.ok) {
+              const d = await r.json();
+              const txt = d.choices?.[0]?.message?.content || '';
+              if (txt) { resultText = txt; console.log(`[Vision] Groq ${gModel} OK`); break; }
+            } else {
+              const errMsg = await parseApiError(r);
+              console.warn(`[Vision] Groq ${gModel} falhou: ${errMsg}`);
+              if (r.status === 429) { await sleep(400); continue; }
+              break;
+            }
+          } catch (groqErr) { console.warn(`[Vision] Groq ${gModel} erro:`, groqErr.message); }
+        }
+      }
+      let r = { descricao: 'Produto Indefinido', marca: '', rotatividade: 'Médio giro' };
+      if (resultText) {
+        try {
+          const clean = resultText.replace(/```json|```/g, '').trim();
+          const match = clean.match(/\{[\s\S]*\}/);
+          if (match) r = JSON.parse(match[0]);
+        } catch { console.warn('[Vision] Falha ao parsear JSON:', resultText); }
+      } else {
+        showErr('IA Vision não conseguiu identificar o produto. Tente novamente com melhor iluminação.');
+      }
+      const nome = ([r.descricao, r.marca, r.tipo].filter(Boolean).join(' · ') + (r.gramatura ? ` (${r.gramatura})` : '')).toUpperCase();
+      setBusy(false);
+      setScanning(false);
+      setRoboMsg(`Encontrei!\n${nome.trim()}`);
+      setShowRoboGif(true);
+      setTimeout(() => { setProdName(nome.trim()); setGiro(r.rotatividade || 'Médio giro'); resetWiz(); }, 80);
+      setTimeout(() => { setShowRoboGif(false); navTo('cadastro'); }, 4000);
+    } catch (ex) {
+      showErr(`Erro na análise visual: ${ex.message}`);
+      setScanning(false); setBusy(false);
+    }
+  }, [showErr, setBusy, setBusyMsg, setCountdown, setScanning, setRoboMsg, setShowRoboGif, setProdName, setGiro, resetWiz, navTo]);
+  const sendChat = async () => { if (!chatTxt.trim() || chatBusy) return; const txt = chatTxt.trim(); setChatTxt(''); setMsgs(p => [...p, { id: Date.now(), text: txt, isAi: false }]); setChatBusy(true); try { const sample = stockData.slice(0, 8).map(s => { const m = buildDepletionMetrics(s, fifoMode, stockData, s.codig); return `${s.produto}: ${m.remainingQty} restantes, ruptura em ${m.remainingDays}d`; }).join('; '); const expiring = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').map(i => i.produto).join(', '); const expired = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').map(i => i.produto).join(', '); const prompt = `Você é o GEI Assistant, assistente inteligente de gestão de estoque do sistema GEI.AI, especializado no varejo alimentício brasileiro. Você tem acesso ao estoque atual do usuário e deve combinar esse contexto com seu amplo conhecimento sobre produtos, legislação de validade, ANVISA, boas práticas de armazenagem e mercado supermercadista brasileiro para dar respostas precisas e práticas.
 
-  const triggerAutoClean = useCallback(async () => {
-    setCleanToast({ cleaning: true });
-    try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); }
-    catch (_) { setCleanToast({ cleaning: false, deleted: [] }); }
-  }, [activeShelf, userData]);
+CONTEXTO DO ESTOQUE ATUAL:
+- Usuário: ${userData?.NOME || 'Usuário'} (${userData?.PERFIL || 'Colaborador'})
+- Prateleira ativa: ${shlabel(activeShelf)}
+- Itens monitorados: ${sample || 'nenhum'}
+- Vencendo em até 7 dias: ${expiring || 'nenhum'}
+- Já vencidos: ${expired || 'nenhum'}
 
-  // ── FUNÇÃO loadStock (definida antes de ser usada) ────────────────────────
-  const loadStock = useCallback(async shelf => {
-    const tid = SHELVES[shelf]; if (!tid) return;
-    try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`); setStockData(res.data.results || []); }
-    catch (ex) { showErr('Erro ao carregar dados da prateleira.'); }
+INSTRUÇÕES:
+- Responda de forma clara, direta e prática em português brasileiro
+- Use dados reais do mercado quando relevante
+- Para perguntas sobre produtos específicos, forneça informações técnicas como prazo de validade típico, condições de armazenagem e rotatividade
+- Dê sugestões proativas baseadas no estoque atual
+- Seja objetivo mas completo
+
+Pergunta do usuário: "${txt}"`;
+      const r = await callGEI(prompt);
+      setMsgs(p => [...p, { id: Date.now() + 1, text: r?.trim() || 'A IA não retornou resposta desta vez. Tente reformular sua pergunta.', isAi: true }]);
+    } catch (ex) { const isAbort = ex?.name === 'AbortError'; setMsgs(p => [...p, { id: Date.now() + 1, text: isAbort ? '⏱️ A IA demorou demais para responder. Verifique sua conexão e tente novamente.' : '⚠️ Erro de conexão com a IA. Verifique sua internet e tente novamente.', isAi: true }]); } finally { setChatBusy(false); } };
+  const getTargetShelf = () => (isCoord(perf) || isDeposito(perf)) && cadastroShelf ? cadastroShelf : activeShelf;
+  const calculatePrevisao = (qtd, giro, dataEnvio) => { const rateMap = { 'Grande giro': 5.2, 'Médio giro': 2.5, 'Pouco giro': 0.8 }; const dailyRate = rateMap[giro] || 2.5; const sendDate = parseDate(dataEnvio) || today(); const remainingDays = dailyRate > 0 ? Math.ceil(qtd / dailyRate) : 999; const depletionDate = addDays(sendDate, remainingDays); return fmtFull(depletionDate); };
+  const doSaveProductConfirmed = async () => { const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf]; if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; } setBusy(true); setBusyMsg('Salvando produto...'); try { const dataEnvio = new Date().toLocaleDateString('pt-BR'); const previsao = calculatePrevisao(Number(qtd), giro, dataEnvio); await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, { produto: prodName.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: validade, quantidade: String(qtd), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: dataEnvio, ALERTAMENSAGEM: '', MARGEM: giro, PREVISAO: previsao }); await addAuditLog('PRODUCT_ADDED', `Produto "${prodName}" adicionado à prateleira ${targetShelf}`, userData?.id); setBusy(false); setShowSuccess(true); setScannedEAN(''); if (targetShelf === activeShelf) loadStock(activeShelf); } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); } };
+  const saveProduct = async () => { if (!prodName) { showErr('O nome do produto é obrigatório.'); return; } if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data de validade inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } if (!qtd) { showErr('A quantidade é obrigatória.'); return; } if (!giro) { showErr('Selecione o giro estimado.'); return; } const eanAtual = scannedEAN && scannedEAN !== 'Sem EAN' ? scannedEAN : null; if (eanAtual) { const duplicado = stockData.find(p => String(p.codig || '').trim() === eanAtual && String(p.VENCIMENTO || '').trim() === validade); if (duplicado) { Alert.alert('⚠️ PRODUTO JÁ CADASTRADO', `ESTE PRODUTO JÁ ESTÁ CADASTRADO COM ESTA DATA.\n\nProduto: ${duplicado.produto || prodName}\nCódigo: ${eanAtual}\nValidade: ${validade}\n\nDeseja cadastrar mesmo assim?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Cadastrar mesmo assim', style: 'destructive', onPress: doSaveProductConfirmed }]); return; } } await doSaveProductConfirmed(); };
+  const nextStep = () => { if (wStep === 1 && !prodName.trim()) { showErr('O nome do produto é obrigatório.'); return; } if (wStep === 2) { if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } } if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { showErr('A quantidade deve ser um número positivo.'); return; } if (wStep === 4 && !giro) { showErr('Selecione o giro estimado.'); return; } if (wStep < 4) setWStep(p => p + 1); else saveProduct(); };
+  const onSuccessDone = () => { setShowSuccess(false); const target = getTargetShelf(); if (target === activeShelf) loadStock(activeShelf); navTo('home'); resetWiz(); setProdName(''); setGiro(''); setCadastroShelf(''); setScannedEAN(''); };
+  const navTo = useCallback(tab => { Animated.timing(fadeAnim, { toValue: 0, duration: 110, useNativeDriver: false }).start(() => { setCurrentTab(tab); setScanning(false); Animated.timing(fadeAnim, { toValue: 1, duration: 170, useNativeDriver: false }).start(); }); }, [fadeAnim]);
+  const resetWiz = useCallback(() => { setWStep(1); setValidade(''); setQtd(''); }, []);
+  const viewAuditLogs = async () => { const logs = await getAuditLogs(); const now = new Date(); const last3Days = logs.filter(log => { const logDate = new Date(log.timestamp); const diffMs = now - logDate; return diffMs >= 0 && Math.floor(diffMs / 86400000) <= 3; }); let loginHistory = []; if (userData?.id) { try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { loginHistory = JSON.parse(utimologin); } else if (utimologin) { loginHistory = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { loginHistory = []; } } setAuditLogs({ logs: last3Days, loginHistory }); setShowAuditLogs(true); };
+  const enableBiometrics = async (value) => { if (value) { const { isAvailable } = await checkBiometricSupport(); if (!isAvailable) { Alert.alert('Biometria não disponível', 'Seu dispositivo não suporta ou não tem biometria configurada.'); return; } const auth = await authenticateWithBiometrics('Confirme para ativar login biométrico'); if (!auth.success) { Alert.alert('Falha na autenticação', 'Não foi possível ativar a biometria.'); return; } try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${userData?.USUARIO}-${Date.now()}-${Math.random()}`); await SecureStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData?.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } else { try { await SecureStore.deleteItemAsync('bio_token'); if (userData?.id) { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: '' }); } } catch (_) { /* noop */ } } setBiometricEnabled(value); await SecureStore.setItemAsync('biometric_enabled', value ? 'true' : 'false'); await addAuditLog(`BIOMETRIC_TOGGLED`, `Biometria ${value ? "ativada" : "desativada"}`, userData?.id); };
+
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockedOut, setLockedOut] = useState(false);
+  const [lockoutRemaining, setLockoutRemaining] = useState(0);
+  const lockoutTimerRef = useRef(null);
+  const startLockout = useCallback(() => { setLockedOut(true); setLockoutRemaining(LOCKOUT_SECS); let remaining = LOCKOUT_SECS; lockoutTimerRef.current = setInterval(() => { remaining -= 1; setLockoutRemaining(remaining); if (remaining <= 0) { clearInterval(lockoutTimerRef.current); setLockedOut(false); setFailedAttempts(0); setLockoutRemaining(0); } }, 1000); }, []);
+  useEffect(() => () => { if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }, []);
+  const sessionTimerRef = useRef(null);
+  const resetSessionTimer = useCallback(() => {
+    if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
+    sessionTimerRef.current = setTimeout(() => {
+      if (isLogged) {
+        Alert.alert('Sessão expirada', 'Sua sessão expirou por inatividade. Faça login novamente.', [{ text: 'OK', onPress: () => { addAuditLog('SESSION_TIMEOUT', 'Sessão expirada por inatividade', userData?.id); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); } }]);
+      }
+    }, SESSION_TIMEOUT_MS);
+  }, [isLogged, userData]);
+  useEffect(() => {
+    if (isLogged) {
+      resetSessionTimer();
+      const sub = AppState.addEventListener('change', state => { if (state === 'active') resetSessionTimer(); });
+      return () => { if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current); sub.remove(); };
+    }
+  }, [isLogged, resetSessionTimer]);
+
+  useEffect(() => {
+    let done = false;
+    const forceInit = () => { if (!done) { done = true; setInitialized(true); } };
+    const timeout = setTimeout(forceInit, 8000);
+    const init = async () => {
+      try { await initializeSecureTokens(); await cleanExpiredCache(); } catch (err) { console.error('Erro ao inicializar tokens:', err); showErr('Falha ao obter tokens de segurança. Verifique sua conexão.'); }
+      try { const bioPref = await SecureStore.getItemAsync('biometric_enabled'); if (bioPref === 'true') setBiometricEnabled(true); } catch (_) { /* noop */ }
+      clearTimeout(timeout); forceInit();
+    };
+    init();
   }, [showErr]);
 
-  // ── LOGIN SEGURO ──────────────────────────────────────────────────────────
-  const doLogin = async (e, p, useBiometrics = false) => {
-    if (lockedOut) {
-      showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`);
-      return;
-    }
-    
-    if (useBiometrics && biometricEnabled) {
-      const bioAuth = await authenticateWithBiometrics();
-      if (!bioAuth.success) {
-        showErr('Falha na autenticação biométrica.');
-        return;
-      }
-      const bioToken = await SecureStore.getItemAsync('bio_token');
-      if (!bioToken) {
-        showErr('Nenhum token biométrico salvo. Faça login normal primeiro.');
-        return;
-      }
-      try {
-        const resB = await secureAxiosInstance.get(
-          `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/?user_field_names=true`
-        );
-        const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO);
-        if (!bioUser) {
-          showErr('Token biométrico inválido ou acesso revogado. Faça login normal.');
-          return;
-        }
-        await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id);
-        onOk(bioUser);
-        return;
-      } catch {
-        showErr('Erro ao validar biometria. Verifique a conexão.');
-        return;
-      }
-    }
-    
-    if (!e || !p) { showErr('Preencha e-mail e senha.'); return; }
-    
-    if (!isValidEmail(e)) {
-      showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com');
-      return;
-    }
-    
-    const sanitizedEmail = sanitizeInput(e);
-    const sanitizedPass = sanitizeInput(p);
-    
-    if (sanitizedEmail !== e || sanitizedPass !== p) {
-      showErr('Caracteres inválidos detectados.');
-      await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null);
-      return;
-    }
-    
-    setLoading(true); setErro('');
-    try {
-      const res = await secureAxiosInstance.get(
-        `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/?user_field_names=true`
-      );
-      const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass);
-      if (!user) {
-        const newAttempts = failedAttempts + 1;
-        setFailedAttempts(newAttempts);
-        const remaining = MAX_LOGIN_ATTEMPTS - newAttempts;
-        await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} para ${sanitizedEmail}`, null);
-        if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
-          startLockout();
-          showErr(`Acesso bloqueado por ${LOCKOUT_SECS} segundos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`);
-        } else {
-          showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`);
-        }
-        return;
-      }
-      if (!user.ACESSO) { 
-        showErr('Seu acesso não foi liberado pelo coordenador.');
-        await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id);
-        return; 
-      }
-      setFailedAttempts(0);
-      
-      if (biometricEnabled) {
-        try {
-          const bioToken = await Crypto.digestStringAsync(
-            Crypto.CryptoDigestAlgorithm.SHA256,
-            `${user.USUARIO}-${Date.now()}-${Math.random()}`
-          );
-          await SecureStore.setItemAsync('bio_token', bioToken);
-          await secureAxiosInstance.patch(
-            `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/${user.id}/?user_field_names=true`,
-            { TOKEN_BIOMETRICO: bioToken }
-          );
-        } catch (_) { /* noop */ }
-      }
-      
-      await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id);
-      onOk(user);
-    } catch (ex) { 
-      showErr('Falha na conexão com o banco de dados.');
-      await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null);
-    }
-    finally { setLoading(false); }
-  };
+  const handleVoiceComplete = useCallback((data) => {
+    setWStep(4);
+    setTimeout(() => saveProduct(), 500);
+  }, []);
 
-  // ── LOGIN VIA QR CODE ────────────────────────────────────────────────────
-  const onQR = async ({ data }) => {
-    if (!data) return;
-    try {
-      const payload = JSON.parse(data);
-      
-      if (!payload.usuario || !payload.loginRapido || !payload.timestamp || !payload.expiraEm) {
-        showErr('QR Code inválido ou corrompido.');
-        await addAuditLog('QR_INVALID', 'QR Code inválido', null);
-        return;
-      }
-      
-      if (Date.now() > payload.expiraEm) {
-        showErr('QR Code expirado. Gere um novo.');
-        await addAuditLog('QR_EXPIRED', 'QR Code expirado', null);
-        return;
-      }
-      
-      const res = await secureAxiosInstance.get(
-        `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/?user_field_names=true`
-      );
-      
-      const user = res.data.results.find(u => u.USUARIO === payload.usuario);
-      
-      if (!user) {
-        showErr('Usuário não encontrado.');
-        await addAuditLog('QR_USER_NOT_FOUND', `Usuário ${payload.usuario} não encontrado`, null);
-        return;
-      }
-      
-      if (user.LOGINRAPIDO !== payload.loginRapido) {
-        showErr('QR Code inválido - código de acesso não corresponde.');
-        await addAuditLog('QR_MISMATCH', `LOGINRAPIDO não confere para ${payload.usuario}`, user.id);
-        return;
-      }
-      
-      if (!user.ACESSO) {
-        showErr('Seu acesso não foi liberado pelo coordenador.');
-        await addAuditLog('QR_ACCESS_DENIED', `Acesso negado para ${payload.usuario} via QR`, user.id);
-        return;
-      }
-      
-      user.PERFIL = qrRole;
-      await addAuditLog('QR_LOGIN_SUCCESS', `Login via QR bem-sucedido para ${payload.usuario}`, user.id);
-      onOk(user);
-      
-    } catch (e) {
-      showErr('QR Code inválido.');
-      await addAuditLog('QR_ERROR', `Erro ao processar QR: ${e.message}`, null);
-    }
-  };
+  if (!initialized) { return (<View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color={T.blue} /><Text style={{ marginTop: 20, color: T.text }}>Inicializando sistema seguro...</Text></View>); }
 
-  const onOk = useCallback(user => {
-    setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role');
-    const area = extractShelf(user.AREA);
-    const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.());
-    const prat = !ehPerfil && SHELVES[area] ? area : '';
-    let def = '';
-    if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); }
-    else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); }
-    setActiveShelf(def);
-    if (def) loadStock(def);
-    setTimeout(() => triggerAutoClean(), 1500);
-  }, [loadStock, triggerAutoClean]);
-
-  const switchShelf = async shelf => { setActiveShelf(shelf); setCadastroShelf(shelf); await loadStock(shelf); setShelfModal(false); };
-
-  const startScan = async mode => {
-    if (!permission?.granted) { const { granted } = await requestPermission(); if (!granted) { showErr('Câmera necessária.'); return; } }
-    setScanMode(mode); setTorchOn(false); setScanning(true);
-    if (mode === 'aiVision') setCountdown(5);
-  };
-
-  const onBarcode = async ({ data }) => {
-    if (Date.now() - lastScan.current < 1500) return;
-    lastScan.current = Date.now();
-    setScannedEAN(data);
-    setBusy(true); setBusyMsg('Consultando fontes de dados...');
-    try {
-      const sources = await fetchProductSources(data);
-      setCurrentSources(sources); setBusy(false); setScanning(false); setSourceModalVisible(true);
-    } catch (ex) { setBusy(false); setScanning(false); showErr('Erro ao consultar fontes de dados.'); }
-  };
-
-  const onSourceSelected = ({ nome, giro: giroVal }) => { setSourceModalVisible(false); setProdName(nome); setGiro(giroVal); resetWiz(); navTo('cadastro'); };
-
-  const captureVision = async () => {
-    if (!camRef.current) { showErr('Câmera não iniciada.'); return; }
-    setCountdown(null); setBusy(true); setBusyMsg('IA analisando imagem...');
-    try {
-      const foto = await camRef.current.takePictureAsync({ base64: true, quality: 0.5 });
-      if (!RT_API_KEY_IA) { throw new Error('API key não carregada'); }
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_IA}:generateContent?key=${RT_API_KEY_IA}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Identifique este produto de supermercado brasileiro. Retorne APENAS JSON: {"descricao":"","marca":"","tipo":"","gramatura":"","rotatividade":"Grande giro"|"Médio giro"|"Pouco giro","detalhes":""}.' }, { inlineData: { mimeType: 'image/jpeg', data: foto.base64 } }] }] }) });
-      const d = await res.json();
-      let r = { descricao: 'Produto Indefinido', marca: '', rotatividade: 'Médio giro' };
-      try { r = JSON.parse((d.candidates?.[0]?.content?.parts?.[0]?.text || '{}').replace(/```json|```/g, '').trim()); } catch { showErr('Falha no formato da IA.'); }
-      const nome = [r.descricao, r.marca, r.tipo].filter(Boolean).join(' · ') + (r.gramatura ? ` (${r.gramatura})` : '');
-      setBusy(false); setScanning(false); setProdName(nome.trim()); setGiro(r.rotatividade || 'Médio giro'); resetWiz(); navTo('cadastro');
-    } catch (ex) { showErr('Erro na análise visual.'); setScanning(false); setBusy(false); }
-  };
-
-  const sendChat = async () => {
-    if (!chatTxt.trim() || chatBusy) return;
-    const txt = chatTxt.trim(); setChatTxt('');
-    setMsgs(p => [...p, { id: Date.now(), text: txt, isAi: false }]);
-    setChatBusy(true);
-    try {
-      const sample = stockData.slice(0, 8).map(s => { const m = buildDepletionMetrics(s); return `${s.produto}: ${m.remainingQty} restantes, ruptura em ${m.remainingDays}d`; }).join('; ');
-      const expiring = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').map(i => i.produto).join(', ');
-      const expired = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').map(i => i.produto).join(', ');
-      const prompt = `Você é assistente de gestão de estoque (GEI.AI). Usuário: ${userData?.NOME || 'Usuário'}, Prateleira: ${shlabel(activeShelf)}, Itens: ${sample || 'vazio'}, Vencendo em 7 dias: ${expiring || 'nenhum'}, Vencidos: ${expired || 'nenhum'}. Responda de forma clara, objetiva e em português. Pergunta: "${txt}"`;
-      const r = await callIA(prompt);
-      setMsgs(p => [...p, { id: Date.now() + 1, text: r?.trim() || 'A IA não retornou resposta desta vez. Tente reformular sua pergunta.', isAi: true }]);
-    } catch (ex) {
-      const isAbort = ex?.name === 'AbortError';
-      setMsgs(p => [...p, { id: Date.now() + 1, text: isAbort ? '⏱️ A IA demorou demais para responder. Verifique sua conexão e tente novamente.' : '⚠️ Erro de conexão com a IA. Verifique sua internet e tente novamente.', isAi: true }]);
-    } finally { setChatBusy(false); }
-  };
-
-  const getTargetShelf = () => (isCoord(perf) || isDeposito(perf)) && cadastroShelf ? cadastroShelf : activeShelf;
-
-  const saveProduct = async () => {
-    if (!prodName) { showErr('O nome do produto é obrigatório.'); return; }
-    if (!validade) { showErr('A data de validade é obrigatória.'); return; }
-    if (!isValidDate(validade)) { showErr('Data de validade inválida! Use o formato DD/MM/AAAA e uma data real.'); return; }
-    if (!qtd) { showErr('A quantidade é obrigatória.'); return; }
-    if (!giro) { showErr('Selecione o giro estimado.'); return; }
-    const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf];
-    if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; }
-    setBusy(true); setBusyMsg('Salvando produto...');
-    try {
-      await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`,
-        { produto: prodName.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: validade, quantidade: String(qtd), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: new Date().toLocaleDateString('pt-BR'), ALERTAMENSAGEM: '', MARGEM: giro }
-      );
-      await addAuditLog('PRODUCT_ADDED', `Produto "${prodName}" adicionado à prateleira ${targetShelf}`, userData?.id);
-      setBusy(false); setShowSuccess(true); setScannedEAN('');
-    } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); }
-  };
-
-  const nextStep = () => {
-    if (wStep === 1 && !prodName.trim()) { showErr('O nome do produto é obrigatório.'); return; }
-    if (wStep === 2) { if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } }
-    if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { showErr('A quantidade deve ser um número positivo.'); return; }
-    if (wStep === 4 && !giro) { showErr('Selecione o giro estimado.'); return; }
-    if (wStep < 4) setWStep(p => p + 1); else saveProduct();
-  };
-
-  const onSuccessDone = () => {
-    setShowSuccess(false); const target = getTargetShelf();
-    if (target === activeShelf) loadStock(activeShelf);
-    navTo('home'); resetWiz(); setProdName(''); setGiro(''); setCadastroShelf(''); setScannedEAN('');
-  };
-
-  const navTo = tab => {
-    Animated.timing(fadeAnim, { toValue: 0, duration: 110, useNativeDriver: false }).start(() => {
-      setCurrentTab(tab); setScanning(false);
-      Animated.timing(fadeAnim, { toValue: 1, duration: 170, useNativeDriver: false }).start();
-    });
-  };
-
-  const resetWiz = () => { setWStep(1); setValidade(''); setQtd(''); };
-
-  const viewAuditLogs = async () => {
-    const logs = await getAuditLogs();
-    setAuditLogs(logs);
-    setShowAuditLogs(true);
-  };
-
-  const enableBiometrics = async (value) => {
-    if (value) {
-      const { isAvailable } = await checkBiometricSupport();
-      if (!isAvailable) {
-        Alert.alert('Biometria não disponível', 'Seu dispositivo não suporta ou não tem biometria configurada.');
-        return;
-      }
-      const auth = await authenticateWithBiometrics('Confirme para ativar login biométrico');
-      if (!auth.success) {
-        Alert.alert('Falha na autenticação', 'Não foi possível ativar a biometria.');
-        return;
-      }
-      try {
-        const bioToken = await Crypto.digestStringAsync(
-          Crypto.CryptoDigestAlgorithm.SHA256,
-          `${userData?.USUARIO}-${Date.now()}-${Math.random()}`
-        );
-        await SecureStore.setItemAsync('bio_token', bioToken);
-        await secureAxiosInstance.patch(
-          `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/${userData?.id}/?user_field_names=true`,
-          { TOKEN_BIOMETRICO: bioToken }
-        );
-      } catch (_) { /* noop */ }
-    } else {
-      try {
-        await SecureStore.deleteItemAsync('bio_token');
-        if (userData?.id) {
-          await secureAxiosInstance.patch(
-            `https://api.baserow.io/api/database/rows/table/${USERS_TABLE}/${userData.id}/?user_field_names=true`,
-            { TOKEN_BIOMETRICO: '' }
-          );
-        }
-      } catch (_) { /* noop */ }
-    }
-    setBiometricEnabled(value);
-    await SecureStore.setItemAsync('biometric_enabled', value ? 'true' : 'false');
-    await addAuditLog(`BIOMETRIC_TOGGLED`, `Biometria ${value ? "ativada" : "desativada"}`, userData?.id);
-  };
-
-  if (!initialized) {
-    return (
-      <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={T.blue} />
-        <Text style={{ marginTop: 20, color: T.text }}>Inicializando sistema seguro...</Text>
-      </View>
-    );
-  }
-
-  // ─── TELA DE LOGIN ────────────────────────────────────────────────────────
   if (!isLogged) {
+    if (authMode === 'register') { return <RegisterScreen T={T} fontScale={fontScale} onBack={() => setAuthMode('login')} onRegisterSuccess={() => setAuthMode('login')} showErr={showErr} />; }
+    if (authMode === 'admin') { return <AdminPanel T={T} fontScale={fontScale} onBack={() => setAuthMode('login')} />; }
     if (authMode === 'qrScanner' && qrStep === 'role') {
       return (
         <View style={{ flex: 1, backgroundColor: T.bg }}>
@@ -2312,17 +3465,7 @@ export default function App() {
             <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}>
               <Text style={{ fontSize: 22, fontWeight: '900', color: T.text, marginBottom: 6 }}>Selecione a Função</Text>
               <Text style={{ fontSize: 14, color: T.textSub, marginBottom: 20, lineHeight: 20 }}>Defina seu papel antes de ler o QR Code.</Text>
-              {ALL_ROLES.map(r => {
-                const on = qrRole === r;
-                const pal = rolePal(T, r);
-                return (
-                  <TouchableOpacity key={r} style={[{ flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 16, borderWidth: 1, borderColor: T.border, backgroundColor: T.bgInput, gap: 12, marginBottom: 10 }, on && { backgroundColor: pal.bg, borderColor: pal.fg + '50' }]} onPress={() => setQrRole(r)}>
-                    <View style={{ width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: on ? pal.fg : T.bgInput }}><Feather name={pal.icon} size={16} color={on ? '#FFF' : T.textSub} /></View>
-                    <Text style={[{ fontSize: 16, color: T.textSub, flex: 1 }, on && { color: pal.fg, fontWeight: '800' }]}>{roleLabel(r)}</Text>
-                    {on && <Feather name="check-circle" size={18} color={pal.fg} style={{ marginLeft: 'auto' }} />}
-                  </TouchableOpacity>
-                );
-              })}
+              {ALL_ROLES.map(r => { const on = qrRole === r; const pal = rolePal(T, r); return (<TouchableOpacity key={r} style={[{ flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 16, borderWidth: 1, borderColor: T.border, backgroundColor: T.bgInput, gap: 12, marginBottom: 10 }, on && { backgroundColor: pal.bg, borderColor: pal.fg + '50' }]} onPress={() => setQrRole(r)}><View style={{ width: 36, height: 36, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor: on ? pal.fg : T.bgInput }}><Feather name={pal.icon} size={16} color={on ? '#FFF' : T.textSub} /></View><Text style={[{ fontSize: 16, color: T.textSub, flex: 1 }, on && { color: pal.fg, fontWeight: '800' }]}>{roleLabel(r)}</Text>{on && <Feather name="check-circle" size={18} color={pal.fg} style={{ marginLeft: 'auto' }} />}</TouchableOpacity>); })}
               <PrimaryBtn label="Escanear QR Code" onPress={() => setQrStep('scan')} icon="maximize" style={{ marginTop: 20 }} color={T.blue} />
               <TouchableOpacity style={{ alignSelf: 'center', paddingVertical: 16, paddingHorizontal: 10 }} onPress={() => setAuthMode('login')}><Text style={{ color: T.textSub, fontSize: 15, fontWeight: '600' }}>← Voltar ao login</Text></TouchableOpacity>
             </View>
@@ -2347,8 +3490,6 @@ export default function App() {
         </View>
       );
     }
-
-    // ── LOGIN FORM ────────────────────────────────────────────────────────
     return (
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: T.bg }}>
         <StatusBar hidden />
@@ -2356,305 +3497,117 @@ export default function App() {
         <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 26, paddingTop: 60, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <Text style={{ fontSize: 56, fontWeight: '900', color: T.text, letterSpacing: -2.5, textAlign: 'center' }}>GEI<Text style={{ color: T.blue }}>.AI</Text></Text>
           <Text style={{ fontSize: 10, letterSpacing: 5, color: T.textSub, marginTop: 6, marginBottom: 40, fontWeight: '700', textAlign: 'center' }}>GESTÃO DE ESTOQUE INTEGRADO</Text>
-
           <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}>
             <Text style={{ fontSize: 22, fontWeight: '900', color: T.text, marginBottom: 6 }}>Bem-vindo de volta</Text>
             <Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24, lineHeight: 20 }}>Acesse sua conta para gerenciar o estoque em tempo real.</Text>
-
-            {lockedOut && (
-              <View style={{ backgroundColor: T.redGlow, borderRadius: 18, padding: 18, marginBottom: 20, borderWidth: 2, borderColor: T.red + '50', alignItems: 'center', gap: 12 }}>
-                <View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.red + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.red + '50' }}>
-                  <Feather name="lock" size={28} color={T.red} />
-                </View>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 15, fontWeight: '900', color: T.red, textAlign: 'center' }}>Acesso temporariamente bloqueado</Text>
-                  <Text style={{ fontSize: 13, color: T.textSub, marginTop: 4, textAlign: 'center' }}>Muitas tentativas incorretas. Aguarde para continuar.</Text>
-                </View>
-                <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: T.red + '18', borderWidth: 3, borderColor: T.red, justifyContent: 'center', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 26, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{lockoutRemaining}</Text>
-                  <Text style={{ fontSize: 8, fontWeight: '800', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>seg</Text>
-                </View>
-                <View style={{ width: '100%', height: 6, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}>
-                  <View style={{ height: '100%', backgroundColor: T.red, borderRadius: 3, width: `${(lockoutRemaining / LOCKOUT_SECS) * 100}%` }} />
-                </View>
-                <Text style={{ fontSize: 11, color: T.textMuted, fontWeight: '700', textAlign: 'center' }}>
-                  {MAX_LOGIN_ATTEMPTS} tentativas incorretas detectadas. Por segurança, o acesso foi suspenso temporariamente.
-                </Text>
-              </View>
-            )}
-
-            {!lockedOut && failedAttempts > 0 && failedAttempts < MAX_LOGIN_ATTEMPTS && (
-              <View style={{ backgroundColor: T.amberGlow, borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1.5, borderColor: T.amber + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Feather name="alert-triangle" size={20} color={T.amber} />
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: T.amber }}>Atenção: {failedAttempts}/{MAX_LOGIN_ATTEMPTS} tentativas usadas</Text>
-                  <Text style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>Após {MAX_LOGIN_ATTEMPTS} tentativas, o acesso será bloqueado por {LOCKOUT_SECS}s.</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 4 }}>
-                  {Array.from({ length: MAX_LOGIN_ATTEMPTS }).map((_, i) => (
-                    <View key={i} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: i < failedAttempts ? T.red : T.border }} />
-                  ))}
-                </View>
-              </View>
-            )}
-
+            {lockedOut && (<View style={{ backgroundColor: T.redGlow, borderRadius: 18, padding: 18, marginBottom: 20, borderWidth: 2, borderColor: T.red + '50', alignItems: 'center', gap: 12 }}><View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.red + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.red + '50' }}><Feather name="lock" size={28} color={T.red} /></View><View style={{ alignItems: 'center' }}><Text style={{ fontSize: 15, fontWeight: '900', color: T.red, textAlign: 'center' }}>Acesso temporariamente bloqueado</Text><Text style={{ fontSize: 13, color: T.textSub, marginTop: 4, textAlign: 'center' }}>Muitas tentativas incorretas. Aguarde para continuar.</Text></View><View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: T.red + '18', borderWidth: 3, borderColor: T.red, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 26, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{lockoutRemaining}</Text><Text style={{ fontSize: 8, fontWeight: '800', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>seg</Text></View><View style={{ width: '100%', height: 6, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}><View style={{ height: '100%', backgroundColor: T.red, borderRadius: 3, width: `${(lockoutRemaining / LOCKOUT_SECS) * 100}%` }} /></View><Text style={{ fontSize: 11, color: T.textMuted, fontWeight: '700', textAlign: 'center' }}>{MAX_LOGIN_ATTEMPTS} tentativas incorretas detectadas. Por segurança, o acesso foi suspenso temporariamente.</Text></View>)}
+            {!lockedOut && failedAttempts > 0 && failedAttempts < MAX_LOGIN_ATTEMPTS && (<View style={{ backgroundColor: T.amberGlow, borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1.5, borderColor: T.amber + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}><Feather name="alert-triangle" size={20} color={T.amber} /><View style={{ flex: 1 }}><Text style={{ fontSize: 13, fontWeight: '800', color: T.amber }}>Atenção: {failedAttempts}/{MAX_LOGIN_ATTEMPTS} tentativas usadas</Text><Text style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>Após {MAX_LOGIN_ATTEMPTS} tentativas, o acesso será bloqueado por {LOCKOUT_SECS}s.</Text></View><View style={{ flexDirection: 'row', gap: 4 }}>{Array.from({ length: MAX_LOGIN_ATTEMPTS }).map((_, i) => (<View key={i} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: i < failedAttempts ? T.red : T.border }} />))}</View></View>)}
             <View style={{ gap: 16, marginBottom: 24 }}>
-              <View>
-                <Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>E-MAIL</Text>
-                <TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, padding: 16, borderRadius: 16, fontSize: 15, color: T.text, opacity: lockedOut ? 0.5 : 1 }} placeholder="seu@email.com" placeholderTextColor={T.textMuted} value={emailIn} onChangeText={setEmailIn} autoCapitalize="none" keyboardType="email-address" editable={!lockedOut} />
-              </View>
-              <View>
-                <Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>SENHA</Text>
-                <CapsLockDetector onCapsLockChange={setCapsLockActive}>
-                  {({ ref, onKeyPress, isCapsLock }) => (
-                    <View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: isCapsLock ? T.amber : T.border, borderRadius: 16, paddingRight: 12, opacity: lockedOut ? 0.5 : 1 }}>
-                        <TextInput
-                          ref={ref}
-                          style={{ flex: 1, padding: 16, fontSize: 15, color: T.text }}
-                          placeholder="••••••••"
-                          placeholderTextColor={T.textMuted}
-                          value={passIn}
-                          onChangeText={setPassIn}
-                          secureTextEntry={!showPass}
-                          editable={!lockedOut}
-                          onKeyPress={onKeyPress}
-                        />
-                        <TouchableOpacity onPress={() => setShowPass(!showPass)} disabled={lockedOut}>
-                          <Feather name={showPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} />
-                        </TouchableOpacity>
-                      </View>
-                      {isCapsLock && (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}>
-                          <Feather name="alert-triangle" size={12} color={T.amber} />
-                          <Text style={{ fontSize: 11, color: T.amber, fontWeight: '600' }}>CAPS LOCK está ativado</Text>
-                        </View>
-                      )}
-                    </View>
-                  )}
-                </CapsLockDetector>
-              </View>
+              <View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>E-MAIL</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, padding: 16, borderRadius: 16, fontSize: 15, color: T.text, opacity: lockedOut ? 0.5 : 1 }} placeholder="seu@email.com" placeholderTextColor={T.textMuted} value={emailIn} onChangeText={v => setEmailIn(v.toLowerCase())} autoCapitalize="none" keyboardType="email-address" editable={!lockedOut} /></View>
+              <View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>SENHA</Text><CapsLockDetector onCapsLockChange={setCapsLockActive}>{({ ref, onKeyPress, isCapsLock }) => (<View><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: isCapsLock ? T.amber : T.border, borderRadius: 16, paddingRight: 12, opacity: lockedOut ? 0.5 : 1 }}><TextInput ref={ref} style={{ flex: 1, padding: 16, fontSize: 15, color: T.text }} placeholder="••••••••" placeholderTextColor={T.textMuted} value={passIn} onChangeText={setPassIn} secureTextEntry={!showPass} editable={!lockedOut} onKeyPress={onKeyPress} /><TouchableOpacity onPress={() => setShowPass(!showPass)} disabled={lockedOut}><Feather name={showPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View>{isCapsLock && (<View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}><Feather name="alert-triangle" size={12} color={T.amber} /><Text style={{ fontSize: 11, color: T.amber, fontWeight: '600' }}>CAPS LOCK está ativado</Text></View>)}</View>)}</CapsLockDetector></View>
             </View>
-
-            {loading
-              ? <ActivityIndicator size="large" color={T.blue} style={{ marginVertical: 12 }} />
-              : <PrimaryBtn label={lockedOut ? `Bloqueado por ${lockoutRemaining}s` : 'Entrar no Painel'} onPress={() => doLogin(emailIn, passIn)} color={lockedOut ? T.textMuted : T.blue} style={{ opacity: lockedOut ? 0.6 : 1 }} />
-            }
-
-            {biometricEnabled && !lockedOut && (
-              <TouchableOpacity style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12 }} onPress={() => doLogin('', '', true)}>
-                <Feather name="fingerprint" size={20} color={T.blue} />
-                <Text style={{ color: T.blue, fontWeight: '600', fontSize: 14 }}>Entrar com Biometria</Text>
-              </TouchableOpacity>
-            )}
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 24 }}>
-              <View style={{ flex: 1, height: 1, backgroundColor: T.border }} /><Text style={{ paddingHorizontal: 16, color: T.textMuted, fontSize: 12, fontWeight: '800' }}>OU</Text><View style={{ flex: 1, height: 1, backgroundColor: T.border }} />
+            {loading ? <ActivityIndicator size="large" color={T.blue} style={{ marginVertical: 12 }} /> : <PrimaryBtn label={lockedOut ? `Bloqueado por ${lockoutRemaining}s` : 'Entrar no Painel'} onPress={() => doLogin(emailIn, passIn)} color={lockedOut ? T.textMuted : T.blue} style={{ opacity: lockedOut ? 0.6 : 1 }} />}
+            {biometricEnabled && !lockedOut && (<TouchableOpacity style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 12 }} onPress={() => doLogin('', '', true)}><Feather name="fingerprint" size={20} color={T.blue} /><Text style={{ color: T.blue, fontWeight: '600', fontSize: 14 }}>Entrar com Biometria</Text></TouchableOpacity>)}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 24 }}><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /><Text style={{ paddingHorizontal: 16, color: T.textMuted, fontSize: 12, fontWeight: '800' }}>OU</Text><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /></View>
+            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+              <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: T.blue + '40', backgroundColor: T.blueGlow }} onPress={() => setAuthMode('qrScanner')}><Feather name="maximize" size={18} color={T.blue} /><Text style={{ color: T.blue, fontWeight: '800' }}>QR Code</Text></TouchableOpacity>
+              <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: T.purple + '40', backgroundColor: T.purpleGlow }} onPress={() => setAuthMode('register')}><Feather name="user-plus" size={18} color={T.purple} /><Text style={{ color: T.purple, fontWeight: '800' }}>Cadastrar</Text></TouchableOpacity>
             </View>
-            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16, borderRadius: 16, borderWidth: 1.5, borderColor: T.blue + '40', backgroundColor: T.blueGlow, opacity: lockedOut ? 0.5 : 1 }} onPress={() => { if (!lockedOut) setAuthMode('qrScanner'); }} disabled={lockedOut}>
-              <Feather name="maximize" size={18} color={T.blue} /><Text style={{ color: T.blue, fontWeight: '800', fontSize: 15 }}>Escanear QR Code</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 14, borderRadius: 16, borderWidth: 1.5, borderColor: T.orange + '40', backgroundColor: T.orangeGlow }} onPress={() => setAuthMode('admin')}><Feather name="shield" size={18} color={T.orange} /><Text style={{ color: T.orange, fontWeight: '800' }}>Admin</Text></TouchableOpacity>
+            <TouchableOpacity style={{ alignSelf: 'center', marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 6 }} onPress={() => setShowRastreioModal(true)}><Feather name="search" size={16} color={T.textSub} /><Text style={{ color: T.textSub, fontSize: 13, fontWeight: '600' }}>Verificar acesso com código de rastreio</Text></TouchableOpacity>
           </View>
           <Text style={{ marginTop: 32, textAlign: 'center', color: T.textMuted, fontSize: 12, fontWeight: '600' }}>GEI.AI v5.0 Secure · 2026</Text>
         </ScrollView>
+        <RastreioModal visible={showRastreioModal} onClose={() => setShowRastreioModal(false)} T={T} fontScale={fontScale} />
       </KeyboardAvoidingView>
     );
   }
 
-  // ─── MAIN APP ──────────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar hidden />
       <DarkTorchPrompt isDarkEnv={darkEnv.isDarkEnv} lightLevel={darkEnv.lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(!torchOn)} T={T} fontScale={fontScale} />
-
-      {/* Modal de QR Code Generator */}
-      <Modal visible={showQrGenerator} transparent animationType="fade" onRequestClose={() => setShowQrGenerator(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center' }}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowQrGenerator(false)} />
-          <View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 20, maxHeight: '85%', borderWidth: 1, borderColor: T.border }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderColor: T.border }}>
-              <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text }}>QR Code de Acesso</Text>
-              <TouchableOpacity onPress={() => setShowQrGenerator(false)} style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}>
-                <Feather name="x" size={20} color={T.textSub} />
-              </TouchableOpacity>
-            </View>
-            <QrCodeGenerator T={T} fontScale={fontScale} userData={userData} onClose={() => setShowQrGenerator(false)} />
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal de Logs de Auditoria */}
-      <Modal visible={showAuditLogs} transparent animationType="fade" onRequestClose={() => setShowAuditLogs(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center' }}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAuditLogs(false)} />
-          <View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 20, maxHeight: '85%', borderWidth: 1, borderColor: T.border }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderColor: T.border }}>
-              <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text }}>Logs de Auditoria</Text>
-              <TouchableOpacity onPress={() => setShowAuditLogs(false)} style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}>
-                <Feather name="x" size={20} color={T.textSub} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
-              {auditLogs.length === 0 ? (
-                <Text style={{ textAlign: 'center', color: T.textSub, padding: 40 }}>Nenhum log registrado.</Text>
-              ) : (
-                auditLogs.map((log, index) => (
-                  <View key={index} style={{ backgroundColor: T.bgElevated, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: T.border }}>
-                    <Text style={{ fontSize: 11, color: T.textMuted }}>{new Date(log.timestamp).toLocaleString()}</Text>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: T.text, marginTop: 4 }}>{log.action}</Text>
-                    <Text style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>{log.details}</Text>
-                  </View>
-                ))
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {!scanning && (
-        <View style={{ paddingTop: 50, paddingHorizontal: 20, paddingBottom: 16, backgroundColor: T.bg, borderBottomWidth: 1, borderColor: T.border }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <View style={{ width: 52, height: 52, borderRadius: 18, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 10 }}>
-              <Text style={{ color: '#FFF', fontSize: 18, fontWeight: '900' }}>{initials}</Text>
-            </View>
-            <View style={{ flex: 1, paddingRight: 12 }}>
-              <Text style={{ fontWeight: '900', color: T.text, fontSize: 20 * fontScale, letterSpacing: -0.5 }} numberOfLines={1}>{userData?.NOME || 'Usuário'}</Text>
-              <Text style={{ color: T.textSub, fontSize: 12.5 * fontScale, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>Painel de estoque inteligente</Text>
-            </View>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              {(canSw || isDeposito(perf) || isRepositor(perf)) && (
-                <TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => setShelfModal(true)}>
-                  <Feather name="layers" size={18} color={T.blue} />
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => {
-                addAuditLog('LOGOUT', 'Usuário fez logout', userData?.id);
-                setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); setCleanToast(null); setFailedAttempts(0); setLockedOut(false); if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current);
-              }}>
-                <Feather name="log-out" size={18} color={T.red} />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      )}
-
+      <Modal visible={showQrGenerator} transparent animationType="fade" onRequestClose={() => setShowQrGenerator(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center' }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowQrGenerator(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 20, maxHeight: '85%', borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text }}>QR Code de Acesso</Text><TouchableOpacity onPress={() => setShowQrGenerator(false)} style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}><Feather name="x" size={20} color={T.textSub} /></TouchableOpacity></View><QrCodeGenerator T={T} fontScale={fontScale} userData={userData} onClose={() => setShowQrGenerator(false)} /></View></View></Modal>
+      <Modal visible={showAuditLogs} transparent animationType="fade" onRequestClose={() => setShowAuditLogs(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-start', paddingTop: 52 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAuditLogs(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 16, maxHeight: WIN.height * 0.99, borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="shield" size={18} color={T.blue} /></View><View><Text style={{ fontSize: 16 * fontScale, fontWeight: '900', color: T.text }}>Auditoria & Logins</Text><Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600' }}>Últimos 3 dias</Text></View></View><TouchableOpacity onPress={() => setShowAuditLogs(false)} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}><Feather name="x" size={18} color={T.textSub} /></TouchableOpacity></View><ScrollView contentContainerStyle={{ padding: 16, gap: 8 }} showsVerticalScrollIndicator={false}>{auditLogs.loginHistory && auditLogs.loginHistory.length > 0 && (<View style={{ backgroundColor: T.bgElevated, borderRadius: 18, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: T.blue + '35' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}><View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="log-in" size={14} color={T.blue} /></View><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Histórico de Logins</Text><View style={{ marginLeft: 'auto', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: T.blue + '18', borderWidth: 1, borderColor: T.blue + '30' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue }}>{auditLogs.loginHistory.length} registro{auditLogs.loginHistory.length !== 1 ? 's' : ''}</Text></View></View>{auditLogs.loginHistory.map((login, idx) => (<View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: idx > 0 ? 1 : 0, borderColor: T.border }}><View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: idx === 0 ? T.green + '20' : T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: idx === 0 ? T.green + '50' : T.border }}><Text style={{ fontSize: 11, fontWeight: '900', color: idx === 0 ? T.green : T.textMuted }}>#{idx + 1}</Text></View><View style={{ flex: 1 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>{idx === 0 && (<View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: T.green + '18', borderWidth: 1, borderColor: T.green + '40' }}><Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.green }}>MAIS RECENTE</Text></View>)}<Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: idx === 0 ? T.text : T.textSub }}>{login.data || '—'}{login.hora ? `  ·  ${login.hora}` : ''}</Text></View>{login.iso ? (<Text style={{ fontSize: 10 * fontScale, color: T.textMuted, marginTop: 2, fontWeight: '600' }}>{new Date(login.iso).toLocaleString('pt-BR', { weekday: 'long' })}</Text>) : null}</View><Feather name={idx === 0 ? 'check-circle' : 'clock'} size={15} color={idx === 0 ? T.green : T.textMuted} /></View>))}</View>)}<View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 }}><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Eventos do Sistema</Text><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /></View>{(!auditLogs.logs || auditLogs.logs.length === 0) ? (<View style={{ alignItems: 'center', paddingVertical: 32 }}><Feather name="check-circle" size={36} color={T.green} /><Text style={{ textAlign: 'center', color: T.textSub, marginTop: 12, fontSize: 14 * fontScale, fontWeight: '700' }}>Nenhum evento nos últimos 3 dias.</Text></View>) : (auditLogs.logs.map((log, index) => { const isLogin = log.action?.includes('LOGIN') || log.action?.includes('QR'); const isWarning = log.action?.includes('FAILED') || log.action?.includes('DENIED') || log.action?.includes('ERROR') || log.action?.includes('INVALID'); const iconName = isWarning ? 'alert-triangle' : isLogin ? 'log-in' : 'activity'; const iconColor = isWarning ? T.amber : isLogin ? T.blue : T.teal; const bgColor = isWarning ? T.amberGlow : isLogin ? T.blueGlow : T.tealGlow; const borderColor = isWarning ? T.amber + '40' : isLogin ? T.blue + '30' : T.teal + '30'; return (<View key={index} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: T.bgElevated, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: borderColor }}><View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: bgColor, justifyContent: 'center', alignItems: 'center', marginTop: 1, borderWidth: 1, borderColor: borderColor }}><Feather name={iconName} size={13} color={iconColor} /></View><View style={{ flex: 1 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: iconColor, flex: 1, paddingRight: 8 }}>{log.action}</Text><Text style={{ fontSize: 9 * fontScale, color: T.textMuted, fontWeight: '700', flexShrink: 0 }}>{new Date(log.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</Text></View><Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 3, lineHeight: 16 }}>{log.details}</Text><Text style={{ fontSize: 9 * fontScale, color: T.textMuted, marginTop: 4, fontWeight: '600' }}>{new Date(log.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}{log.userId ? `  ·  ID ${log.userId}` : ''}</Text></View></View>); }))}</ScrollView></View></View></Modal>
+      {!scanning && (<View style={{ paddingTop: 50, paddingHorizontal: 20, paddingBottom: 16, backgroundColor: T.bg, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>{userData?.PERFILFOTOURL ? <Image source={{ uri: userData.PERFILFOTOURL }} style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: T.blue }} /> : <View style={{ width: 52, height: 52, borderRadius: 18, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 10 }}><Text style={{ color: '#FFF', fontSize: 18, fontWeight: '900' }}>{initials}</Text></View>}<View style={{ flex: 1, paddingRight: 12 }}><Text style={{ fontWeight: '900', color: T.text, fontSize: 20 * fontScale, letterSpacing: -0.5 }} numberOfLines={1}>{userData?.NOME || 'Usuário'}</Text><Text style={{ color: T.textSub, fontSize: 12.5 * fontScale, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>Painel de estoque inteligente</Text></View><View style={{ flexDirection: 'row', gap: 10 }}>{(canSw || isDeposito(perf)) && (<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => setShelfModal(true)}><Feather name="layers" size={18} color={T.blue} /></TouchableOpacity>)}<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => { addAuditLog('LOGOUT', 'Usuário fez logout', userData?.id); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); setCleanToast(null); setFailedAttempts(0); setLockedOut(false); if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }}><Feather name="log-out" size={18} color={T.red} /></TouchableOpacity></View></View></View>)}
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         {currentTab === 'home' && !scanning && (
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: TAB_SAFE + 20 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}>
-              <View style={{ flex: 1.4, backgroundColor: T.bgCard, borderRadius: 22, padding: 20, borderWidth: 1, borderColor: T.border }}>
-                <Text style={{ color: T.textSub, fontSize: 13 * fontScale, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase' }}>Itens Ativos</Text>
-                <Text style={{ color: T.text, fontSize: 42 * fontScale, fontWeight: '900', letterSpacing: -1.5 }}>{stockData.length}</Text>
-                <Text style={{ color: shPal.accent, fontSize: 14 * fontScale, fontWeight: '800', marginTop: 6 }}>{shlabel(activeShelf)}</Text>
-                <Text style={{ color: T.textSub, fontSize: 11.5 * fontScale, fontWeight: '700', marginTop: 8 }}>Toque em Estoque para ver todos.</Text>
-              </View>
-              <View style={{ flex: 1, gap: 12 }}>
-                <TouchableOpacity style={{ flex: 1, borderRadius: 16, padding: 16, justifyContent: 'center', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: T.blue + '30', backgroundColor: T.blueGlow }} onPress={() => navTo('estoque')}>
-                  <Feather name="layers" size={20} color={T.blue} /><Text style={{ fontWeight: '800', fontSize: 13 * fontScale, color: T.blue }}>Estoque</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={{ flex: 1, borderRadius: 16, padding: 16, justifyContent: 'center', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: T.teal + '30', backgroundColor: T.tealGlow }} onPress={() => navTo('chat')}>
-                  <Feather name="message-circle" size={20} color={T.teal} /><Text style={{ fontWeight: '800', fontSize: 13 * fontScale, color: T.teal }}>IA Chat</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <ShelfQuickSelector current={cadastroShelf || activeShelf} onOpen={() => setShelfModal(true)} T={T} fontScale={fontScale} title={canSw || isDeposito(perf) ? 'Troca rápida de prateleira' : 'Sua prateleira ativa'} subtitle={canSw || isDeposito(perf) ? 'Toque para trocar a prateleira' : 'Visualize a prateleira atual.'} />
-
+            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}><View style={{ flex: 1.4, backgroundColor: T.bgCard, borderRadius: 22, padding: 20, borderWidth: 1, borderColor: T.border }}><Text style={{ color: T.textSub, fontSize: 13 * fontScale, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase' }}>Itens Ativos</Text><Text style={{ color: T.text, fontSize: 42 * fontScale, fontWeight: '900', letterSpacing: -1.5 }}>{stockData.length}</Text><Text style={{ color: shPal.accent, fontSize: 14 * fontScale, fontWeight: '800', marginTop: 6 }}>{shlabel(activeShelf)}</Text><Text style={{ color: T.textSub, fontSize: 11.5 * fontScale, fontWeight: '700', marginTop: 8 }}>Toque em Estoque para ver todos.</Text></View><View style={{ flex: 1, gap: 12 }}><TouchableOpacity style={{ flex: 1, borderRadius: 16, padding: 16, justifyContent: 'center', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: T.blue + '30', backgroundColor: T.blueGlow }} onPress={() => navTo('estoque')}><Feather name="layers" size={20} color={T.blue} /><Text style={{ fontWeight: '800', fontSize: 13 * fontScale, color: T.blue }}>Estoque</Text></TouchableOpacity><TouchableOpacity style={{ flex: 1, borderRadius: 16, padding: 16, justifyContent: 'center', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: T.teal + '30', backgroundColor: T.tealGlow }} onPress={() => navTo('chat')}><Feather name="message-circle" size={20} color={T.teal} /><Text style={{ fontWeight: '800', fontSize: 13 * fontScale, color: T.teal }}>IA Chat</Text></TouchableOpacity></View></View>
+            <ShelfQuickSelector current={cadastroShelf || activeShelf} onOpen={isRepositor(perf) ? undefined : () => setShelfModal(true)} T={T} fontScale={fontScale} title={canSw || isDeposito(perf) ? 'Troca rápida de prateleira' : 'Sua prateleira ativa'} subtitle={isRepositor(perf) ? 'Sua prateleira é definida pelo coordenador.' : canSw || isDeposito(perf) ? 'Toque para trocar a prateleira' : 'Visualize a prateleira atual.'} />
             {counts.expired > 0 && <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12, gap: 12, borderColor: T.red + '50', backgroundColor: T.redGlow }} onPress={() => { setActiveFilter('expired'); navTo('estoque'); }}><Feather name="alert-circle" size={20} color={T.red} /><View style={{ flex: 1 }}><Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.red }}>{counts.expired} produto{counts.expired !== 1 ? 's' : ''} vencido{counts.expired !== 1 ? 's' : ''}!</Text><Text style={{ fontSize: 12 * fontScale, color: T.red, opacity: 0.8, marginTop: 2 }}>Toque para ver e gerenciar</Text></View><Feather name="arrow-right" size={16} color={T.red} /></TouchableOpacity>}
             {counts.warning > 0 && <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 12, gap: 12, borderColor: T.amber + '50', backgroundColor: T.amberGlow }} onPress={() => { setActiveFilter('warning'); navTo('estoque'); }}><Feather name="alert-triangle" size={20} color={T.amber} /><View style={{ flex: 1 }}><Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.amber }}>{counts.warning} produto{counts.warning !== 1 ? 's' : ''} vence{counts.warning !== 1 ? 'm' : ''} em 7 dias</Text><Text style={{ fontSize: 12 * fontScale, color: T.amber, opacity: 0.8, marginTop: 2 }}>Atenção imediata necessária</Text></View><Feather name="arrow-right" size={16} color={T.amber} /></TouchableOpacity>}
-
-            <TouchableOpacity onPress={triggerAutoClean} style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 16, gap: 12, borderColor: T.purple + '40', backgroundColor: T.purpleGlow }}>
-              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.purple + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.purple + '40' }}><Feather name="trash-2" size={18} color={T.purple} /></View>
-              <View style={{ flex: 1 }}><Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.purple }}>Limpar produtos vencidos</Text><Text style={{ fontSize: 12 * fontScale, color: T.purple, opacity: 0.75, marginTop: 1 }}>Remove itens com +30 dias de vencimento</Text></View>
-              <Feather name="arrow-right" size={16} color={T.purple} />
+            <TouchableOpacity onPress={() => setShowExpiryModal(true)} style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 16, gap: 12, borderColor: T.orange + '40', backgroundColor: T.orangeGlow }}>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.orange + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.orange + '40' }}><Feather name="calendar" size={18} color={T.orange} /></View>
+              <View style={{ flex: 1 }}><Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.orange }}>📅 Vencimentos por Mês</Text><Text style={{ fontSize: 12 * fontScale, color: T.orange, opacity: 0.75, marginTop: 1 }}>Veja produtos que vencem nos próximos 30 dias</Text></View>
+              <Feather name="chevron-right" size={16} color={T.orange} />
             </TouchableOpacity>
-
+            <TouchableOpacity onPress={triggerAutoClean} style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 16, gap: 12, borderColor: T.purple + '40', backgroundColor: T.purpleGlow }}><View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.purple + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.purple + '40' }}><Feather name="trash-2" size={18} color={T.purple} /></View><View style={{ flex: 1 }}><Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.purple }}>Limpar produtos vencidos</Text><Text style={{ fontSize: 12 * fontScale, color: T.purple, opacity: 0.75, marginTop: 1 }}>Remove itens com +30 dias de vencimento</Text></View><Feather name="arrow-right" size={16} color={T.purple} /></TouchableOpacity>
             <Text style={{ fontSize: 15 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.2, marginBottom: 16, textTransform: 'uppercase' }}>Painel de Ações</Text>
-            {(isRepositor(perf) || isDeposito(perf) || isCoord(perf)) && <ActionCard T={T} fontScale={fontScale} icon="layers" color={T.orange} title="Gerenciar Prateleiras" desc={`Prateleira atual: ${shlabel(activeShelf)}`} badge={shlabel(activeShelf)} onPress={() => setShelfModal(true)} />}
+            {(isDeposito(perf) || isCoord(perf)) && <ActionCard T={T} fontScale={fontScale} icon="layers" color={T.orange} title="Gerenciar Prateleiras" desc={`Prateleira atual: ${shlabel(activeShelf)}`} badge={shlabel(activeShelf)} onPress={() => setShelfModal(true)} />}
             <ActionCard T={T} fontScale={fontScale} icon="edit-3" color={shPal.accent} title="Cadastrar Produto" desc={`Destino: ${shlabel(cadastroShelf || activeShelf)}`} badge={shlabel(cadastroShelf || activeShelf)} onPress={() => { resetWiz(); setProdName(''); setGiro(''); navTo('cadastro'); }} />
             <ActionCard T={T} fontScale={fontScale} icon="maximize" color={T.blue} title="Leitura de Código de Barras" desc="Preenche o nome automaticamente via IA" onPress={() => startScan('barcode')} />
             <ActionCard T={T} fontScale={fontScale} icon="camera" color={T.purple} title="Scanner IA Vision" desc="Identifique produtos via foto" onPress={() => startScan('aiVision')} />
+            <ActionCard T={T} fontScale={fontScale} icon="box" color={T.teal} title="🏗️ Calculadora de Pinhas" desc="Simule e calcule pilhas de produtos visualmente" onPress={() => setShowPinhasModal(true)} />
             <ActionCard T={T} fontScale={fontScale} icon="settings" color={T.textSub} title="Configurações do App" desc="Aparência, fonte e automações" onPress={() => navTo('config')} />
+            {/* Botão de microfone na home */}
+            <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: T.blueGlow, borderRadius: 50, padding: 12, marginTop: 10, borderWidth: 1, borderColor: T.blue }} onPress={() => setVoiceAssistantVisible(true)}>
+              <Feather name="mic" size={24} color={T.blue} />
+              <Text style={{ marginLeft: 8, fontSize: 14 * fontScale, fontWeight: '700', color: T.blue }}>Assistente de Voz</Text>
+            </TouchableOpacity>
           </ScrollView>
         )}
-
         {currentTab === 'chat' && <ChatScreen T={T} fontScale={fontScale} msgs={msgs} chatTxt={chatTxt} setChatTxt={setChatTxt} sendChat={sendChat} busy={chatBusy} scrollRef={scrollRef} TAB_H={TAB_H} NAV_BAR_H={NAV_BAR_H} />}
-
-        {currentTab === 'cadastro' && <CadastroScreen T={T} fontScale={fontScale} perf={perf} cadastroShelf={cadastroShelf} setCadastroShelf={setCadastroShelf} activeShelf={activeShelf} prodName={prodName} setProdName={setProdName} validade={validade} setValidade={setValidade} qtd={qtd} setQtd={setQtd} giro={giro} setGiro={setGiro} wStep={wStep} setWStep={setWStep} nextStep={nextStep} saveProduct={saveProduct} TAB_SAFE={TAB_SAFE} GIRO={GIRO} isCoord={isCoord} isDeposito={isDeposito} SHELF_KEYS={SHELF_KEYS} shlabel={shlabel} shelfPalette={shelfPalette} showErr={showErr} />}
-
+        {currentTab === 'cadastro' && (
+          <>
+            <CadastroScreen T={T} fontScale={fontScale} perf={perf} cadastroShelf={cadastroShelf} setCadastroShelf={setCadastroShelf} activeShelf={activeShelf} prodName={prodName} setProdName={setProdName} validade={validade} setValidade={setValidade} qtd={qtd} setQtd={setQtd} giro={giro} setGiro={setGiro} wStep={wStep} setWStep={setWStep} nextStep={nextStep} saveProduct={saveProduct} TAB_SAFE={TAB_SAFE} GIRO={GIRO} isCoord={isCoord} isDeposito={isDeposito} SHELF_KEYS={SHELF_KEYS} shlabel={shlabel} shelfPalette={shelfPalette} showErr={showErr} />
+            <TouchableOpacity style={{ position: 'absolute', bottom: TAB_SAFE + 20, right: 20, backgroundColor: T.blue, width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', shadowColor: T.blue, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8 }} onPress={() => setVoiceAssistantVisible(true)}>
+              <Feather name="mic" size={28} color="#FFF" />
+            </TouchableOpacity>
+          </>
+        )}
         {currentTab === 'estoque' && (
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: T.border, gap: 8, backgroundColor: T.bgCard }}>
-              <FlatList horizontal showsHorizontalScrollIndicator={false} data={FILTERS} keyExtractor={f => f.key} style={{ flex: 1 }} contentContainerStyle={{ gap: 8 }}
-                renderItem={({ item: f }) => { const on = activeFilter === f.key; const fc2 = fcol[f.colorKey]; const cnt = counts[f.key]; return (<TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }, on && { backgroundColor: fc2 + '18', borderColor: fc2 + '60' }]} onPress={() => setActiveFilter(f.key)}><Feather name={f.icon} size={13} color={on ? fc2 : T.textSub} /><Text style={[{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: fc2, fontWeight: '800' }]}>{f.label}</Text>{cnt > 0 && <View style={{ width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', backgroundColor: on ? fc2 : T.borderMid }}><Text style={{ fontSize: 10, fontWeight: '900', color: on ? '#FFF' : T.textSub }}>{cnt}</Text></View>}</TouchableOpacity>); }}
-              />
-              <View style={{ flexDirection: 'row', gap: 6, marginLeft: 8 }}>
-                {['list', 'grid'].map(m => (<TouchableOpacity key={m} style={[{ width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }, viewMode === m && { backgroundColor: T.blueGlow, borderColor: T.blue + '60' }]} onPress={() => setViewMode(m)}><Feather name={m} size={16} color={viewMode === m ? T.blue : T.textSub} /></TouchableOpacity>))}
-              </View>
+              <FlatList horizontal showsHorizontalScrollIndicator={false} data={FILTERS} keyExtractor={f => f.key} style={{ flex: 1 }} contentContainerStyle={{ gap: 8 }} renderItem={({ item: f }) => { const on = activeFilter === f.key; const fc2 = fcol[f.colorKey]; const cnt = counts[f.key]; return (<TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }, on && { backgroundColor: fc2 + '18', borderColor: fc2 + '60' }]} onPress={() => setActiveFilter(f.key)}><Feather name={f.icon} size={13} color={on ? fc2 : T.textSub} /><Text style={[{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: fc2, fontWeight: '800' }]}>{f.label}</Text>{cnt > 0 && <View style={{ width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', backgroundColor: on ? fc2 : T.borderMid }}><Text style={{ fontSize: 10, fontWeight: '900', color: on ? '#FFF' : T.textSub }}>{cnt}</Text></View>}</TouchableOpacity>); }} />
+              <View style={{ flexDirection: 'row', gap: 6, marginLeft: 8 }}><TouchableOpacity style={[{ width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }, searchOpen && { backgroundColor: T.blueGlow, borderColor: T.blue + '60' }]} onPress={() => { setSearchOpen(o => !o); if (searchOpen) setSearchQuery(''); }}><Feather name="search" size={16} color={searchOpen ? T.blue : T.textSub} /></TouchableOpacity>{['list', 'grid'].map(m => (<TouchableOpacity key={m} style={[{ width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }, viewMode === m && { backgroundColor: T.blueGlow, borderColor: T.blue + '60' }]} onPress={() => setViewMode(m)}><Feather name={m} size={16} color={viewMode === m ? T.blue : T.textSub} /></TouchableOpacity>))}</View>
             </View>
-            <FlatList key={viewMode} data={filteredStock} keyExtractor={(item, index) => `${item.id}-${index}`} numColumns={viewMode === 'grid' ? 2 : 1} columnWrapperStyle={viewMode === 'grid' ? { gap: 12 } : undefined}
-              renderItem={({ item }) => viewMode === 'list' ? <CardList item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} /> : <CardGrid item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} />}
-              contentContainerStyle={{ padding: 16, paddingBottom: TAB_SAFE + 24 }} showsVerticalScrollIndicator={false}
-              ListEmptyComponent={() => (<View style={{ alignItems: 'center', paddingVertical: 80 }}><Feather name="inbox" size={60} color={T.textMuted} /><Text style={{ color: T.textSub, marginTop: 20, fontSize: 17 * fontScale, fontWeight: '800', textAlign: 'center' }}>Nada aqui...</Text><Text style={{ color: T.textMuted, marginTop: 8, fontSize: 14 * fontScale, fontWeight: '600', textAlign: 'center' }}>{activeFilter === 'all' ? 'Nenhum produto cadastrado nesta prateleira.' : 'Nenhum produto atende a este filtro.'}</Text></View>)}
-            />
+            {searchOpen && (<View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: T.bgCard, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderRadius: 14, borderWidth: 1.5, borderColor: T.blue + '60', paddingHorizontal: 14, gap: 10 }}><Feather name="search" size={16} color={T.blue} /><TextInput style={{ flex: 1, paddingVertical: 12, fontSize: 15 * fontScale, color: T.text }} placeholder="Buscar produto pelo nome..." placeholderTextColor={T.textMuted} value={searchQuery} onChangeText={setSearchQuery} autoFocus clearButtonMode="while-editing" />{searchQuery.length > 0 && (<TouchableOpacity onPress={() => setSearchQuery('')}><Feather name="x" size={16} color={T.textMuted} /></TouchableOpacity>)}</View></View>)}
+            <FlatList key={viewMode} data={filteredStock} keyExtractor={(item, index) => `${item.id}-${index}`} numColumns={viewMode === 'grid' ? 2 : 1} columnWrapperStyle={viewMode === 'grid' ? { gap: 12 } : undefined} renderItem={({ item }) => viewMode === 'list' ? <CardList item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} fifoMode={fifoMode} allProducts={stockData} /> : <CardGrid item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} fifoMode={fifoMode} allProducts={stockData} />} contentContainerStyle={{ padding: 16, paddingBottom: TAB_SAFE + 24 }} showsVerticalScrollIndicator={false} ListEmptyComponent={() => (<View style={{ alignItems: 'center', paddingVertical: 80 }}><Feather name={searchQuery ? 'search' : 'inbox'} size={60} color={T.textMuted} /><Text style={{ color: T.textSub, marginTop: 20, fontSize: 17 * fontScale, fontWeight: '800', textAlign: 'center' }}>{searchQuery ? 'Nenhum resultado' : 'Nada aqui...'}</Text><Text style={{ color: T.textMuted, marginTop: 8, fontSize: 14 * fontScale, fontWeight: '600', textAlign: 'center' }}>{searchQuery ? `Nenhum produto encontrado para "${searchQuery}".` : activeFilter === 'all' ? 'Nenhum produto cadastrado nesta prateleira.' : 'Nenhum produto atende a este filtro.'}</Text></View>)} />
           </View>
         )}
-
-        {currentTab === 'config' && <ConfigScreen T={T} currentTheme={currentTheme} onThemeChange={setCurrentTheme} fontScale={fontScale} setFontScale={setFontScale} notifOn={notifOn} setNotifOn={setNotifOn} TAB_SAFE={TAB_SAFE} onGenerateQR={() => setShowQrGenerator(true)} onViewAuditLogs={viewAuditLogs} onEnableBiometrics={enableBiometrics} biometricEnabled={biometricEnabled} />}
+        {currentTab === 'config' && <ConfigScreen T={T} currentTheme={currentTheme} onThemeChange={setCurrentTheme} fontScale={fontScale} setFontScale={setFontScale} notifOn={notifOn} setNotifOn={setNotifOn} TAB_SAFE={TAB_SAFE} onGenerateQR={() => setShowQrGenerator(true)} onViewAuditLogs={viewAuditLogs} onEnableBiometrics={enableBiometrics} biometricEnabled={biometricEnabled} onChangePassword={handleChangePassword} userData={userData} fifoMode={fifoMode} setFifoMode={setFifoMode} />}
       </Animated.View>
-
-      {scanning && (
-        <View style={StyleSheet.absoluteFill}>
-          <CameraView ref={camRef} style={StyleSheet.absoluteFill} enableTorch={torchOn} onBarcodeScanned={scanMode === 'barcode' ? onBarcode : undefined} barcodeScannerSettings={scanMode === 'barcode' ? { barcodeTypes: ['ean13', 'upc_a', 'ean8'] } : undefined} />
-          <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.32)' }}>
-            <View style={{ position: 'absolute', top: 40, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24 }}>
-              <TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => { setScanning(false); setCountdown(null); setTorchOn(false); }}><Feather name="x" size={22} color="#FFF" /></TouchableOpacity>
-              <TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: torchOn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setTorchOn(!torchOn)}><Feather name="zap" size={20} color={torchOn ? '#000' : '#FFF'} /></TouchableOpacity>
-            </View>
-            {scanMode === 'barcode' && (<View style={{ alignItems: 'center' }}><View style={{ width: 280, height: 180, borderWidth: 2, borderColor: T.blue, borderRadius: 24, backgroundColor: 'rgba(59,91,255,0.05)' }}><Animated.View style={{ height: 2, backgroundColor: T.blue, width: '100%', position: 'absolute', top: scanAnim.interpolate({ inputRange: [0, 1], outputRange: ['10%', '90%'] }), shadowColor: T.blue, shadowOpacity: 1, shadowRadius: 10, elevation: 10 }} /></View><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 }}>Posicione o código de barras</Text><Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Nome preenchido automaticamente pela IA</Text></View>)}
-            {scanMode === 'aiVision' && (<View style={{ alignItems: 'center' }}><Animated.View style={{ width: 260, height: 260, borderWidth: 3, borderColor: T.purple, borderRadius: 130, backgroundColor: 'rgba(124,58,237,0.1)', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulseAnim }] }}><MaterialCommunityIcons name="robot-outline" size={80} color={T.purple} />{countdown !== null && <View style={{ position: 'absolute', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#FFF', fontSize: 52, fontWeight: '900', textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 8 }}>{countdown}</Text></View>}</Animated.View><Text style={{ color: '#FFF', marginTop: 32, fontWeight: '800', fontSize: 18, textAlign: 'center', paddingHorizontal: 40 }}>IA Vision · Foto em {countdown ?? 0}s</Text></View>)}
-          </View>
-        </View>
-      )}
-
-      {!scanning && (
-        <View style={{ height: TAB_SAFE, backgroundColor: T.bgCard, borderTopWidth: 1, borderColor: T.border, flexDirection: 'row', paddingBottom: NAV_BAR_H, paddingHorizontal: 10 }}>
-          <TabBtn icon="home" label="Início" active={currentTab === 'home'} onPress={() => navTo('home')} T={T} fontScale={fontScale} />
-          <TabBtn icon="layers" label="Estoque" active={currentTab === 'estoque'} onPress={() => navTo('estoque')} T={T} fontScale={fontScale} />
-          <View style={{ flex: 1.2, alignItems: 'center', justifyContent: 'center' }}>
-            <TouchableOpacity activeOpacity={0.9} style={{ width: 58, height: 58, borderRadius: 22, backgroundColor: T.blue, marginTop: -34, justifyContent: 'center', alignItems: 'center', elevation: 10, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 12, borderWidth: 4, borderColor: T.bgCard }} onPress={() => { resetWiz(); setProdName(''); setGiro(''); navTo('cadastro'); }}>
-              <Feather name="plus" size={28} color="#FFF" />
-            </TouchableOpacity>
-          </View>
-          <TabBtn icon="message-circle" label="IA Chat" active={currentTab === 'chat'} onPress={() => navTo('chat')} T={T} fontScale={fontScale} />
-          <TabBtn icon="settings" label="Ajustes" active={currentTab === 'config'} onPress={() => navTo('config')} T={T} fontScale={fontScale} />
-        </View>
-      )}
-
-      <ProductDetailModal visible={!!selectedProduct} product={selectedProduct} onClose={() => setSelectedProduct(null)} T={T} fontScale={fontScale} />
+      {scanning && (<View style={StyleSheet.absoluteFill}><CameraView ref={camRef} style={StyleSheet.absoluteFill} enableTorch={torchOn} onBarcodeScanned={scanMode === 'barcode' ? onBarcode : undefined} barcodeScannerSettings={scanMode === 'barcode' ? { barcodeTypes: ['ean13', 'upc_a', 'ean8'] } : undefined} onCameraReady={scanMode === 'aiVision' ? onAIVisionCameraReady : undefined} /><View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.32)' }}><View style={{ position: 'absolute', top: 40, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24 }}><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => { setScanning(false); setCountdown(null); setTorchOn(false); setShowAchandoGif(false); aiVisionTriggeredRef.current = false; if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); }}><Feather name="x" size={22} color="#FFF" /></TouchableOpacity><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: torchOn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setTorchOn(!torchOn)}><Feather name="zap" size={20} color={torchOn ? '#000' : '#FFF'} /></TouchableOpacity></View>{scanMode === 'barcode' && !showAchandoGif && (<View style={{ alignItems: 'center' }}><View style={{ width: 280, height: 180, borderWidth: 2, borderColor: T.blue, borderRadius: 24, backgroundColor: 'rgba(59,91,255,0.05)' }}><Animated.View style={{ height: 2, backgroundColor: T.blue, width: '100%', position: 'absolute', top: scanAnim.interpolate({ inputRange: [0, 1], outputRange: ['10%', '90%'] }), shadowColor: T.blue, shadowOpacity: 1, shadowRadius: 10, elevation: 10 }} /></View><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 }}>Posicione o código de barras</Text><Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Nome preenchido automaticamente pela IA</Text></View>)}{scanMode === 'aiVision' && (<View style={{ alignItems: 'center' }}><Animated.View style={{ width: 260, height: 260, borderWidth: 3, borderColor: T.purple, borderRadius: 130, backgroundColor: 'rgba(124,58,237,0.1)', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulseAnim }] }}><MaterialCommunityIcons name="robot-outline" size={80} color={T.purple} /></Animated.View><Text style={{ color: '#FFF', marginTop: 32, fontWeight: '800', fontSize: 18, textAlign: 'center', paddingHorizontal: 40 }}>IA Vision · Aponte para o produto</Text><Text style={{ color: 'rgba(255,255,255,0.65)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Captura automática em tempo real pelo Gemini</Text></View>)}</View></View>)}
+      {showAchandoGif && (<View style={StyleSheet.absoluteFill}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}><View style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, padding: 25, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' }}><Image source={AchandoGif} style={{ width: 180, height: 180 }} resizeMode="contain" /></View><Text style={{ marginTop: 35, color: '#FFF', fontSize: 22, fontWeight: 'bold', letterSpacing: 1 }}>Consultando fontes...</Text><Text style={{ marginTop: 10, color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>Buscando em GEI.IA, Bluesoft e OpenFoodFacts</Text></View></View>)}
+      <Modal visible={showRoboGif} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}><View style={{ flex: 1, backgroundColor: 'rgba(0,10,40,0.92)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}><View style={{ backgroundColor: '#FFFFFF', borderRadius: 36, padding: 28, width: '90%', alignItems: 'center', shadowColor: '#3B5BFF', shadowOpacity: 0.5, shadowRadius: 40, elevation: 20, borderWidth: 2, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(59,91,255,0.1)', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#3B5BFF' }} /><Text style={{ fontSize: 11, fontWeight: '900', color: '#3B5BFF', letterSpacing: 1.5, textTransform: 'uppercase' }}>IA Vision · GEI.AI</Text></View><View style={{ width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(59,91,255,0.06)', borderWidth: 3, borderColor: 'rgba(59,91,255,0.3)', justifyContent: 'center', alignItems: 'center', marginBottom: 20, shadowColor: '#3B5BFF', shadowOpacity: 0.3, shadowRadius: 20, elevation: 8 }}><Image source={RoboGif} style={{ width: 170, height: 170, borderRadius: 85 }} resizeMode="cover" fadeDuration={0} /></View><View style={{ width: '80%', height: 1, backgroundColor: 'rgba(59,91,255,0.12)', marginBottom: 16 }} /><Text style={{ fontSize: 13, fontWeight: '800', color: '#3B5BFF', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Produto Identificado!</Text><Text style={{ fontSize: 16, fontWeight: '900', color: '#0F172A', textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 }} numberOfLines={3}>{roboMsg.split('\n')[1]}</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18, backgroundColor: 'rgba(22,163,74,0.08)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(22,163,74,0.25)' }}><Feather name="check-circle" size={14} color="#16A34A" /><Text style={{ fontSize: 12, fontWeight: '800', color: '#16A34A' }}>Cadastro sendo aberto...</Text></View></View></View></Modal>
+      {!scanning && (<View style={{ height: TAB_SAFE, backgroundColor: T.bgCard, borderTopWidth: 1, borderColor: T.border, flexDirection: 'row', paddingBottom: NAV_BAR_H, paddingHorizontal: 10 }}><TabBtn icon="home" label="Início" active={currentTab === 'home'} onPress={() => navTo('home')} T={T} fontScale={fontScale} /><TabBtn icon="layers" label="Estoque" active={currentTab === 'estoque'} onPress={() => navTo('estoque')} T={T} fontScale={fontScale} /><View style={{ flex: 1.2, alignItems: 'center', justifyContent: 'center' }}><TouchableOpacity activeOpacity={0.9} style={{ width: 58, height: 58, borderRadius: 22, backgroundColor: T.blue, marginTop: -34, justifyContent: 'center', alignItems: 'center', elevation: 10, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 12, borderWidth: 4, borderColor: T.bgCard }} onPress={() => { resetWiz(); setProdName(''); setGiro(''); navTo('cadastro'); }}><Feather name="plus" size={28} color="#FFF" /></TouchableOpacity></View><TabBtn icon="message-circle" label="IA Chat" active={currentTab === 'chat'} onPress={() => navTo('chat')} T={T} fontScale={fontScale} /><TabBtn icon="settings" label="Ajustes" active={currentTab === 'config'} onPress={() => navTo('config')} T={T} fontScale={fontScale} /></View>)}
+      {selectedProduct && (<ProductDetailModal visible={!!selectedProduct} product={selectedProduct} onClose={() => setSelectedProduct(null)} onDelete={deleteProduct} T={T} fontScale={fontScale} fifoMode={fifoMode} allProducts={stockData} />)}
       <ProductSourceModal visible={sourceModalVisible} sources={currentSources} onSelect={onSourceSelected} onClose={() => { setSourceModalVisible(false); setCurrentSources([]); setProdName(''); }} T={T} fontScale={fontScale} />
-
-      <Modal visible={shelfModal} transparent animationType="fade" onRequestClose={() => setShelfModal(false)}>
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}>
-          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShelfModal(false)} />
-          <View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: T.border, elevation: 20 }}>
-            <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, marginBottom: 6 }}>Selecionar Prateleira</Text>
-            <Text style={{ fontSize: 14 * fontScale, color: T.textSub, marginBottom: 20 }}>Escolha qual setor deseja gerenciar agora.</Text>
-            <View style={{ gap: 10 }}>
-              {SHELF_KEYS.map(k => { const on = activeShelf === k; const pal = shelfPalette(T, k); return (<TouchableOpacity key={k} style={[{ flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 18, backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, gap: 14 }, on && { backgroundColor: pal.glow, borderColor: pal.accent }]} onPress={() => switchShelf(k)}><View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: on ? pal.accent : T.bgElevated, justifyContent: 'center', alignItems: 'center' }}><Feather name={pal.icon} size={18} color={on ? '#FFF' : T.textSub} /></View><Text style={[{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub, flex: 1 }, on && { color: pal.accent, fontWeight: '900' }]}>{shlabel(k)}</Text>{on && <Feather name="check-circle" size={20} color={pal.accent} />}</TouchableOpacity>); })}
-            </View>
-            <PrimaryBtn label="Fechar" onPress={() => setShelfModal(false)} outline color={T.textSub} style={{ marginTop: 20 }} fontScale={fontScale} />
-          </View>
-        </View>
-      </Modal>
-
+      <Modal visible={shelfModal} transparent animationType="fade" onRequestClose={() => setShelfModal(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShelfModal(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: T.border, elevation: 20 }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, marginBottom: 6 }}>Selecionar Prateleira</Text><Text style={{ fontSize: 14 * fontScale, color: T.textSub, marginBottom: 20 }}>Escolha qual setor deseja gerenciar agora.</Text><View style={{ gap: 10 }}>{SHELF_KEYS.map(k => { const on = activeShelf === k; const pal = shelfPalette(T, k); return (<TouchableOpacity key={k} style={[{ flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 18, backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, gap: 14 }, on && { backgroundColor: pal.glow, borderColor: pal.accent }]} onPress={() => switchShelf(k)}><View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: on ? pal.accent : T.bgElevated, justifyContent: 'center', alignItems: 'center' }}><Feather name={pal.icon} size={18} color={on ? '#FFF' : T.textSub} /></View><Text style={[{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub, flex: 1 }, on && { color: pal.accent, fontWeight: '900' }]}>{shlabel(k)}</Text>{on && <Feather name="check-circle" size={20} color={pal.accent} />}</TouchableOpacity>); })}</View><PrimaryBtn label="Fechar" onPress={() => setShelfModal(false)} outline color={T.textSub} style={{ marginTop: 20 }} fontScale={fontScale} /></View></View></Modal>
       {busy && (<View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 9999, alignItems: 'center', justifyContent: 'center' }}><View style={{ backgroundColor: T.bgCard, padding: 30, borderRadius: 24, alignItems: 'center', gap: 20, borderWidth: 1, borderColor: T.border }}><ActivityIndicator size="large" color={T.blue} /><Text style={{ color: T.text, fontWeight: '800', fontSize: 16 }}>{busyMsg || 'Processando...'}</Text></View></View>)}
-
       <SuccessOverlay visible={showSuccess} onClose={onSuccessDone} T={T} fontScale={fontScale} />
-
       {cleanToast && !scanning && <AutoCleanToast data={cleanToast} onClose={() => setCleanToast(null)} T={T} fontScale={fontScale} />}
-
       {erro ? (<View style={{ position: 'absolute', bottom: TAB_SAFE + 16, left: 16, right: 16, zIndex: 9997 }}><ErrBanner msg={erro} onClose={() => setErro('')} /></View>) : null}
+      <PinhasCalculatorModal visible={showPinhasModal} onClose={() => setShowPinhasModal(false)} T={T} fontScale={fontScale} />
+      <ExpiryAnalysisModal visible={showExpiryModal} onClose={() => setShowExpiryModal(false)} products={stockData} T={T} fontScale={fontScale} />
+      <VoiceAssistant
+        visible={voiceAssistantVisible}
+        onClose={() => setVoiceAssistantVisible(false)}
+        onComplete={handleVoiceComplete}
+        T={T}
+        fontScale={fontScale}
+        userData={userData}
+        activeShelf={activeShelf}
+        cadastroShelf={cadastroShelf}
+        setProdName={setProdName}
+        setGiro={setGiro}
+        setValidade={setValidade}
+        setQtd={setQtd}
+        setWStep={setWStep}
+        setCadastroShelf={setCadastroShelf}
+        setIsVoiceActive={setIsVoiceActive}
+      />
     </View>
   );
 }
