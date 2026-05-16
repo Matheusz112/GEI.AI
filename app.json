@@ -29,7 +29,6 @@
       }
     },
     "plugins": [
-      "expo-secure-store",
       "expo-navigation-bar",
       [
         "expo-speech-recognition",
