@@ -16,7 +16,7 @@ import Constants from 'expo-constants';
 import QRCode from 'react-native-qrcode-svg';
 import axios from 'axios';
 import * as Speech from 'expo-speech';
-import Voice from '@react-native-voice/voice';
+import * as SpeechRecognition from 'expo-speech-recognition';
 
 /*
  * ╔═══════════════════════════════════════════════════════════════════════╗
@@ -262,7 +262,7 @@ const requestMicPermission = async () => {
     }
   }
   
-  // iOS: o sistema solicita automaticamente na primeira chamada a Voice.start()
+  // iOS: o sistema solicita automaticamente na primeira chamada a SpeechRecognition.requestPermissionsAsync()
   return true;
 };
 
@@ -2678,10 +2678,10 @@ const RastreioModal = ({ visible, onClose, T, fontScale }) => {
   return (<Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} /><View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, marginBottom: 8 }}>Verificar Acesso</Text><Text style={{ fontSize: 14 * fontScale, color: T.textSub, marginBottom: 20 }}>Digite o código de rastreio fornecido no cadastro.</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, padding: 16, marginBottom: 20, color: T.text }} placeholder="cordeiroXXXX" value={codigo} onChangeText={setCodigo} autoCapitalize="none" /><PrimaryBtn label={loading ? 'Consultando...' : 'Consultar'} onPress={checkRastreio} color={T.blue} disabled={loading} />{result && (<View style={{ marginTop: 16, padding: 12, borderRadius: 12, backgroundColor: result.success ? T.greenGlow : T.redGlow, borderWidth: 1, borderColor: result.success ? T.green : T.red }}><Text style={{ color: result.success ? T.green : T.red, fontWeight: '700', textAlign: 'center' }}>{result.message}</Text></View>)}<TouchableOpacity onPress={onClose} style={{ marginTop: 20, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>Fechar</Text></TouchableOpacity></View></View></Modal>);
 };
 
-// 🆕 NOVO COMPONENTE: ASSISTENTE DE VOZ
+// 🆕 NOVO COMPONENTE: ASSISTENTE DE VOZ (USANDO expo-speech-recognition)
 const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, activeShelf, cadastroShelf, setProdName, setGiro, setValidade, setQtd, setWStep, setCadastroShelf, setIsVoiceActive }) => {
   const [listening, setListening] = useState(false);
-  const [step, setStep] = useState(0); 
+  const [step, setStep] = useState(0);
   const [tempProdName, setTempProdName] = useState('');
   const [tempQtd, setTempQtd] = useState('');
   const [tempValidade, setTempValidade] = useState('');
@@ -2690,6 +2690,11 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
   const [errorMsg, setErrorMsg] = useState('');
   const slideA = useRef(new Animated.Value(WIN.height)).current;
   const opacA = useRef(new Animated.Value(0)).current;
+  const stepRef = useRef(0);
+  const tempProdNameRef = useRef('');
+  const tempQtdRef = useRef('');
+  const tempValidadeRef = useRef('');
+  const listeningRef = useRef(false);
 
   const speak = useCallback((text, callback) => {
     Speech.stop();
@@ -2701,166 +2706,69 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
     });
   }, []);
 
-  // Refs para evitar closures obsoletos sem re-registrar handlers
-  const stepRef = useRef(0);
-  const tempProdNameRef = useRef('');
-  const tempQtdRef = useRef('');
-  const tempValidadeRef = useRef('');
-  const listeningRef = useRef(false);
-
   const startListening = async () => {
     if (listeningRef.current) {
       console.log('⚠️ Microfone já está ativo, ignorando nova chamada');
-      return; // evita dupla chamada
-    }
-
-    // 1. Verificar se reconhecimento de voz está disponível no dispositivo
-    try {
-      const available = await Voice.isAvailable();
-      if (!available) {
-        const errorMessage = 'Reconhecimento de voz não disponível neste dispositivo.';
-        console.error('❌', errorMessage);
-        setErrorMsg(errorMessage);
-        Alert.alert('Recurso Indisponível', errorMessage, [{ text: 'OK' }]);
-        return;
-      }
-    } catch (err) {
-      console.error('❌ Erro ao verificar disponibilidade do Voice:', err);
-    }
-
-    // 2. Pedir permissão ANTES de qualquer coisa
-    console.log('🎤 Verificando permissão de microfone...');
-    const hasPermission = await requestMicPermission();
-    
-    if (!hasPermission) {
-      const errorMessage = 'Permissão de microfone negada. Para habilitar, vá em:\nConfigurações > Aplicativos > GEI.AI > Permissões > Microfone';
-      console.error('❌', errorMessage);
-      setErrorMsg('Sem permissão de microfone');
-      
-      Alert.alert(
-        'Permissão Necessária',
-        errorMessage,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Abrir Configurações',
-            onPress: () => {
-              if (Platform.OS === 'android') {
-                Linking.openSettings();
-              }
-            }
-          }
-        ]
-      );
       return;
     }
 
-    console.log('✅ Permissão de microfone OK, iniciando gravação...');
-
     try {
+      // 1. Pedir permissão (se já tiver, retorna true)
+      const hasPermission = await requestMicPermission();
+      if (!hasPermission) {
+        setErrorMsg('Permissão de microfone negada.');
+        return;
+      }
+
+      // 2. Verificar se o serviço de reconhecimento está disponível
+      const isAvailable = await SpeechRecognition.isAvailableAsync();
+      if (!isAvailable) {
+        setErrorMsg('Reconhecimento de voz não disponível neste dispositivo.');
+        return;
+      }
+
       setTranscript('');
       setErrorMsg('');
-      
-      // 3. Cancelar qualquer sessão anterior antes de iniciar nova
-      try { 
-        await Voice.cancel(); 
-        console.log('🔄 Voice.cancel() executado');
-      } catch (_) {}
-      
-      try { 
-        await Voice.stop(); 
-        console.log('🔄 Voice.stop() executado');
-      } catch (_) {}
-      
-      // Pequeno delay para garantir que o microfone foi liberado
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      console.log('🎤 Iniciando Voice.start("pt-BR")...');
-      await Voice.start('pt-BR');
-      console.log('✅ Voice.start() executado com sucesso');
-      
-      // setListening é feito pelo onSpeechStart para garantir sincronismo
-    } catch (e) {
-      console.error('❌ ERRO em Voice.start:', e);
-      const code = e?.code || e?.message || '';
-      
-      let errorMessage = 'Erro ao abrir microfone.';
-      
-      if (String(code).includes('busy') || String(code).includes('recognizer')) {
-        errorMessage = 'Microfone ocupado. Aguarde um momento e tente novamente.';
-      } else if (String(code).includes('permission')) {
-        errorMessage = 'Permissão de microfone negada. Verifique as configurações.';
-      }
-      
-      setErrorMsg(errorMessage);
-      Alert.alert('Erro no Microfone', errorMessage, [{ text: 'OK' }]);
+      listeningRef.current = true;
+      setListening(true);
+
+      // 3. Iniciar reconhecimento
+      await SpeechRecognition.startAsync({
+        lang: 'pt-BR',
+        interimResults: false,
+        maxAlternatives: 1,
+        onResult: (result) => {
+          const text = result[0]?.toLowerCase() || '';
+          setTranscript(text);
+          processCommand(text);
+        },
+        onError: (error) => {
+          console.error('🎤 Erro no reconhecimento:', error);
+          listeningRef.current = false;
+          setListening(false);
+          // Se erro for "no-match", reinicia automaticamente
+          if (error === 'no-match') {
+            setTimeout(() => startListening(), 800);
+          } else {
+            setErrorMsg('Erro no microfone. Toque para tentar novamente.');
+          }
+        },
+      });
+    } catch (err) {
+      console.error('❌ Erro ao iniciar reconhecimento:', err);
+      setErrorMsg('Não foi possível iniciar o microfone.');
+      setListening(false);
+      listeningRef.current = false;
     }
   };
 
   const stopListening = async () => {
     listeningRef.current = false;
-    try { await Voice.stop(); } catch (_) {}
     setListening(false);
+    try {
+      await SpeechRecognition.stopAsync();
+    } catch (_) {}
   };
-
-  useEffect(() => {
-    // Registrar handlers UMA vez — usar refs para acessar valores atuais
-    Voice.onSpeechStart = () => {
-      console.log('🎤 Voice.onSpeechStart - Microfone ATIVO');
-      listeningRef.current = true;
-      setListening(true);
-      setErrorMsg(''); // Limpa mensagem de erro quando começa a escutar
-    };
-    
-    Voice.onSpeechEnd = () => {
-      console.log('🔇 Voice.onSpeechEnd - Microfone PARADO');
-      listeningRef.current = false;
-      setListening(false);
-    };
-    
-    Voice.onSpeechError = (e) => {
-      console.error('❌ Voice.onSpeechError:', e);
-      listeningRef.current = false;
-      setListening(false);
-      
-      const code = String(e?.error?.code || e?.error || '');
-      const message = String(e?.error?.message || '');
-      
-      console.log('Código do erro:', code);
-      console.log('Mensagem do erro:', message);
-      
-      // Código 7 = "no match", código "client" = timeout normal → reiniciar silenciosamente
-      if (code === '7' || code.includes('no-match') || code.includes('client')) {
-        console.log('⚠️ Timeout normal (nenhuma fala detectada), reiniciando...');
-        setTimeout(() => startListening(), 800);
-      } else if (code.includes('busy') || code.includes('recognizer')) {
-        console.log('⚠️ Microfone ocupado, tentando novamente em 2.5s...');
-        setErrorMsg('Microfone ocupado, tentando novamente...');
-        setTimeout(() => startListening(), 2500);
-      } else if (code.includes('permission') || code.includes('audio')) {
-        console.log('❌ Erro de permissão detectado');
-        setErrorMsg('Sem permissão de microfone. Toque no microfone para tentar novamente.');
-      } else {
-        console.log('⚠️ Erro genérico, permitindo retry manual');
-        setErrorMsg('Microfone parou. Toque para falar novamente.');
-      }
-    };
-    
-    Voice.onSpeechResults = (e) => {
-      console.log('📝 Voice.onSpeechResults:', e.value);
-      if (e.value && e.value.length > 0) {
-        const text = e.value[0];
-        setTranscript(text);
-        processCommand(text);
-      }
-    };
-
-    return () => {
-      console.log('🧹 Limpando Voice listeners...');
-      listeningRef.current = false;
-      Voice.destroy().then(() => Voice.removeAllListeners()).catch(() => {});
-    };
-  }, []); // [] = registrar handlers apenas uma vez
 
   const processCommand = (text) => {
     const lower = text.toLowerCase();
@@ -2930,7 +2838,6 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
 
   useEffect(() => {
     if (visible) {
-      // Resetar tudo ao abrir
       stepRef.current = 0;
       tempProdNameRef.current = '';
       tempQtdRef.current = '';
@@ -2940,99 +2847,60 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
       setErrorMsg('');
       slideA.setValue(WIN.height);
       opacA.setValue(0);
-      
-      console.log('📱 VoiceAssistant ABERTO');
-      
       Animated.parallel([
         Animated.spring(slideA, { toValue: 0, useNativeDriver: false, bounciness: 10 }),
         Animated.timing(opacA, { toValue: 1, duration: 300, useNativeDriver: false }),
       ]).start();
-      
       speak('GEI Assistant pronto. Diga "Olá GEI" para começar.');
-      
-      // Espera a animação e o áudio antes de pedir permissão/iniciar
+      // Aguarda um pouco para dar tempo de carregar e depois pede permissão/inicia
       setTimeout(async () => {
-        console.log('🎤 Iniciando processo de ativação do microfone...');
-        
-        // Verificar permissão ANTES de chamar startListening
         const hasPermission = await requestMicPermission();
-        
         if (hasPermission) {
-          console.log('✅ Permissão OK, iniciando escuta...');
           startListening();
         } else {
-          console.log('❌ Permissão NEGADA, mostrando erro ao usuário');
           setErrorMsg('Permissão de microfone necessária. Toque no microfone para tentar novamente.');
         }
       }, 2500);
-
-      // Listener para detectar quando app volta do background
-      // (útil quando usuário vai em configurações e volta)
-      const subscription = AppState.addEventListener('change', async (nextAppState) => {
-        if (nextAppState === 'active' && !listeningRef.current && errorMsg.includes('permissão')) {
-          console.log('📱 App voltou ao foreground, verificando permissão novamente...');
-          
-          // Pequeno delay para garantir que o app está totalmente ativo
-          setTimeout(async () => {
-            const hasPermission = await requestMicPermission();
-            if (hasPermission) {
-              console.log('✅ Permissão concedida! Reiniciando microfone...');
-              setErrorMsg('');
-              setTimeout(() => startListening(), 500);
-            }
-          }, 500);
-        }
-      });
-
-      return () => {
-        subscription.remove();
-      };
     } else {
-      console.log('📱 VoiceAssistant FECHADO, limpando Voice...');
       stopListening();
-      try { Voice.cancel(); } catch (_) {}
     }
-  }, [visible, errorMsg]);
+  }, [visible]);
 
+  // UI do modal (mesmo visual original, mas com eventos ajustados)
   if (!visible) return null;
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}>
         <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} />
-        <Animated.View style={{ 
+        <Animated.View style={{
           width: '90%', backgroundColor: T.bgCard, borderRadius: 35, padding: 30, alignItems: 'center',
           transform: [{ translateY: slideA }], opacity: opacA,
           borderWidth: 1, borderColor: T.blue + '30',
           elevation: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 15
         }}>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={startListening}
             activeOpacity={0.7}
-            style={{ 
-              width: 110, 
-              height: 110, 
-              borderRadius: 55, 
-              backgroundColor: errorMsg && errorMsg.includes('permissão') ? T.red : (listening ? T.blue : T.bgInput),
-              justifyContent: 'center', 
-              alignItems: 'center', 
-              marginBottom: 25,
-              borderWidth: 4, 
-              borderColor: errorMsg && errorMsg.includes('permissão') ? T.red + '60' : (listening ? T.blue + '40' : T.border)
+            style={{
+              width: 110, height: 110, borderRadius: 55,
+              backgroundColor: errorMsg ? T.red : (listening ? T.blue : T.bgInput),
+              justifyContent: 'center', alignItems: 'center', marginBottom: 25,
+              borderWidth: 4, borderColor: errorMsg ? T.red + '60' : (listening ? T.blue + '40' : T.border)
             }}
           >
-            {errorMsg && errorMsg.includes('permissão') ? (
+            {errorMsg ? (
               <Feather name="alert-circle" size={55} color="#FFF" />
             ) : (
-              <MaterialCommunityIcons 
-                name={listening ? "microphone" : "microphone-off"} 
-                size={55} 
-                color={listening ? "#FFF" : T.textSub} 
+              <MaterialCommunityIcons
+                name={listening ? "microphone" : "microphone-off"}
+                size={55}
+                color={listening ? "#FFF" : T.textSub}
               />
             )}
             {listening && (
-              <Animated.View style={{ 
-                position: 'absolute', width: 130, height: 130, borderRadius: 65, 
+              <Animated.View style={{
+                position: 'absolute', width: 130, height: 130, borderRadius: 65,
                 borderWidth: 2, borderColor: T.blue, opacity: 0.5,
                 transform: [{ scale: 1.1 }]
               }} />
@@ -3040,10 +2908,10 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
           </TouchableOpacity>
 
           <Text style={{ fontSize: 26, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 5 }}>
-            {errorMsg && errorMsg.includes('permissão') ? 'Permissão Negada' : (listening ? 'Pode falar...' : 'GEI Assistant')}
+            {errorMsg ? 'Permissão Negada' : (listening ? 'Pode falar...' : 'GEI Assistant')}
           </Text>
           <Text style={{ fontSize: 14, color: T.textSub, textAlign: 'center' }}>
-            {errorMsg && errorMsg.includes('permissão') ? 'Toque para solicitar novamente' : (listening ? 'Estou processando sua voz' : 'Toque no microfone para falar')}
+            {errorMsg ? 'Toque para solicitar novamente' : (listening ? 'Estou processando sua voz' : 'Toque no microfone para falar')}
           </Text>
 
           <View style={{ height: 100, justifyContent: 'center', marginVertical: 20, width: '100%', backgroundColor: T.bgInput + '50', borderRadius: 20, padding: 15 }}>
@@ -3052,32 +2920,9 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
                 "{transcript}"
               </Text>
             ) : (
-              <>
-                <Text style={{ fontSize: 14, color: T.textMuted, textAlign: 'center', fontWeight: '600' }}>
-                  {errorMsg || 'Aguardando comando...'}
-                </Text>
-                {errorMsg && errorMsg.includes('permissão') && Platform.OS === 'android' && (
-                  <TouchableOpacity 
-                    onPress={() => Linking.openSettings()} 
-                    style={{ 
-                      marginTop: 12, 
-                      paddingVertical: 8, 
-                      paddingHorizontal: 16, 
-                      backgroundColor: T.blue, 
-                      borderRadius: 12, 
-                      alignSelf: 'center',
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 8
-                    }}
-                  >
-                    <Feather name="settings" size={14} color="#FFF" />
-                    <Text style={{ color: '#FFF', fontWeight: '700', fontSize: 12 }}>
-                      Abrir Configurações
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </>
+              <Text style={{ fontSize: 14, color: T.textMuted, textAlign: 'center', fontWeight: '600' }}>
+                {errorMsg || 'Aguardando comando...'}
+              </Text>
             )}
           </View>
 
@@ -3085,8 +2930,8 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               {['Ativar', 'Produto', 'Qtd', 'Data', 'Giro'].map((l, i) => (
                 <View key={i} style={{ alignItems: 'center', flex: 1 }}>
-                  <View style={{ 
-                    width: 32, height: 32, borderRadius: 16, 
+                  <View style={{
+                    width: 32, height: 32, borderRadius: 16,
                     backgroundColor: step > i ? T.green : (step === i ? T.blue : T.bgElevated),
                     justifyContent: 'center', alignItems: 'center',
                     borderWidth: 2, borderColor: step === i ? T.blue + '40' : 'transparent'
@@ -3099,7 +2944,7 @@ const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, 
             </View>
           </View>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={onClose}
             style={{ width: '100%', height: 55, borderRadius: 18, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.red + '20' }}
           >
@@ -3115,7 +2960,6 @@ const styles = StyleSheet.create({
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, minHeight: 54 },
   btnTxt: { fontWeight: '800', letterSpacing: 0.3 },
 });
-
 
 // ─── ELEVEN LABS CONFIG ──────────────────────────────────────────────────────
 const ELEVEN_LABS_API_KEY = 'sk_5eeaa17369322e234f74a50aff06a52d6e6a2c5edb3878b9';
@@ -3134,7 +2978,7 @@ const speakWithAI = async (text) => {
   }
 };
 
-// ─── VOICE MODALS ────────────────────────────────────────────────────────────
+// ─── VOICE MODALS (opcional) ────────────────────────────────────────────────
 const VoicePermissionModal = ({ visible, onAccept, onClose, T, fontScale }) => {
   const slideA = useRef(new Animated.Value(Dimensions.get('window').height)).current;
   useEffect(() => {
@@ -3550,7 +3394,6 @@ Pergunta do usuário: "${txt}"`;
             <ActionCard T={T} fontScale={fontScale} icon="camera" color={T.purple} title="Scanner IA Vision" desc="Identifique produtos via foto" onPress={() => startScan('aiVision')} />
             <ActionCard T={T} fontScale={fontScale} icon="box" color={T.teal} title="🏗️ Calculadora de Pinhas" desc="Simule e calcule pilhas de produtos visualmente" onPress={() => setShowPinhasModal(true)} />
             <ActionCard T={T} fontScale={fontScale} icon="settings" color={T.textSub} title="Configurações do App" desc="Aparência, fonte e automações" onPress={() => navTo('config')} />
-            {/* Botão de microfone na home */}
             <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: T.blueGlow, borderRadius: 50, padding: 12, marginTop: 10, borderWidth: 1, borderColor: T.blue }} onPress={() => setVoiceAssistantVisible(true)}>
               <Feather name="mic" size={24} color={T.blue} />
               <Text style={{ marginLeft: 8, fontSize: 14 * fontScale, fontWeight: '700', color: T.blue }}>Assistente de Voz</Text>
