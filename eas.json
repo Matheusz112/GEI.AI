@@ -15,6 +15,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "node": "20",
       "android": {
         "buildType": "apk"
       },
