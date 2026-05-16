@@ -15,13 +15,12 @@
     },
     "production": {
       "autoIncrement": true,
-      "image": "ubuntu-22.04-jammy-20241114",
+      "node": "20.18.0",
       "android": {
         "buildType": "apk"
       },
       "env": {
-        "YARN_ENABLE_IMMUTABLE_INSTALLS": "false",
-        "YARN_IGNORE_ENGINES": "true"
+        "YARN_ENABLE_IMMUTABLE_INSTALLS": "false"
       }
     }
   }
