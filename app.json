@@ -28,18 +28,18 @@
         "backgroundColor": "#060B18"
       }
     },
-"plugins": [
-  "expo-camera",
-  "expo-secure-store",
-  "expo-navigation-bar",
-  [
-    "expo-speech-recognition",
-    {
-      "microphonePermission": "Permitir que o GEI.AI use o microfone para comandos de voz e cadastro por voz.",
-      "speechRecognitionPermission": "Permitir que o GEI.AI reconheça sua fala."
-    }
-  ]
-],
+    "plugins": [
+      "expo-camera",
+      "expo-secure-store",
+      "expo-navigation-bar",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Permitir que o GEI.AI use o microfone para comandos de voz e cadastro por voz.",
+          "speechRecognitionPermission": "Permitir que o GEI.AI reconheça sua fala."
+        }
+      ]
+    ],
     "platforms": ["ios", "android"]
   }
 }
