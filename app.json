@@ -29,7 +29,6 @@
       }
     },
     "plugins": [
-      "expo-camera",
       "expo-secure-store",
       "expo-navigation-bar",
       [
