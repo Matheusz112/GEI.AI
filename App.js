@@ -85,8 +85,8 @@ import * as SpeechRecognition from 'expo-speech-recognition';
  */
 
 // --- GIFs ---
-import AchandoGif from './assets/achando.gif';
-import RoboGif from './assets/analise.gif';
+import AchandoGif from '/assets/achando.gif';
+import RoboGif from '/assets/analise.gif';
 
 const WIN = Dimensions.get('window');
 const SCR = Dimensions.get('screen');
