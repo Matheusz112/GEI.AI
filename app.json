@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GEI.AI",
-    "slug": "gei-cordeiro",
+    "slug": "gei-ai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -40,7 +40,13 @@
           "cameraPermission": "O GEI.AI usa a câmera para ler códigos de barras e identificar produtos com IA."
         }
       ],
-      "expo-speech-recognition",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "O GEI.AI precisa acessar seu microfone para comandos de voz.",
+          "speechRecognitionPermission": "O GEI.AI usa reconhecimento de voz para cadastrar produtos."
+        }
+      ],
       "expo-secure-store",
       "expo-local-authentication",
       [
@@ -50,9 +56,6 @@
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
             "buildToolsVersion": "34.0.0"
-          },
-          "ios": {
-            "deploymentTarget": "15.1"
           }
         }
       ]
