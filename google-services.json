@@ -1,8 +1,8 @@
 {
   "project_info": {
     "project_number": "123456789012",
-    "project_id": "dummy-project",
-    "storage_bucket": "dummy-project.appspot.com"
+    "project_id": "dummy-project-geiai",
+    "storage_bucket": "dummy-project-geiai.appspot.com"
   },
   "client": [
     {
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDummyKey"
+          "current_key": "AIzaSyDummyKey123456789"
         }
       ],
       "services": {}
