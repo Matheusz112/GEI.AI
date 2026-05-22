@@ -3,12 +3,37 @@ import {
   StyleSheet, Text, View, TouchableOpacity,
   StatusBar, Animated, ActivityIndicator,
   Dimensions, TextInput, FlatList, ScrollView, KeyboardAvoidingView,
-  Platform, Modal, Switch, Easing, Keyboard, Image, Linking, Appearance, Alert, AppState, PermissionsAndroid
+  Platform, Modal, Switch, Easing, Keyboard, Image, Linking, Appearance, Alert, AppState, PermissionsAndroid, Vibration
 } from 'react-native';
 import * as NavigationBar from 'expo-navigation-bar';
 import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, Camera } from 'expo-camera';
 import * as SecureStore from 'expo-secure-store';
+// ─── SAFESTORE: COMPATÍVEL COM WEB (CHROME) E DEVICE ───────────────────────
+// expo-secure-store não suporta web — usamos localStorage como fallback.
+const SafeStore = {
+  getItemAsync: async (key) => {
+    if (Platform.OS === 'web') {
+      try { return window.localStorage.getItem(key); } catch { return null; }
+    }
+    try { return await SecureStore.getItemAsync(key); } catch { return null; }
+  },
+  setItemAsync: async (key, value) => {
+    if (Platform.OS === 'web') {
+      try { window.localStorage.setItem(key, value); } catch { /* noop */ }
+      return;
+    }
+    try { await SecureStore.setItemAsync(key, value); } catch { /* noop */ }
+  },
+  deleteItemAsync: async (key) => {
+    if (Platform.OS === 'web') {
+      try { window.localStorage.removeItem(key); } catch { /* noop */ }
+      return;
+    }
+    try { await SecureStore.deleteItemAsync(key); } catch { /* noop */ }
+  },
+};
+
 import * as Clipboard from 'expo-clipboard';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Crypto from 'expo-crypto';
@@ -16,77 +41,47 @@ import Constants from 'expo-constants';
 import QRCode from 'react-native-qrcode-svg';
 import axios from 'axios';
 import * as Speech from 'expo-speech';
-import * as SpeechRecognition from 'expo-speech-recognition';
+import { Audio } from 'expo-av';
+// ─── EXPO-SPEECH-RECOGNITION: FALLBACK SEGURO PARA EXPO GO ────────────────────
+let ExpoSpeechRecognitionModule = null;
+let _useSpeechRecognitionEventReal = null;
+let SPEECH_RECOGNITION_AVAILABLE = false;
 
-/*
- * ╔═══════════════════════════════════════════════════════════════════════╗
- * ║  CORREÇÕES APLICADAS - VERSÃO FUNCIONAL 100%                          ║
- * ╠═══════════════════════════════════════════════════════════════════════╣
- * ║                                                                       ║
- * ║  ✅ PROBLEMA IDENTIFICADO:                                            ║
- * ║     A função requestMicPermission não estava verificando se a        ║
- * ║     permissão já estava concedida, causando problemas de             ║
- * ║     inicialização do microfone.                                      ║
- * ║                                                                       ║
- * ║  ✅ CORREÇÕES IMPLEMENTADAS:                                          ║
- * ║                                                                       ║
- * ║     1. requestMicPermission():                                       ║
- * ║        - Agora verifica PRIMEIRO se já tem permissão                 ║
- * ║        - Só solicita permissão se necessário                         ║
- * ║        - Logs detalhados para debug                                  ║
- * ║        - Melhor tratamento de erros com Alert                        ║
- * ║                                                                       ║
- * ║     2. startListening():                                             ║
- * ║        - Melhor feedback visual quando permissão é negada            ║
- * ║        - Alert com opção de abrir configurações                      ║
- * ║        - Delay de 300ms antes de iniciar Voice.start()               ║
- * ║        - Logs detalhados em cada etapa                               ║
- * ║        - Tratamento específico para cada tipo de erro                ║
- * ║                                                                       ║
- * ║     3. Voice.onSpeechError:                                          ║
- * ║        - Logs detalhados de código e mensagem de erro                ║
- * ║        - Tratamento específico para erro de permissão                ║
- * ║        - Mensagens mais claras para o usuário                        ║
- * ║                                                                       ║
- * ║     4. Voice.onSpeechStart:                                          ║
- * ║        - Limpa mensagens de erro quando microfone ativa              ║
- * ║        - Logs de confirmação                                         ║
- * ║                                                                       ║
- * ║     5. useEffect do VoiceAssistant:                                  ║
- * ║        - Verifica permissão ANTES de iniciar escuta                  ║
- * ║        - Mensagem clara se permissão for negada                      ║
- * ║        - Logs de debug em todas as etapas                            ║
- * ║                                                                       ║
- * ║     6. UI do botão de microfone:                                     ║
- * ║        - Botão fica VERMELHO quando há erro de permissão             ║
- * ║        - Ícone de alerta quando sem permissão                        ║
- * ║        - Texto indicando "Permissão Negada"                          ║
- * ║        - Instrução clara: "Toque para solicitar novamente"           ║
- * ║                                                                       ║
- * ║  ✅ COMO TESTAR:                                                      ║
- * ║     1. Abra o VoiceAssistant                                         ║
- * ║     2. Se for primeira vez, deverá aparecer Alert de permissão       ║
- * ║     3. Se negar, botão fica vermelho com ícone de alerta             ║
- * ║     4. Toque novamente no botão para solicitar permissão             ║
- * ║     5. Se permitir, microfone inicia normalmente                     ║
- * ║     6. Verifique os logs no console para debug                       ║
- * ║                                                                       ║
- * ║  ✅ LOGS DE DEBUG:                                                    ║
- * ║     Procure no console por:                                          ║
- * ║     - "🎤" = eventos de microfone                                     ║
- * ║     - "✅" = sucesso                                                  ║
- * ║     - "❌" = erro                                                     ║
- * ║     - "⚠️" = aviso                                                    ║
- * ║     - "📱" = eventos do VoiceAssistant                                ║
- * ║     - "🔇" = microfone parado                                         ║
- * ║     - "📝" = resultados de voz                                        ║
- * ║                                                                       ║
- * ╚═══════════════════════════════════════════════════════════════════════╝
- */
+try {
+  const SpeechRecognitionLib = require('expo-speech-recognition');
+  ExpoSpeechRecognitionModule = SpeechRecognitionLib.ExpoSpeechRecognitionModule;
+  _useSpeechRecognitionEventReal = SpeechRecognitionLib.useSpeechRecognitionEvent;
+  SPEECH_RECOGNITION_AVAILABLE = true;
+  console.log('✅ expo-speech-recognition carregado com sucesso');
+} catch (e) {
+  console.warn('⚠️ expo-speech-recognition não disponível neste ambiente (Expo Go).');
+  ExpoSpeechRecognitionModule = {
+    requestPermissionsAsync: async () => ({ granted: false, canAskAgain: false }),
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+
+const useSpeechRecognitionEvent = (eventName, handler) => {
+  const handlerRef = React.useRef(handler);
+  React.useEffect(() => { handlerRef.current = handler; }, [handler]);
+  React.useEffect(() => {
+    if (!SPEECH_RECOGNITION_AVAILABLE || !_useSpeechRecognitionEventReal) return;
+  }, [eventName]);
+};
+
+const _SafeSpeechEventWrapper = ({ eventName, onEvent }) => {
+  if (!SPEECH_RECOGNITION_AVAILABLE || !_useSpeechRecognitionEventReal) return null;
+  return <_InnerSpeechListener eventName={eventName} onEvent={onEvent} />;
+};
+const _InnerSpeechListener = ({ eventName, onEvent }) => {
+  _useSpeechRecognitionEventReal(eventName, onEvent);
+  return null;
+};
 
 // --- GIFs ---
-import AchandoGif from '/assets/achando.gif';
-import RoboGif from '/assets/analise.gif';
+import AchandoGif from './assets/achando.gif';
+import RoboGif from './assets/analise.gif';
 
 const WIN = Dimensions.get('window');
 const SCR = Dimensions.get('screen');
@@ -110,7 +105,7 @@ let RT_BLUESOFT_TOKEN = '';
 let GROQ_API_KEY = '';
 
 // ─── LOGS DE AUDITORIA ─────────────────────────────────────────────────────
-const AUDIT_LOGS_KEY = '@GEI_AuditLogs';
+const AUDIT_LOGS_KEY = 'GEI_AuditLogs';
 const MAX_AUDIT_LOGS = 1000;
 const addAuditLog = async (action, details, userId = null) => {
   try {
@@ -125,7 +120,7 @@ const addAuditLog = async (action, details, userId = null) => {
     };
     const existingLogs = await getAuditLogs();
     const updatedLogs = [log, ...existingLogs].slice(0, MAX_AUDIT_LOGS);
-    await SecureStore.setItemAsync(AUDIT_LOGS_KEY, JSON.stringify(updatedLogs));
+    await SafeStore.setItemAsync(AUDIT_LOGS_KEY, JSON.stringify(updatedLogs));
     return true;
   } catch (error) {
     console.error('Erro ao salvar log:', error);
@@ -134,11 +129,11 @@ const addAuditLog = async (action, details, userId = null) => {
 };
 const getAuditLogs = async () => {
   try {
-    const logs = await SecureStore.getItemAsync(AUDIT_LOGS_KEY);
+    const logs = await SafeStore.getItemAsync(AUDIT_LOGS_KEY);
     return logs ? JSON.parse(logs) : [];
   } catch { return []; }
 };
-const clearAuditLogs = async () => { await SecureStore.deleteItemAsync(AUDIT_LOGS_KEY); };
+const clearAuditLogs = async () => { await SafeStore.deleteItemAsync(AUDIT_LOGS_KEY); };
 
 // ─── TOKENS ────────────────────────────────────────────────────────────────
 let tokensFetched = false;
@@ -167,10 +162,10 @@ const fetchSecureTokens = () => new Promise((resolve, reject) => {
       RT_API_KEY_IA = data.API_KEY_IA;
       RT_BLUESOFT_TOKEN = data.BLUESOFT_TOKEN;
       GROQ_API_KEY = data.API_KEY_GROQ;
-      await SecureStore.setItemAsync('BASEROW_TOKEN', BASEROW_TOKEN);
-      await SecureStore.setItemAsync('API_KEY_IA', RT_API_KEY_IA);
-      await SecureStore.setItemAsync('BLUESOFT_TOKEN', RT_BLUESOFT_TOKEN);
-      await SecureStore.setItemAsync('GROQ_API_KEY', GROQ_API_KEY);
+      await SafeStore.setItemAsync('BASEROW_TOKEN', BASEROW_TOKEN);
+      await SafeStore.setItemAsync('API_KEY_IA', RT_API_KEY_IA);
+      await SafeStore.setItemAsync('BLUESOFT_TOKEN', RT_BLUESOFT_TOKEN);
+      await SafeStore.setItemAsync('GROQ_API_KEY', GROQ_API_KEY);
       tokensFetched = true;
       tokensFetching = false;
       tokensCallbacks.forEach(cb => cb.resolve());
@@ -186,10 +181,10 @@ const fetchSecureTokens = () => new Promise((resolve, reject) => {
 });
 const initializeSecureTokens = async () => {
   try {
-    const cachedBaserow = await SecureStore.getItemAsync('BASEROW_TOKEN');
-    const cachedApiIa = await SecureStore.getItemAsync('API_KEY_IA');
-    const cachedBluesoft = await SecureStore.getItemAsync('BLUESOFT_TOKEN');
-    const cachedGroq = await SecureStore.getItemAsync('GROQ_API_KEY');
+    const cachedBaserow = await SafeStore.getItemAsync('BASEROW_TOKEN');
+    const cachedApiIa = await SafeStore.getItemAsync('API_KEY_IA');
+    const cachedBluesoft = await SafeStore.getItemAsync('BLUESOFT_TOKEN');
+    const cachedGroq = await SafeStore.getItemAsync('GROQ_API_KEY');
     if (cachedBaserow && cachedApiIa && cachedBluesoft && cachedGroq) {
       BASEROW_TOKEN = cachedBaserow;
       RT_API_KEY_IA = cachedApiIa;
@@ -216,54 +211,19 @@ secureAxiosInstance.interceptors.request.use(async (config) => {
 
 // ─── PERMISSÃO DE MICROFONE (nível de módulo — acessível em todos os componentes) ──
 const requestMicPermission = async () => {
-  if (Platform.OS === 'android') {
-    try {
-      // 1. PRIMEIRO: Verificar se já tem permissão concedida
-      const hasPermission = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
-      );
-      
-      // Se já tem permissão, retorna true imediatamente
-      if (hasPermission) {
-        console.log('✅ Permissão de microfone JÁ concedida');
-        return true;
-      }
-
-      // 2. Se NÃO tem permissão, solicita ao usuário
-      console.log('🎤 Solicitando permissão de microfone...');
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        {
-          title: 'Permissão de Microfone',
-          message: 'O GEI.AI precisa acessar seu microfone para comandos de voz e cadastro por voz.',
-          buttonNeutral: 'Perguntar depois',
-          buttonNegative: 'Negar',
-          buttonPositive: 'Permitir',
-        }
-      );
-
-      const isGranted = granted === PermissionsAndroid.RESULTS.GRANTED;
-      
-      if (isGranted) {
-        console.log('✅ Permissão de microfone CONCEDIDA pelo usuário');
-      } else {
-        console.log('❌ Permissão de microfone NEGADA pelo usuário');
-      }
-      
-      return isGranted;
-    } catch (err) {
-      console.error('❌ ERRO ao solicitar permissão de microfone:', err);
-      Alert.alert(
-        'Erro de Permissão',
-        'Ocorreu um erro ao solicitar permissão do microfone. Tente novamente.',
-        [{ text: 'OK' }]
-      );
-      return false;
-    }
+  if (!SPEECH_RECOGNITION_AVAILABLE) {
+    console.warn('⚠️ Reconhecimento de voz não disponível neste ambiente.');
+    return false;
   }
-  
-  // iOS: o sistema solicita automaticamente na primeira chamada a SpeechRecognition.requestPermissionsAsync()
-  return true;
+  try {
+    console.log('🎤 Solicitando permissões (Microfone e Reconhecimento)...');
+    const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    console.log(result.granted ? '✅ Permissões CONCEDIDAS' : '❌ Permissões NEGADAS');
+    return result.granted;
+  } catch (err) {
+    console.error('❌ ERRO ao solicitar permissões:', err);
+    return false;
+  }
 };
 
 // ─── BIOMETRIA ─────────────────────────────────────────────────────────────
@@ -392,6 +352,7 @@ const vencStatus = str => {
   const d = diffDays(dt, today());
   if (d < 0) return { status: 'expired', days: d };
   if (d <= 7) return { status: 'warning', days: d };
+  if (d <= 30) return { status: 'warning30', days: d };
   return { status: 'ok', days: d };
 };
 const qtyToNumber = v => {
@@ -435,17 +396,17 @@ const parseApiError = async (response) => {
 };
 
 // ==================== SISTEMA DE IA OTIMIZADO COM CACHE ====================
-const AI_CACHE_KEY = '@GEI_AICache';
+const AI_CACHE_KEY = 'GEI_AICache';
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const pendingRequests = new Map();
 const getAICache = async () => {
   try {
-    const raw = await SecureStore.getItemAsync(AI_CACHE_KEY);
+    const raw = await SafeStore.getItemAsync(AI_CACHE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 };
 const setAICache = async (cache) => {
-  try { await SecureStore.setItemAsync(AI_CACHE_KEY, JSON.stringify(cache)); } catch (e) { console.warn('Cache save error', e); }
+  try { await SafeStore.setItemAsync(AI_CACHE_KEY, JSON.stringify(cache)); } catch (e) { console.warn('Cache save error', e); }
 };
 const cleanExpiredCache = async () => {
   const cache = await getAICache();
@@ -678,7 +639,7 @@ const QrCodeGenerator = ({ T, fontScale, userData, onClose }) => {
   const [copied, setCopied] = useState(false);
   const [loginRapido, setLoginRapido] = useState('');
   const [expiresAt, setExpiresAt] = useState(null);
-  useEffect(() => { generateLoginQR(); }, []);
+  useEffect(() => { generateLoginQR(); }, [generateLoginQR]);
   const generateLoginQR = useCallback(async () => {
     setLoading(true);
     try {
@@ -699,7 +660,7 @@ const QrCodeGenerator = ({ T, fontScale, userData, onClose }) => {
       const qrString = JSON.stringify(payload);
       setQrValue(qrString);
       setExpiresAt(new Date(payload.expiraEm));
-      await SecureStore.setItemAsync('last_qr_data', qrString);
+      await SafeStore.setItemAsync('last_qr_data', qrString);
       await addAuditLog('QR_GENERATED', `QR Code gerado para ${userData.USUARIO}`, userData.id);
     } catch (error) { console.error('Erro ao gerar QR:', error); Alert.alert('Erro', 'Falha ao gerar QR Code de acesso.'); } finally { setLoading(false); }
   }, [userData]);
@@ -910,6 +871,7 @@ const buildDepletionMetrics = (productOrLotes, fifoMode = false, allProducts = n
 const makeVENC = (theme) => ({
   expired: { color: theme.red, glow: theme.redGlow, icon: 'alert-circle', label: d => `Vencido há ${Math.abs(d)}d` },
   warning: { color: theme.amber, glow: theme.amberGlow, icon: 'alert-triangle', label: d => `Vence em ${d}d` },
+  warning30: { color: theme.teal, glow: theme.tealGlow, icon: 'calendar', label: d => `Vence em ${d}d` },
   ok: { color: theme.green, glow: theme.greenGlow, icon: 'check-circle', label: v => `Vence: ${v}` },
   unknown: { color: '#888', glow: 'transparent', icon: 'clock', label: () => 'Sem data' },
 });
@@ -917,6 +879,7 @@ const makeVENC = (theme) => ({
 const FILTERS = [
   { key: 'all', label: 'Todos', icon: 'list', colorKey: 'blue' },
   { key: 'ok', label: 'Seguros', icon: 'check-circle', colorKey: 'green' },
+  { key: 'warning30', label: '30 Dias', icon: 'calendar', colorKey: 'teal' },
   { key: 'warning', label: '7 Dias', icon: 'alert-triangle', colorKey: 'amber' },
   { key: 'expired', label: 'Vencidos', icon: 'alert-circle', colorKey: 'red' },
 ];
@@ -965,6 +928,7 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
   const opacA = useRef(new Animated.Value(0)).current;
   const scaleA = useRef(new Animated.Value(0.88)).current;
   const trashA = useRef(new Animated.Value(0)).current;
+  const progressA = useRef(new Animated.Value(1)).current;
   const [modalVis, setModalVis] = useState(false);
   const dismissedRef = useRef(false);
   const deletedCount = data.deleted?.length ?? 0;
@@ -976,6 +940,15 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
       Animated.spring(scaleA, { toValue: 1, tension: 90, friction: 10, useNativeDriver: false }),
     ]).start();
   }, [slideA, opacA, scaleA]);
+
+  useEffect(() => {
+    if (deletedCount === 0) {
+      progressA.setValue(1);
+      Animated.timing(progressA, { toValue: 0, duration: 3000, useNativeDriver: false }).start();
+      const t = setTimeout(() => dismiss(), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [deletedCount, progressA, dismiss]);
 
   const dismiss = useCallback(() => {
     if (dismissedRef.current) return;
@@ -1013,9 +986,9 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
             <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green, textTransform: 'uppercase', letterSpacing: 0.8 }}>Estoque limpo ✓</Text>
             <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '700', marginTop: 1 }}>Nenhum produto vencido há +30 dias.</Text>
           </View>
-          <TouchableOpacity onPress={dismiss} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: T.greenGlow, borderWidth: 1, borderColor: T.green + '40' }}>
-            <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.green }}>Fechar</Text>
-          </TouchableOpacity>
+        </View>
+        <View style={{ marginTop: 8, height: 4, backgroundColor: T.border, borderRadius: 2, overflow: 'hidden' }}>
+          <Animated.View style={{ height: '100%', backgroundColor: T.green, borderRadius: 2, width: progressA.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }} />
         </View>
       </Animated.View>
     );
@@ -1829,7 +1802,7 @@ const ExpiryAnalysisModal = ({ visible, onClose, products, T, fontScale }) => {
       ]).start();
       setSelectedMonth(null);
     }
-  }, [visible]);
+  }, [visible, fadeAnim, opacA, slideA]);
 
   const getMonthColor = (daysUntilExpiry) => {
     if (daysUntilExpiry <= 7) return T.red;
@@ -2016,7 +1989,7 @@ const Pinha3DScene = ({ pyramidAnims, PYRAMID_ROWS, T, resultado }) => {
     );
     loopRef.current.start();
     return () => { if (loopRef.current) loopRef.current.stop(); };
-  }, []);
+  }, [rotateZ, sceneOpac]);
 
   const spin = rotateZ.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
@@ -2137,7 +2110,7 @@ const PinhasCalculatorModal = ({ visible, onClose, T, fontScale }) => {
         Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: false }),
       ]).start();
     }
-  }, [visible]);
+  }, [visible, opacA, slideA]);
 
   const reset = () => {
     setStep(1); setLargura(''); setComprimento(''); setAltura('');
@@ -2678,313 +2651,1314 @@ const RastreioModal = ({ visible, onClose, T, fontScale }) => {
   return (<Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} /><View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, marginBottom: 8 }}>Verificar Acesso</Text><Text style={{ fontSize: 14 * fontScale, color: T.textSub, marginBottom: 20 }}>Digite o código de rastreio fornecido no cadastro.</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, padding: 16, marginBottom: 20, color: T.text }} placeholder="cordeiroXXXX" value={codigo} onChangeText={setCodigo} autoCapitalize="none" /><PrimaryBtn label={loading ? 'Consultando...' : 'Consultar'} onPress={checkRastreio} color={T.blue} disabled={loading} />{result && (<View style={{ marginTop: 16, padding: 12, borderRadius: 12, backgroundColor: result.success ? T.greenGlow : T.redGlow, borderWidth: 1, borderColor: result.success ? T.green : T.red }}><Text style={{ color: result.success ? T.green : T.red, fontWeight: '700', textAlign: 'center' }}>{result.message}</Text></View>)}<TouchableOpacity onPress={onClose} style={{ marginTop: 20, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>Fechar</Text></TouchableOpacity></View></View></Modal>);
 };
 
-// 🆕 NOVO COMPONENTE: ASSISTENTE DE VOZ (USANDO expo-speech-recognition)
-const VoiceAssistant = ({ visible, onClose, onComplete, T, fontScale, userData, activeShelf, cadastroShelf, setProdName, setGiro, setValidade, setQtd, setWStep, setCadastroShelf, setIsVoiceActive }) => {
-  const [listening, setListening] = useState(false);
-  const [step, setStep] = useState(0);
-  const [tempProdName, setTempProdName] = useState('');
-  const [tempQtd, setTempQtd] = useState('');
-  const [tempValidade, setTempValidade] = useState('');
-  const [tempGiro, setTempGiro] = useState('');
-  const [transcript, setTranscript] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-  const slideA = useRef(new Animated.Value(WIN.height)).current;
-  const opacA = useRef(new Animated.Value(0)).current;
-  const stepRef = useRef(0);
-  const tempProdNameRef = useRef('');
-  const tempQtdRef = useRef('');
-  const tempValidadeRef = useRef('');
-  const listeningRef = useRef(false);
+// ─── SMART VOICE ENGINE — NLP COMPLETO PT-BR ────────────────────────────────
 
-  const speak = useCallback((text, callback) => {
-    Speech.stop();
-    Speech.speak(text, {
-      language: 'pt-BR',
-      pitch: 1.0,
-      rate: 1.0,
-      onDone: callback,
-    });
+// ── Tabela completa de números em português ──────────────────────────────────
+const PT_NUM_MAP = {
+  'zero':0,'um':1,'uma':1,'dois':2,'duas':2,'tres':3,'tres':3,
+  'quatro':4,'cinco':5,'seis':6,'sete':7,'oito':8,'nove':9,
+  'dez':10,'onze':11,'doze':12,'treze':13,'catorze':14,'quatorze':14,
+  'quinze':15,'dezesseis':16,'dezasseis':16,'dezessete':17,'dezoito':18,
+  'dezenove':19,'dezanove':19,
+  'vinte':20,'trinta':30,'quarenta':40,'cinquenta':50,'cinqüenta':50,
+  'sessenta':60,'setenta':70,'oitenta':80,'noventa':90,
+  'cem':100,'cento':100,
+  'duzentos':200,'duzentas':200,'trezentos':300,'trezentas':300,
+  'quatrocentos':400,'quatrocentas':400,'quinhentos':500,'quinhentas':500,
+  'seiscentos':600,'seiscentas':600,'setecentos':700,'setecentas':700,
+  'oitocentos':800,'oitocentas':800,'novecentos':900,'novecentas':900,
+  'mil':1000,'milhao':1000000,
+};
+const PT_ORDINAL_MAP = {
+  'primeiro':1,'primeira':1,'segundo':2,'segunda':2,'terceiro':3,'terceira':3,
+  'quarto':4,'quarta':4,'quinto':5,'quinta':5,'sexto':6,'sexta':6,
+  'setimo':7,'setima':7,'oitavo':8,'oitava':8,'nono':9,'nona':9,
+  'decimo':10,'decima':10,'decimo primeiro':11,'decima primeira':11,
+  'decimo segundo':12,'decima segunda':12,'decimo terceiro':13,'decima terceira':13,
+  'decimo quarto':14,'decima quarta':14,'decimo quinto':15,'decima quinta':15,
+  'decimo sexto':16,'decima sexta':16,'decimo setimo':17,'decima setima':17,
+  'decimo oitavo':18,'decima oitava':18,'decimo nono':19,'decima nona':19,
+  'vigesimo':20,'vigesima':20,'vigesimo primeiro':21,'vigesima primeira':21,
+  'vigesimo segundo':22,'vigesima segunda':22,'vigesimo terceiro':23,
+  'vigesimo quarto':24,'vigesimo quinto':25,'vigesimo sexto':26,
+  'vigesimo setimo':27,'vigesimo oitavo':28,'vigesimo nono':29,
+  'trigesimo':30,'trigesima':30,'trigesimo primeiro':31,'trigesima primeira':31,
+};
+
+// Converte texto PT-BR em número inteiro (ex: "mil cento e três" → 1103)
+const parsePortugueseNumber = (raw) => {
+  if (!raw) return null;
+  try {
+    const s = String(raw).trim().toLowerCase()
+      .replace(/[.,]/g,'').replace(/\be\b|\bcom\b|\bde\b/g,' ').replace(/\s+/g,' ').trim();
+    const direct = parseInt(s.replace(/\s/g,''), 10);
+    if (!isNaN(direct) && /^\d+$/.test(s.replace(/\s/g,''))) return direct;
+    for (const [k,v] of Object.entries(PT_ORDINAL_MAP)) { if (s === k) return v; }
+    const tokens = s.split(/\s+/).filter(Boolean);
+    let total = 0, chunk = 0;
+    for (const tok of tokens) {
+      const val = PT_NUM_MAP[tok];
+      if (val === undefined) { const d = parseInt(tok,10); if (!isNaN(d)) chunk += d; continue; }
+      if (val === 1000) { chunk = chunk===0 ? 1 : chunk; total += chunk * 1000; chunk = 0; }
+      else { chunk += val; }
+    }
+    total += chunk;
+    return total > 0 ? total : null;
+  } catch { return null; }
+};
+
+// ── Tabela de meses ──────────────────────────────────────────────────────────
+const PT_MONTH_MAP = {
+  'janeiro':'01','jan':'01','janero':'01','janiero':'01',
+  'fevereiro':'02','fev':'02','feveriro':'02','feverero':'02',
+  'marco':'03','marcco':'03','mar':'03','maco':'03','marso':'03',
+  'abril':'04','abr':'04','abryl':'04',
+  'maio':'05','mai':'05','mao':'05',
+  'junho':'06','jun':'06','juho':'06',
+  'julho':'07','jul':'07','juio':'07','jullio':'07',
+  'agosto':'08','ago':'08','agost':'08',
+  'setembro':'09','set':'09','setembro':'09',
+  'outubro':'10','out':'10','otubro':'10',
+  'novembro':'11','nov':'11','novembr':'11',
+  'dezembro':'12','dez':'12','decembro':'12',
+};
+// Dias escritos por extenso ("onze de maio" → dia 11)
+const PT_DAY_WORDS = {
+  'um':1,'uma':1,'dois':2,'duas':2,'tres':3,'quatro':4,'cinco':5,
+  'seis':6,'sete':7,'oito':8,'nove':9,'dez':10,'onze':11,'doze':12,
+  'treze':13,'quatorze':14,'catorze':14,'quinze':15,'dezesseis':16,
+  'dezaseis':16,'dezasseis':16,'dezessete':17,'dezassete':17,'dezasete':17,
+  'dezoito':18,'dezenove':19,'dezanove':19,'vinte':20,
+  'vinte e um':21,'vinte e uma':21,'vinte e dois':22,'vinte e duas':22,
+  'vinte e tres':23,'vinte e quatro':24,'vinte e cinco':25,
+  'vinte e seis':26,'vinte e sete':27,'vinte e oito':28,'vinte e nove':29,
+  'trinta':30,'trinta e um':31,'trinta e uma':31,
+};
+
+// Converte expressão de data PT-BR em DD/MM/YYYY — parser inteligente multi-formato
+const parsePortugueseDate = (raw) => {
+  if (!raw) return null;
+  try {
+    const curYear = new Date().getFullYear();
+
+    // ── Normalização base ──────────────────────────────────────────────────
+    const strip = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let t = strip(String(raw).trim().toLowerCase());
+
+    // Converter anos por extenso antes de tudo
+    const yearWords = [
+      [/dois mil e vinte e seis/g,'2026'],[/dois mil e vinte e sete/g,'2027'],
+      [/dois mil e vinte e oito/g,'2028'],[/dois mil e vinte e nove/g,'2029'],
+      [/dois mil e trinta/g,'2030'],[/dois mil e vinte e cinco/g,'2025'],
+      [/dois mil e vinte e quatro/g,'2024'],[/dois mil e vinte e tres/g,'2023'],
+      [/dois mil e vinte e dois/g,'2022'],[/dois mil e vinte e um/g,'2021'],
+      [/dois mil e vinte/g,'2020'],[/dois mil e trinta e um/g,'2031'],
+    ];
+    for (const [re, v] of yearWords) t = t.replace(re, v);
+
+    // Converter dias por extenso para número (antes de remover preposições)
+    const dayWordsSorted = Object.keys(PT_DAY_WORDS).sort((a,b)=>b.length-a.length);
+    for (const k of dayWordsSorted) {
+      t = t.replace(new RegExp('\\b' + k.replace(/ /g,'\\s+') + '\\b', 'g'), String(PT_DAY_WORDS[k]));
+    }
+
+    // Converter ordinais para número
+    const ordinalsSorted = Object.keys(PT_ORDINAL_MAP).sort((a,b)=>b.length-a.length);
+    for (const k of ordinalsSorted) {
+      t = t.replace(new RegExp('\\b' + k.replace(/ /g,'\\s+') + '\\b', 'g'), String(PT_ORDINAL_MAP[k]));
+    }
+
+    // Limpar ruído
+    t = t
+      .replace(/[º°]/g, '')
+      .replace(/\b(de|do|da|no|na|em|ao|aos|dia|mes|ano|o|a|para|ate|vence|vencimento|validade|prazo)\b/g, ' ')
+      .replace(/[.,]/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+    const clampDay = (d, m, y) => Math.max(1, Math.min(d, new Date(y, parseInt(m), 0).getDate()));
+    const fmt = (d, m, y) => `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
+    const monthNum = (s) => {
+      const key = strip(s.trim().toLowerCase());
+      // Pelo nome
+      if (PT_MONTH_MAP[key]) return parseInt(PT_MONTH_MAP[key]);
+      // Pelo número direto (1-12)
+      const n = parseInt(key);
+      if (!isNaN(n) && n >= 1 && n <= 12) return n;
+      return null;
+    };
+    const resolveYear = (s) => {
+      const n = parseInt(s);
+      if (isNaN(n)) return curYear;
+      if (n >= 2000) return n;
+      if (n >= 100) return n;
+      if (n > 24) return 2000 + n;  // ex: "26" → 2026
+      if (n > 0) return 2000 + n;   // ex: "25" → 2025
+      return curYear;
+    };
+
+    // ── Estratégia 1: 8 dígitos sem separador DDMMYYYY ────────────────────
+    const eightDigits = t.match(/\b(\d{2})(\d{2})(\d{4})\b/);
+    if (eightDigits) {
+      const d = parseInt(eightDigits[1]), m = parseInt(eightDigits[2]), y = parseInt(eightDigits[3]);
+      if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,y), m, y);
+    }
+
+    // ── Estratégia 2: DD/MM/YYYY ou DD-MM-YYYY ou DD.MM.YYYY ─────────────
+    const sepDate = t.match(/(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})/);
+    if (sepDate) {
+      const d = parseInt(sepDate[1]), m = parseInt(sepDate[2]), y = resolveYear(sepDate[3]);
+      if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,y), m, y);
+    }
+
+    // ── Estratégia 3: três números separados por espaço ──────────────────
+    // "05 11 2026" / "5 7 26" / "05 07 2026"
+    const threeNums = t.match(/^\s*(\d{1,2})\s+(\d{1,2})\s+(\d{2,4})\s*$/);
+    if (threeNums) {
+      const d = parseInt(threeNums[1]), m = parseInt(threeNums[2]), y = resolveYear(threeNums[3]);
+      if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,y), m, y);
+    }
+
+    // ── Estratégia 4: dois números espaçados (dia + mês) ─────────────────
+    const twoNums = t.match(/^\s*(\d{1,2})\s+(\d{1,2})\s*$/);
+    if (twoNums) {
+      const d = parseInt(twoNums[1]), m = parseInt(twoNums[2]);
+      if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,curYear), m, curYear);
+    }
+
+    // ── Estratégia 5: dia (nº) + nome_mês + ano opcional ─────────────────
+    // "5 junho 2026" / "5 junho" / "5 jun 2026"
+    const monthKeys = Object.keys(PT_MONTH_MAP).sort((a,b)=>b.length-a.length);
+    let month = null, monthStart = -1, monthEnd = -1;
+    for (const k of monthKeys) {
+      const idx = t.indexOf(k);
+      if (idx >= 0) { month = parseInt(PT_MONTH_MAP[k]); monthStart = idx; monthEnd = idx + k.length; break; }
+    }
+
+    if (month) {
+      // Detectar dia (número antes do mês)
+      const beforeMonth = t.substring(0, monthStart).trim();
+      const afterMonth  = t.substring(monthEnd).trim();
+
+      // Ano (número 4 dígitos ou 2 dígitos depois do mês)
+      let year = curYear;
+      const yAfter = afterMonth.match(/\b(\d{2,4})\b/);
+      if (yAfter) year = resolveYear(yAfter[1]);
+      else {
+        const yGlobal = t.match(/\b(20[2-9]\d)\b/);
+        if (yGlobal) year = parseInt(yGlobal[1]);
+        else {
+          const y2 = t.match(/\b([2-9]\d)\b/);
+          if (y2 && parseInt(y2[1]) > 24) year = 2000 + parseInt(y2[1]);
+        }
+      }
+
+      // Dia: tenta número
+      let day = 1;
+      const dayNum = beforeMonth.match(/(\d{1,2})\s*$/);
+      if (dayNum) {
+        day = parseInt(dayNum[1]);
+      } else if (beforeMonth.length === 0) {
+        // Só mês → dia 1
+        day = 1;
+      } else {
+        // Tentar número em qualquer parte antes
+        const anyNum = t.match(/^\s*(\d{1,2})\b/);
+        if (anyNum) day = parseInt(anyNum[1]);
+      }
+
+      // "ultimo" → último dia do mês
+      if (t.includes('ultimo')) day = new Date(year, month, 0).getDate();
+
+      return fmt(clampDay(day, month, year), month, year);
+    }
+
+    // ── Estratégia 6: só ano falado com 4 dígitos → usa ano, mês 1, dia 1 ─
+    // (Raramente útil, mas evita retornar null desnecessariamente)
+
+    return null;
+  } catch { return null; }
+};
+
+// ── Normalização completa de texto de voz ────────────────────────────────────
+const normalizeVoiceInput = (raw) => {
+  if (!raw) return '';
+  try {
+    let t = String(raw).trim();
+    const FIXES = [
+      // Wake words / app
+      [/\bgei\s+a[ií]\b/gi,'GEI'],
+      [/\bge[iy]\b/gi,'GEI'],
+      // Compostos vinte-e-algo → número
+      [/\bvinte\s+e\s+um[a]?\b/gi,'21'],
+      [/\bvinte\s+e\s+dois\b/gi,'22'],[/\bvinte\s+e\s+duas\b/gi,'22'],
+      [/\bvinte\s+e\s+tr[eê]s\b/gi,'23'],
+      [/\bvinte\s+e\s+quatro\b/gi,'24'],
+      [/\bvinte\s+e\s+cinco\b/gi,'25'],
+      [/\bvinte\s+e\s+seis\b/gi,'26'],
+      [/\bvinte\s+e\s+sete\b/gi,'27'],
+      [/\bvinte\s+e\s+oito\b/gi,'28'],
+      [/\bvinte\s+e\s+nove\b/gi,'29'],
+      [/\btrinta\s+e\s+uma?\b/gi,'31'],
+      [/\bdois\s+mil\b/gi,'2000'],
+      [/\btr[eê]s\s+mil\b/gi,'3000'],
+      [/\bquatro\s+mil\b/gi,'4000'],
+      [/\bcinco\s+mil\b/gi,'5000'],
+      // Medidas
+      [/(\d+)\s*gramas?\b/gi,'$1g'],
+      [/(\d+)\s*quilos?\b/gi,'$1kg'],
+      [/(\d+)\s*litros?\b/gi,'$1L'],
+      [/(\d+)\s*mililitros?\b/gi,'$1ml'],
+      // Anos falados por extenso — converter ANTES das datas (ex: "dois mil e vinte e seis" → "2026")
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+um\b/gi,   '2021'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+dois\b/gi,  '2022'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+tres\b/gi,  '2023'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+tr[eê]s\b/gi,'2023'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+quatro\b/gi,'2024'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+cinco\b/gi, '2025'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+seis\b/gi,  '2026'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+sete\b/gi,  '2027'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+oito\b/gi,  '2028'],
+      [/\bdois\s+mil\s+e\s+vinte\s+e\s+nove\b/gi,  '2029'],
+      [/\bdois\s+mil\s+e\s+trinta\b/gi,             '2030'],
+      [/\bdois\s+mil\s+e\s+vinte\b/gi,              '2020'],
+      // Dias ordinais por extenso ("primeiro de maio" → "1 de maio")
+      [/\bprimeiro\b/gi,'1'],[/\bsegundo\b/gi,'2'],[/\bterceiro\b/gi,'3'],
+      // Datas: todas as formas possiveis
+      // "11 de julho de 2026" / "11 julho 2026"
+      [/(\d{1,2})\s+(?:de\s+)?([a-záàâãéêíóôõú]+)\s+(?:de\s+)?(20\d{2}|\d{2})\b/gi, (_, d, m, y) => parsePortugueseDate(`${d} ${m} ${y}`) || _],
+      [/(\d{1,2})\s+(?:de\s+)?([a-záàâãéêíóôõú]+)/gi, (_, d, m) => parsePortugueseDate(`${d} ${m}`) || _],
+      // Tres numeros seguidos: "05 11 2026" / "5 7 26"
+      [/\b(\d{1,2})\s+(\d{1,2})\s+(20\d{2}|\d{2})\b/g, (_, d, m, y) => { const r = parsePortugueseDate(`${d} ${m} ${y}`); return r || _; }],
+      // Mês + ano: "junho 2026" → data
+      [/\b(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+(20\d{2}|\d{2})\b/gi, (_, m, y) => parsePortugueseDate(`${m} ${y}`) || _],
+      // Só mês falado
+      [/\b(janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/gi, (_, m) => parsePortugueseDate(m) || _],
+    ];
+    for (const [re, rep] of FIXES) {
+      try { t = t.replace(re, rep); } catch { /* ignora */ }
+    }
+    return t;
+  } catch { return raw; }
+};
+
+// ── Wake words e comandos ────────────────────────────────────────────────────
+const WAKE_WORDS_LIST = [
+  'abrir painel','abre painel','abrir o painel','entrar painel',
+  'abrir assistente','ativar assistente','oi gei','ola gei','ei gei',
+  'hey gei','cadastrar produto','novo produto','gei cadastrar',
+  'gei assistente','chamar assistente','registrar produto',
+];
+const stripAccents = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const detectWakeWord = (text) => {
+  if (!text) return false;
+  const n = stripAccents(text);
+  return WAKE_WORDS_LIST.some(w => n.includes(stripAccents(w)));
+};
+const isCancelCmd = (text) => {
+  const n = stripAccents(text||'');
+  return ['cancelar','sair','fechar','parar','para ','encerrar','desistir','para tudo'].some(w=>n.includes(w));
+};
+const isConfirmCmd = (text) => {
+  const n = stripAccents(text||'');
+  return ['sim','isso','correto','confirmar','confirma','pode ','ok ','isso mesmo','certo','positivo','bom','quero','salvar'].some(w=>n.includes(w)||n===w.trim());
+};
+const isCorrectCmd = (text) => {
+  const n = stripAccents(text||'');
+  return ['corrigir','mudar','errado','errada','incorreto','nao','voltar','repetir','de novo','trocar','refazer'].some(w=>n.includes(w));
+};
+
+// ── Estados do motor ─────────────────────────────────────────────────────────
+const VS = {
+  IDLE:'idle', PROD:'product', QTY:'qty',
+  DATE:'date', GIRO:'giro', CONFIRM:'confirm', SAVING:'saving',
+  FIFO_MATCH:'fifo_match', EDIT_WHAT:'edit_what', EDIT_VALUE:'edit_value',
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPONENTE: VoiceAssistant (Smart Engine)
+// ─────────────────────────────────────────────────────────────────────────────
+const VoiceAssistant = ({
+  visible, onClose, onComplete, T, fontScale,
+  setProdName, setGiro, setValidade, setQtd, setWStep,
+  fromWakeWord, stockData, scannedEAN, doUpdateExisting,
+}) => {
+  const [voiceEngine, setVoiceEngine] = useState('native');
+  const voiceEngineRef = useRef('native');
+  useEffect(() => { voiceEngineRef.current = voiceEngine; }, [voiceEngine]);
+
+  // Estado conversacional
+  const [vsState, setVsState] = useState(VS.IDLE);
+  const vsStateRef = useRef(VS.IDLE);
+  const setVsStateBoth = useCallback((s) => { vsStateRef.current = s; setVsState(s); }, []);
+
+  // Dados coletados
+  const dataRef = useRef({ nome:'', qty:'', date:'', giro:'Médio giro' });
+  const [collected, setCollected] = useState({ nome:'', qty:'', date:'', giro:'' });
+
+  // UI
+  const [listening, setListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [lastSpoken, setLastSpoken] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const retryRef = useRef(0);
+  const isTtsActiveRef    = useRef(false); // bloqueia mic enquanto TTS fala
+  const editingFieldRef   = useRef(null);  // campo sendo editado (FIFO edit)
+  const fifoExistingRef   = useRef(null);  // item ja existente no stock
+
+  // ── Animação de sucesso ao salvar ───────────────────────────────────────
+  const [showSaveAnim, setShowSaveAnim] = useState(false);
+  const sOpac    = useRef(new Animated.Value(0)).current;
+  const sCircle  = useRef(new Animated.Value(0)).current;
+  const sCheck   = useRef(new Animated.Value(0)).current;
+  const sTextO   = useRef(new Animated.Value(0)).current;
+  const sTextY   = useRef(new Animated.Value(28)).current;
+  const sRing1   = useRef(new Animated.Value(0.9)).current;
+  const sRingO1  = useRef(new Animated.Value(0)).current;
+  const sRing2   = useRef(new Animated.Value(0.9)).current;
+  const sRingO2  = useRef(new Animated.Value(0)).current;
+  const sPartO   = useRef(new Animated.Value(0)).current;
+  const sPartS   = useRef(new Animated.Value(0.4)).current;
+  const sSubTextO = useRef(new Animated.Value(0)).current;
+
+  // Animações
+  const slideA = useRef(new Animated.Value(WIN.height)).current;
+  const opacA  = useRef(new Animated.Value(0)).current;
+  const pulseA = useRef(new Animated.Value(1)).current;
+  const pulseLoop = useRef(null);
+  const recordingRef = useRef(null);
+  const listeningRef = useRef(false);
+  const autoRestartRef = useRef(null);
+
+  // ── TTS ──────────────────────────────────────────────────────────────────
+  const speak = useCallback((text, onDone) => {
+    isTtsActiveRef.current = true;
+    const wrapped = (...args) => { isTtsActiveRef.current = false; if (onDone) onDone(...args); };
+    try {
+      setLastSpoken(text);
+      speakWithElevenLabs(text, wrapped);
+    } catch { isTtsActiveRef.current = false; if (onDone) setTimeout(onDone, 100); }
   }, []);
 
-  const startListening = async () => {
-    if (listeningRef.current) {
-      console.log('⚠️ Microfone já está ativo, ignorando nova chamada');
+  // ── Pulso animado ─────────────────────────────────────────────────────────
+  const startPulse = useCallback(() => {
+    if (pulseLoop.current) return;
+    pulseLoop.current = Animated.loop(Animated.sequence([
+      Animated.timing(pulseA, { toValue:1.2, duration:650, useNativeDriver:false }),
+      Animated.timing(pulseA, { toValue:1,   duration:650, useNativeDriver:false }),
+    ]));
+    pulseLoop.current.start();
+  }, [pulseA]);
+  const stopPulse = useCallback(() => {
+    if (pulseLoop.current) { pulseLoop.current.stop(); pulseLoop.current = null; }
+    Animated.timing(pulseA, { toValue:1, duration:200, useNativeDriver:false }).start();
+  }, [pulseA]);
+
+  const triggerSaveAnimation = useCallback(() => {
+    sOpac.setValue(0); sCircle.setValue(0); sCheck.setValue(0);
+    sTextO.setValue(0); sTextY.setValue(28); sSubTextO.setValue(0);
+    sRing1.setValue(0.9); sRingO1.setValue(0);
+    sRing2.setValue(0.9); sRingO2.setValue(0);
+    sPartO.setValue(0); sPartS.setValue(0.3);
+    setShowSaveAnim(true);
+    Animated.sequence([
+      Animated.timing(sOpac, { toValue:1, duration:220, useNativeDriver:false }),
+      Animated.parallel([
+        Animated.spring(sCircle, { toValue:1, tension:90, friction:6, useNativeDriver:false }),
+        Animated.sequence([
+          Animated.timing(sRingO1, { toValue:1, duration:80, useNativeDriver:false }),
+          Animated.parallel([
+            Animated.timing(sRing1, { toValue:2.8, duration:700, useNativeDriver:false }),
+            Animated.timing(sRingO1, { toValue:0, duration:700, useNativeDriver:false }),
+          ]),
+        ]),
+        Animated.sequence([
+          Animated.delay(180),
+          Animated.timing(sRingO2, { toValue:0.7, duration:80, useNativeDriver:false }),
+          Animated.parallel([
+            Animated.timing(sRing2, { toValue:3.4, duration:850, useNativeDriver:false }),
+            Animated.timing(sRingO2, { toValue:0, duration:850, useNativeDriver:false }),
+          ]),
+        ]),
+      ]),
+      Animated.spring(sCheck, { toValue:1, tension:120, friction:5, useNativeDriver:false }),
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(sPartO, { toValue:1, duration:180, useNativeDriver:false }),
+          Animated.delay(500),
+          Animated.timing(sPartO, { toValue:0, duration:400, useNativeDriver:false }),
+        ]),
+        Animated.spring(sPartS, { toValue:1, tension:60, friction:9, useNativeDriver:false }),
+        Animated.parallel([
+          Animated.timing(sTextO, { toValue:1, duration:380, useNativeDriver:false }),
+          Animated.timing(sTextY, { toValue:0, duration:380, useNativeDriver:false }),
+        ]),
+        Animated.sequence([
+          Animated.delay(180),
+          Animated.timing(sSubTextO, { toValue:1, duration:350, useNativeDriver:false }),
+        ]),
+      ]),
+    ]).start();
+    setTimeout(() => {
+      Animated.timing(sOpac, { toValue:0, duration:350, useNativeDriver:false }).start(() => setShowSaveAnim(false));
+    }, 2800);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Motor nativo ───────────────────────────────────────────────────────────
+  const onSpeechStart   = useCallback(() => { setListening(true); listeningRef.current=true; startPulse(); }, [startPulse]);
+  const onSpeechEnd     = useCallback(() => {
+    setListening(false); listeningRef.current=false; stopPulse();
+    // Auto-reinicia escuta se ainda em processo de cadastro (nao IDLE/SAVING)
+    const cur = vsStateRef.current;
+    if (cur !== VS.IDLE && cur !== VS.SAVING) {
+      autoRestartRef.current = setTimeout(() => { if (!isTtsActiveRef.current) startNativeListening(); }, 800);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopPulse]);
+  const onSpeechResult  = useCallback((event) => {
+    const raw = event?.results?.[0]?.transcript || '';
+    const text = normalizeVoiceInput(raw);
+    setTranscript(text);
+    if (event.isFinal) handleVoiceInput(text);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const onSpeechError = useCallback((event) => {
+    setListening(false); listeningRef.current = false; stopPulse();
+    const code = event?.error || '';
+    if (['no-match','network','aborted'].includes(code)) {
+      if (vsStateRef.current !== VS.IDLE && vsStateRef.current !== VS.SAVING) {
+        autoRestartRef.current = setTimeout(() => startNativeListening(), 900);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopPulse]);
+
+  const startNativeListening = async () => {
+    if (listeningRef.current || isTtsActiveRef.current) return; // aguarda TTS
+    try {
+      const ok = await requestMicPermission();
+      if (!ok) { setErrorMsg('Permissão de microfone negada'); return; }
+      setTranscript(''); setErrorMsg('');
+      playAudioR(); // toca audior.mp3 ao ativar microfone (so dentro do VoiceAssistant)
+      await ExpoSpeechRecognitionModule.start({ lang:'pt-BR', interimResults:true, continuous:false });
+    } catch { /* ignora */ }
+  };
+  const stopNativeListening = async () => {
+    try { await ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+    setListening(false); listeningRef.current = false; stopPulse();
+  };
+
+  // ── Motor Deepgram ─────────────────────────────────────────────────────────
+  const startDeepgramRecording = async () => {
+    if (isRecording || recordingRef.current) return;
+    try {
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) { setErrorMsg('Permissão negada'); return; }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS:true, playsInSilentModeIOS:true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setIsRecording(true); setListening(true); setTranscript(''); setErrorMsg(''); startPulse();
+      playAudioR(); // toca audior.mp3 ao ativar microfone (so dentro do VoiceAssistant)
+    } catch { setErrorMsg('Erro ao iniciar gravação'); }
+  };
+  const stopDeepgramRecording = async () => {
+    if (!recordingRef.current) return;
+    try {
+      stopPulse(); setIsRecording(false); setListening(false);
+      setIsProcessing(true); setTranscript('Processando...');
+      await recordingRef.current.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS:false });
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+      const r = await fetch(
+        'https://api.deepgram.com/v1/listen?language=pt-BR&model=nova-2&smart_format=true&punctuate=true',
+        { method:'POST', headers:{ 'Authorization':`Token ${DEEPGRAM_API_KEY}`, 'Content-Type':'audio/m4a' }, body:{ uri, type:'audio/m4a', name:'audio.m4a' } }
+      );
+      const res = await r.json();
+      const text = res?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+      setIsProcessing(false);
+      if (text.trim()) {
+        const normalized = normalizeVoiceInput(text.trim());
+        setTranscript(normalized);
+        handleVoiceInput(normalized);
+      } else {
+        setTranscript(''); retryRef.current++;
+        if (retryRef.current <= 2) {
+          speak('Não entendi. Pode repetir?', () => setTimeout(startDeepgramRecording, 900));
+        } else {
+          retryRef.current = 0;
+          setErrorMsg('Áudio não reconhecido. Tente novamente.');
+        }
+      }
+    } catch {
+      setIsProcessing(false); setTranscript('');
+      setErrorMsg('Erro de rede. Verifique a conexão.');
+      recordingRef.current = null;
+    }
+  };
+
+  const listenAfterSpeak = useCallback((delay=1300) => {
+    // Toca o beep suave indicando que o GEI esta pronto para ouvir
+    setTimeout(() => playListenBeep(), Math.max(0, delay - 180));
+    setTimeout(() => {
+      if (voiceEngineRef.current === 'native') startNativeListening();
+    }, delay);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const micPress = () => {
+    if (isProcessing) return;
+    if (voiceEngineRef.current === 'deepgram') {
+      if (isRecording) stopDeepgramRecording(); else startDeepgramRecording();
+    } else {
+      if (listening) stopNativeListening(); else startNativeListening();
+    }
+  };
+
+  // ── Máquina de estados conversacional ────────────────────────────────────
+  const handleVoiceInput = (text) => {
+    if (!text || !text.trim()) return;
+    const cur = vsStateRef.current;
+    setErrorMsg('');
+    retryRef.current = 0;
+
+    // Cancelamento global
+    if (isCancelCmd(text)) {
+      speak('Tudo bem, cancelado!');
+      setTimeout(() => { setVsStateBoth(VS.IDLE); onClose(); }, 1200);
       return;
     }
 
-    try {
-      // 1. Pedir permissão (se já tiver, retorna true)
-      const hasPermission = await requestMicPermission();
-      if (!hasPermission) {
-        setErrorMsg('Permissão de microfone negada.');
-        return;
+    // Corrigir durante confirmação
+    if (cur === VS.CONFIRM && isCorrectCmd(text)) {
+      setVsStateBoth(VS.PROD);
+      dataRef.current = { nome:'', qty:'', date:'', giro:'Médio giro' };
+      setCollected({ nome:'', qty:'', date:'', giro:'' });
+      speak('Ok, vamos recomeçar. Qual o nome do produto?', () => listenAfterSpeak());
+      return;
+    }
+
+    switch (cur) {
+      case VS.IDLE: {
+        if (detectWakeWord(text)) {
+          setVsStateBoth(VS.PROD);
+          retryRef.current = 0;
+          speak('Pronto! Qual o nome do produto que deseja cadastrar?', () => listenAfterSpeak());
+        } else {
+          speak('Diga "cadastrar produto" ou "abrir painel" para começar.', () => listenAfterSpeak(600));
+        }
+        break;
       }
-
-      // 2. Verificar se o serviço de reconhecimento está disponível
-      const isAvailable = await SpeechRecognition.isAvailableAsync();
-      if (!isAvailable) {
-        setErrorMsg('Reconhecimento de voz não disponível neste dispositivo.');
-        return;
+      case VS.PROD: {
+        const lower = stripAccents(text);
+        if (lower.length < 2 || detectWakeWord(text)) { listenAfterSpeak(400); return; }
+        const nome = text.trim().toUpperCase();
+        dataRef.current.nome = nome;
+        setCollected(p => ({ ...p, nome }));
+        setVsStateBoth(VS.QTY);
+        speak(`"${nome}" anotado. Agora me diga a quantidade.`, () => listenAfterSpeak());
+        break;
       }
-
-      setTranscript('');
-      setErrorMsg('');
-      listeningRef.current = true;
-      setListening(true);
-
-      // 3. Iniciar reconhecimento
-      await SpeechRecognition.startAsync({
-        lang: 'pt-BR',
-        interimResults: false,
-        maxAlternatives: 1,
-        onResult: (result) => {
-          const text = result[0]?.toLowerCase() || '';
-          setTranscript(text);
-          processCommand(text);
-        },
-        onError: (error) => {
-          console.error('🎤 Erro no reconhecimento:', error);
-          listeningRef.current = false;
-          setListening(false);
-          // Se erro for "no-match", reinicia automaticamente
-          if (error === 'no-match') {
-            setTimeout(() => startListening(), 800);
+      case VS.QTY: {
+        const num = parsePortugueseNumber(text);
+        const rawQty = text.replace(/[^\d]/g,'');
+        const qty = num !== null ? String(num) : (rawQty || null);
+        if (!qty || qty === '0') {
+          speak('Não entendi a quantidade. Diga um número, como "cinquenta" ou "120".');
+          listenAfterSpeak(2200);
+          return;
+        }
+        dataRef.current.qty = qty;
+        setCollected(p => ({ ...p, qty }));
+        setVsStateBoth(VS.DATE);
+        speak(`${qty} unidades anotado. Qual a data de vencimento?`, () => listenAfterSpeak(1400));
+        break;
+      }
+      case VS.DATE: {
+        const date = parsePortugueseDate(text);
+        if (!date) {
+          speak('Não entendi a data. Diga por exemplo "11 de julho de 2026" ou apenas "junho 2026".');
+          listenAfterSpeak(3000);
+          return;
+        }
+        dataRef.current.date = date;
+        setCollected(p => ({ ...p, date }));
+        setVsStateBoth(VS.GIRO);
+        speak(`Vencimento em ${date}. Qual o giro do produto: pouco giro, médio giro ou grande giro?`, () => listenAfterSpeak());
+        break;
+      }
+      case VS.GIRO: {
+        const ln = stripAccents(text);
+        let giro = 'Médio giro';
+        // ── Grande giro ────────────────────────────────────────────────────
+        if (/(grande|alto|alta|muito|bastante|rapido|rapida|veloz|acelerado|acelerada|agil|ageis|frequente|forte|forte|vende muito|vende bastante|saida rapida|muito rapido|giro alto|alto giro|gira muito|giro grande|numero um|top|popular|campeao|campeao de vendas|mais vendido)/.test(ln)) giro = 'Grande giro';
+        // ── Pouco giro ─────────────────────────────────────────────────────
+        else if (/(pouco|baixo|baixa|lento|lenta|devagar|fraco|fraca|poucas|poucos|raramente|quase nao|nao vende|parado|parada|encalhado|encalhada|dificil|dificil de vender|pouca saida|giro baixo|baixo giro|giro lento|giro fraco|giro pouco|pouco giro|quase nada|nao sai|nao saiu)/.test(ln)) giro = 'Pouco giro';
+        // ── Médio giro ─────────────────────────────────────────────────────
+        else if (/(medio|media|normal|regular|regulare|moderado|moderada|razoavel|razoaveis|mediano|mediana|intermediario|equilibrado|padrao|mais ou menos|nem tanto|nao muito|mediano|giro medio|medio giro|giro normal|giro regular|ok|tanto faz|qualquer)/.test(ln)) giro = 'Médio giro';
+        dataRef.current.giro = giro;
+        setCollected(p => ({ ...p, giro }));
+        setVsStateBoth(VS.CONFIRM);
+        const d = dataRef.current;
+        speak(
+          `Confirme: produto ${d.nome}, ${d.qty} unidades, vencimento ${d.date}, giro ${giro}. Está correto? Diga sim ou corrigir.`,
+          () => listenAfterSpeak(1800)
+        );
+        break;
+      }
+      case VS.CONFIRM: {
+        if (isConfirmCmd(text)) {
+          // FIFO: nome (primeiros 6 chars) ou EAN igual
+          const d = dataRef.current;
+          const nomeLow = stripAccents((d.nome || '').toLowerCase());
+          const fifoHit = (stockData || []).find(function(p) {
+            const pNome = stripAccents((p.produto || '').toLowerCase());
+            const eanOk = scannedEAN && scannedEAN !== 'Sem EAN' && String(p.codig||''). trim() === String(scannedEAN).trim();
+            const nameOk = nomeLow.length >= 4 && pNome.startsWith(nomeLow.substring(0, Math.min(6, nomeLow.length)));
+            return eanOk || nameOk;
+          });
+          if (fifoHit) {
+            fifoExistingRef.current = fifoHit;
+            setVsStateBoth(VS.FIFO_MATCH);
+            speak(
+              'Ja existe ' + fifoHit.produto + ' cadastrado. Quer cadastrar novo lote ou alterar o existente? Diga novo lote ou alterar.',
+              () => listenAfterSpeak()
+            );
           } else {
-            setErrorMsg('Erro no microfone. Toque para tentar novamente.');
+            setVsStateBoth(VS.SAVING);
+            triggerSaveAnimation();
+            speak('Perfeito! Salvando produto.', () => {
+              try {
+                setProdName(d.nome);
+                setQtd(d.qty);
+                setValidade(d.date);
+                setGiro(d.giro);
+                setWStep(4);
+                onComplete({ nome:d.nome, qty:d.qty, date:d.date, giro:d.giro });
+              } catch { /* ignora */ }
+              setTimeout(() => onClose(), 1200);
+            });
           }
-        },
-      });
-    } catch (err) {
-      console.error('❌ Erro ao iniciar reconhecimento:', err);
-      setErrorMsg('Não foi possível iniciar o microfone.');
-      setListening(false);
-      listeningRef.current = false;
-    }
-  };
-
-  const stopListening = async () => {
-    listeningRef.current = false;
-    setListening(false);
-    try {
-      await SpeechRecognition.stopAsync();
-    } catch (_) {}
-  };
-
-  const processCommand = (text) => {
-    const lower = text.toLowerCase();
-    const currentStep = stepRef.current;
-
-    if (currentStep === 0 && (lower.includes('gei') || lower.includes('painel') || lower.includes('olá') || lower.includes('ola'))) {
-      speak('Estou ouvindo. Diga o nome do produto.');
-      stepRef.current = 1;
-      setStep(1);
-      setTimeout(() => startListening(), 1800);
-      return;
-    }
-
-    if (currentStep === 1) {
-      if (lower.includes('cadastrar') || lower.includes('produto')) {
-        speak('Diga o nome do produto.');
-        setTimeout(() => startListening(), 1500);
-        return;
+        } else if (isCorrectCmd(text)) {
+          setVsStateBoth(VS.PROD);
+          dataRef.current = { nome:'', qty:'', date:'', giro:'Médio giro' };
+          setCollected({ nome:'', qty:'', date:'', giro:'' });
+          speak('Ok, vamos recomeçar. Qual o nome do produto?', () => listenAfterSpeak());
+        } else {
+          speak('Diga "sim" para confirmar ou "corrigir" para refazer.', () => listenAfterSpeak());
+        }
+        break;
       }
-      tempProdNameRef.current = text;
-      setTempProdName(text);
-      speak(`${text} anotado. Qual a quantidade?`);
-      stepRef.current = 2;
-      setStep(2);
-      setTimeout(() => startListening(), 2000);
-      return;
-    }
-
-    if (currentStep === 2) {
-      const qty = text.replace(/[^0-9]/g, '') || text;
-      tempQtdRef.current = qty;
-      setTempQtd(qty);
-      speak(`${qty} unidades. Qual a validade?`);
-      stepRef.current = 3;
-      setStep(3);
-      setTimeout(() => startListening(), 2000);
-      return;
-    }
-
-    if (currentStep === 3) {
-      tempValidadeRef.current = text;
-      setTempValidade(text);
-      speak('Qual o giro: pouco, médio ou grande?');
-      stepRef.current = 4;
-      setStep(4);
-      setTimeout(() => startListening(), 2000);
-      return;
-    }
-
-    if (currentStep === 4) {
-      let giro = 'Médio giro';
-      if (lower.includes('grande')) giro = 'Grande giro';
-      else if (lower.includes('pouco')) giro = 'Pouco giro';
-      setTempGiro(giro);
-      speak('Produto cadastrado com sucesso!');
-      setTimeout(() => {
-        onComplete({
-          nome: tempProdNameRef.current,
-          qtd: tempQtdRef.current,
-          validade: tempValidadeRef.current,
-          giro,
-        });
-        onClose();
-      }, 1500);
+      case VS.FIFO_MATCH: {
+        const lf = stripAccents(text.toLowerCase());
+        if (/(novo|lote|novo lote|outro|adicionar|cadastrar|sim|confirma)/.test(lf)) {
+          const df = dataRef.current;
+          setVsStateBoth(VS.SAVING); triggerSaveAnimation();
+          speak('Cadastrando novo lote!', () => {
+            try { setProdName(df.nome); setQtd(df.qty); setValidade(df.date); setGiro(df.giro); setWStep(4); onComplete({ nome:df.nome, qty:df.qty, date:df.date, giro:df.giro }); } catch {}
+            setTimeout(() => onClose(), 1200);
+          });
+        } else if (/(alterar|mudar|editar|corrigir|trocar|modificar|atualizar)/.test(lf)) {
+          setVsStateBoth(VS.EDIT_WHAT);
+          speak('O que quer alterar? Diga nome, quantidade, data de vencimento ou giro.', () => listenAfterSpeak());
+        } else {
+          speak('Diga novo lote para cadastrar um novo ou alterar para modificar o existente.', () => listenAfterSpeak());
+        }
+        break;
+      }
+      case VS.EDIT_WHAT: {
+        const lw = stripAccents(text.toLowerCase());
+        if (/(confirmar|pronto|ok|salvar|finalizar|terminar|tudo certo)/.test(lw)) {
+          const dw = dataRef.current; const ex = fifoExistingRef.current;
+          setVsStateBoth(VS.SAVING); triggerSaveAnimation();
+          speak('Perfeito! Salvando alteracoes.', async () => {
+            try {
+              if (ex && doUpdateExisting) { await doUpdateExisting(ex.id, dw); }
+              else { setProdName(dw.nome); setQtd(dw.qty); setValidade(dw.date); setGiro(dw.giro); setWStep(4); onComplete({ nome:dw.nome, qty:dw.qty, date:dw.date, giro:dw.giro }); }
+            } catch {}
+            setTimeout(() => onClose(), 1200);
+          });
+        } else if (/(nome|produto|descri|chamado)/.test(lw)) {
+          editingFieldRef.current = 'nome';
+          speak('Qual o novo nome do produto?', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
+        } else if (/(quantidade|qtd|qt|unidade|estoque|quantas|quantos)/.test(lw)) {
+          editingFieldRef.current = 'qty';
+          speak('Qual a nova quantidade?', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
+        } else if (/(data|validade|vencimento|vence)/.test(lw)) {
+          editingFieldRef.current = 'date';
+          speak('Qual a nova data de vencimento?', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
+        } else if (/(giro|rotatividade|velocidade)/.test(lw)) {
+          editingFieldRef.current = 'giro';
+          speak('Qual o giro? Diga pouco giro, medio giro ou grande giro.', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
+        } else {
+          speak('Diga o campo: nome, quantidade, data ou giro. Ou diga confirmar para salvar.', () => listenAfterSpeak());
+        }
+        break;
+      }
+      case VS.EDIT_VALUE: {
+        const fld = editingFieldRef.current;
+        if (fld === 'nome') {
+          const nn = text.trim().toUpperCase();
+          dataRef.current.nome = nn; setCollected(p => ({ ...p, nome: nn }));
+          speak('Nome alterado para ' + nn + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
+          setVsStateBoth(VS.EDIT_WHAT);
+        } else if (fld === 'qty') {
+          const nq = parsePortugueseNumber(text);
+          if (!nq || nq <= 0) { speak('Nao entendi a quantidade. Diga um numero como cinquenta ou 120.', () => listenAfterSpeak(400)); return; }
+          dataRef.current.qty = String(nq); setCollected(p => ({ ...p, qty: String(nq) }));
+          speak('Quantidade alterada para ' + nq + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
+          setVsStateBoth(VS.EDIT_WHAT);
+        } else if (fld === 'date') {
+          const nd = parsePortugueseDate(text);
+          if (!nd) { speak('Nao entendi a data. Diga por exemplo 11 de julho de 2026.', () => listenAfterSpeak(400)); return; }
+          dataRef.current.date = nd; setCollected(p => ({ ...p, date: nd }));
+          speak('Data alterada para ' + nd + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
+          setVsStateBoth(VS.EDIT_WHAT);
+        } else if (fld === 'giro') {
+          const lv = stripAccents(text.toLowerCase());
+          const ng = /(grande|alto|muito|rapido|veloz)/.test(lv) ? 'Grande giro' : /(pouco|baixo|lento|devagar|fraco)/.test(lv) ? 'Pouco giro' : 'Médio giro';
+          dataRef.current.giro = ng; setCollected(p => ({ ...p, giro: ng }));
+          speak('Giro alterado para ' + ng + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
+          setVsStateBoth(VS.EDIT_WHAT);
+        } else { listenAfterSpeak(400); }
+        break;
+      }
     }
   };
 
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (visible) {
-      stepRef.current = 0;
-      tempProdNameRef.current = '';
-      tempQtdRef.current = '';
-      tempValidadeRef.current = '';
-      setStep(0);
-      setTranscript('');
-      setErrorMsg('');
-      slideA.setValue(WIN.height);
-      opacA.setValue(0);
+      slideA.setValue(WIN.height); opacA.setValue(0);
       Animated.parallel([
-        Animated.spring(slideA, { toValue: 0, useNativeDriver: false, bounciness: 10 }),
-        Animated.timing(opacA, { toValue: 1, duration: 300, useNativeDriver: false }),
+        Animated.spring(slideA, { toValue:0, tension:65, friction:11, useNativeDriver:false }),
+        Animated.timing(opacA,  { toValue:1, duration:280, useNativeDriver:false }),
       ]).start();
-      speak('GEI Assistant pronto. Diga "Olá GEI" para começar.');
-      // Aguarda um pouco para dar tempo de carregar e depois pede permissão/inicia
-      setTimeout(async () => {
-        const hasPermission = await requestMicPermission();
-        if (hasPermission) {
-          startListening();
-        } else {
-          setErrorMsg('Permissão de microfone necessária. Toque no microfone para tentar novamente.');
-        }
-      }, 2500);
+      dataRef.current = { nome:'', qty:'', date:'', giro:'Médio giro' };
+      setCollected({ nome:'', qty:'', date:'', giro:'' });
+      setTranscript(''); setErrorMsg(''); retryRef.current = 0;
+      if (fromWakeWord) {
+        // Wake word ja detectado: pula IDLE, ativa mic e vai direto para cadastro
+        setVsStateBoth(VS.PROD);
+        speak('Pronto! Qual o nome do produto que deseja cadastrar?', () => listenAfterSpeak(1100));
+      } else {
+        setVsStateBoth(VS.IDLE);
+        speak('GEI Assistant ativado. Diga "cadastrar produto" para começar.', () => {
+          if (voiceEngineRef.current === 'native') listenAfterSpeak(300);
+        });
+      }
     } else {
-      stopListening();
+      if (autoRestartRef.current) { clearTimeout(autoRestartRef.current); autoRestartRef.current = null; }
+      if (recordingRef.current) { recordingRef.current.stopAndUnloadAsync().catch(()=>{}); recordingRef.current = null; }
+      stopNativeListening();
+      stopPulse();
+      setIsRecording(false); setListening(false); setIsProcessing(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // UI do modal (mesmo visual original, mas com eventos ajustados)
   if (!visible) return null;
+
+  const isActive = isRecording || listening;
+  const STEP_LABELS = ['Ativação','Produto','Qtd.','Data','Giro','Confirmar'];
+  const STATE_IDX = {
+    [VS.IDLE]:0, [VS.PROD]:1, [VS.QTY]:2,
+    [VS.DATE]:3, [VS.GIRO]:4, [VS.CONFIRM]:5, [VS.SAVING]:5,
+    [VS.FIFO_MATCH]:5, [VS.EDIT_WHAT]:5, [VS.EDIT_VALUE]:5,
+  };
+  const stepIdx = STATE_IDX[vsState] ?? 0;
+  const STATE_LABEL = {
+    [VS.IDLE]:'Diga "cadastrar produto"...',
+    [VS.PROD]:'Diga o nome do produto',
+    [VS.QTY]:'Diga a quantidade',
+    [VS.DATE]:'Diga a data de vencimento',
+    [VS.GIRO]:'Pouco, médio ou grande giro?',
+    [VS.CONFIRM]:'Confirme ou peça para corrigir',
+    [VS.SAVING]:'Salvando...',
+    [VS.FIFO_MATCH]:'Produto existente — novo lote ou alterar?',
+    [VS.EDIT_WHAT]:'O que quer alterar?',
+    [VS.EDIT_VALUE]:'Diga o novo valor',
+  };
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onClose} />
-        <Animated.View style={{
-          width: '90%', backgroundColor: T.bgCard, borderRadius: 35, padding: 30, alignItems: 'center',
-          transform: [{ translateY: slideA }], opacity: opacA,
-          borderWidth: 1, borderColor: T.blue + '30',
-          elevation: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.5, shadowRadius: 15
-        }}>
-          <TouchableOpacity
-            onPress={startListening}
-            activeOpacity={0.7}
-            style={{
-              width: 110, height: 110, borderRadius: 55,
-              backgroundColor: errorMsg ? T.red : (listening ? T.blue : T.bgInput),
-              justifyContent: 'center', alignItems: 'center', marginBottom: 25,
-              borderWidth: 4, borderColor: errorMsg ? T.red + '60' : (listening ? T.blue + '40' : T.border)
-            }}
-          >
-            {errorMsg ? (
-              <Feather name="alert-circle" size={55} color="#FFF" />
-            ) : (
-              <MaterialCommunityIcons
-                name={listening ? "microphone" : "microphone-off"}
-                size={55}
-                color={listening ? "#FFF" : T.textSub}
-              />
-            )}
-            {listening && (
+      <>
+        {voiceEngine === 'native' && (
+          <>
+            <_SafeSpeechEventWrapper eventName="start" onEvent={onSpeechStart} />
+            <_SafeSpeechEventWrapper eventName="end"   onEvent={onSpeechEnd} />
+            <_SafeSpeechEventWrapper eventName="result" onEvent={onSpeechResult} />
+            <_SafeSpeechEventWrapper eventName="error"  onEvent={onSpeechError} />
+          </>
+        )}
+        <View style={{ flex:1, backgroundColor:'rgba(0,0,0,0.88)', justifyContent:'flex-end' }}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+
+          <Animated.View style={{
+            backgroundColor:T.bgCard, borderTopLeftRadius:36, borderTopRightRadius:36,
+            paddingHorizontal:22, paddingTop:14, paddingBottom:32 + NAV_BAR_H,
+            borderTopWidth:2, borderColor:T.blue+'50',
+            transform:[{ translateY:slideA }], opacity:opacA,
+            shadowColor:'#000', shadowOffset:{width:0,height:-14},
+            shadowOpacity:0.55, shadowRadius:28, elevation:32,
+          }}>
+
+            {/* Handle */}
+            <View style={{ width:44, height:5, borderRadius:3, backgroundColor:T.border, alignSelf:'center', marginBottom:16 }} />
+
+            {/* Header */}
+            <View style={{ flexDirection:'row', alignItems:'center', marginBottom:18, gap:14 }}>
               <Animated.View style={{
-                position: 'absolute', width: 130, height: 130, borderRadius: 65,
-                borderWidth: 2, borderColor: T.blue, opacity: 0.5,
-                transform: [{ scale: 1.1 }]
-              }} />
-            )}
-          </TouchableOpacity>
+                width:52, height:52, borderRadius:16,
+                backgroundColor: isActive ? T.blue : (isProcessing ? T.amber : T.bgInput),
+                justifyContent:'center', alignItems:'center',
+                borderWidth:2, borderColor: isActive ? T.blue+'50' : T.border,
+                transform:[{ scale:pulseA }],
+                shadowColor:T.blue, shadowOpacity:isActive?0.55:0, shadowRadius:14, elevation:isActive?10:0,
+              }}>
+                {isProcessing
+                  ? <ActivityIndicator size="small" color="#FFF" />
+                  : <MaterialCommunityIcons
+                      name={isActive ? 'microphone' : 'microphone-off'}
+                      size={26}
+                      color={isActive ? '#FFF' : T.textMuted}
+                    />
+                }
+              </Animated.View>
+              <View style={{ flex:1 }}>
+                <Text style={{ fontSize:10*fontScale, fontWeight:'900', color: isProcessing ? T.amber : (isActive ? T.blue : T.textMuted), textTransform:'uppercase', letterSpacing:1.4 }}>
+                  {isProcessing ? '⚙️  PROCESSANDO' : isActive ? '🔴  OUVINDO' : '🔵  GEI ASSISTANT'}
+                </Text>
+                <Text style={{ fontSize:13*fontScale, fontWeight:'800', color:T.text, marginTop:3 }} numberOfLines={1}>
+                  {STATE_LABEL[vsState]}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={onClose} style={{ width:36, height:36, borderRadius:12, backgroundColor:T.bgInput, justifyContent:'center', alignItems:'center' }}>
+                <Feather name="x" size={17} color={T.textSub} />
+              </TouchableOpacity>
+            </View>
 
-          <Text style={{ fontSize: 26, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 5 }}>
-            {errorMsg ? 'Permissão Negada' : (listening ? 'Pode falar...' : 'GEI Assistant')}
-          </Text>
-          <Text style={{ fontSize: 14, color: T.textSub, textAlign: 'center' }}>
-            {errorMsg ? 'Toque para solicitar novamente' : (listening ? 'Estou processando sua voz' : 'Toque no microfone para falar')}
-          </Text>
+            {/* Seletor de motor */}
+            <View style={{ flexDirection:'row', backgroundColor:T.bgInput, borderRadius:14, padding:3, marginBottom:14 }}>
+              {[{key:'deepgram',label:'☁️ Deepgram',sub:'Expo Go'},{key:'native',label:'📱 Nativo',sub:'Build'}].map(opt => {
+                const on = voiceEngine === opt.key;
+                return (
+                  <TouchableOpacity key={opt.key}
+                    onPress={() => { setVoiceEngine(opt.key); voiceEngineRef.current = opt.key; setErrorMsg(''); setTranscript(''); }}
+                    style={{ flex:1, paddingVertical:9, borderRadius:11, alignItems:'center', backgroundColor:on?T.blue:'transparent' }}>
+                    <Text style={{ fontSize:12*fontScale, fontWeight:'800', color:on?'#FFF':T.textSub }}>{opt.label}</Text>
+                    <Text style={{ fontSize:9*fontScale, color:on?'rgba(255,255,255,0.7)':T.textMuted, marginTop:1 }}>{opt.sub}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-          <View style={{ height: 100, justifyContent: 'center', marginVertical: 20, width: '100%', backgroundColor: T.bgInput + '50', borderRadius: 20, padding: 15 }}>
-            {transcript ? (
-              <Text style={{ fontSize: 18, color: T.blue, textAlign: 'center', fontWeight: '800', fontStyle: 'italic' }}>
-                "{transcript}"
-              </Text>
-            ) : (
-              <Text style={{ fontSize: 14, color: T.textMuted, textAlign: 'center', fontWeight: '600' }}>
-                {errorMsg || 'Aguardando comando...'}
-              </Text>
-            )}
-          </View>
-
-          <View style={{ width: '100%', backgroundColor: T.bgInput, borderRadius: 22, padding: 18, marginBottom: 25 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              {['Ativar', 'Produto', 'Qtd', 'Data', 'Giro'].map((l, i) => (
-                <View key={i} style={{ alignItems: 'center', flex: 1 }}>
-                  <View style={{
-                    width: 32, height: 32, borderRadius: 16,
-                    backgroundColor: step > i ? T.green : (step === i ? T.blue : T.bgElevated),
-                    justifyContent: 'center', alignItems: 'center',
-                    borderWidth: 2, borderColor: step === i ? T.blue + '40' : 'transparent'
-                  }}>
-                    {step > i ? <Feather name="check" size={16} color="#FFF" /> : <Text style={{ fontSize: 12, fontWeight: 'bold', color: step === i ? "#FFF" : T.textMuted }}>{i+1}</Text>}
+            {/* Dados coletados */}
+            <View style={{ backgroundColor:T.bgElevated, borderRadius:20, padding:14, marginBottom:14, gap:8, borderWidth:1, borderColor:T.border }}>
+              {[
+                { key:'nome',  label:'Produto',    icon:'package',    empty:'Aguardando...' },
+                { key:'qty',   label:'Quantidade', icon:'layers',     empty:'Aguardando...' },
+                { key:'date',  label:'Vencimento', icon:'calendar',   empty:'Aguardando...' },
+                { key:'giro',  label:'Giro',       icon:'trending-up',empty:'Aguardando...' },
+              ].map(f => (
+                <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
+                  <View style={{ width:32, height:32, borderRadius:10, backgroundColor:collected[f.key]?T.blue+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
+                    <Feather name={f.icon} size={15} color={collected[f.key]?T.blue:T.textMuted} />
                   </View>
-                  <Text style={{ fontSize: 9, color: step >= i ? T.text : T.textMuted, marginTop: 6, fontWeight: step === i ? 'bold' : 'normal' }}>{l}</Text>
+                  <Text style={{ fontSize:11*fontScale, fontWeight:'700', color:T.textMuted, width:76 }}>{f.label}</Text>
+                  <Text style={{ fontSize:13*fontScale, fontWeight:collected[f.key]?'900':'500', color:collected[f.key]?T.text:T.textMuted, flex:1 }} numberOfLines={1}>
+                    {collected[f.key] || f.empty}
+                  </Text>
+                  {collected[f.key] && <Feather name="check-circle" size={14} color={T.green} />}
                 </View>
               ))}
             </View>
-          </View>
 
-          <TouchableOpacity
-            onPress={onClose}
-            style={{ width: '100%', height: 55, borderRadius: 18, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.red + '20' }}
-          >
-            <Text style={{ color: T.red, fontWeight: '900', fontSize: 16 }}>FECHAR ASSISTENTE</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
+            {/* Transcrição / erro */}
+            {(transcript || errorMsg) ? (
+              <View style={{ backgroundColor:errorMsg?T.redGlow:T.blue+'14', borderRadius:14, padding:12, marginBottom:12, borderWidth:1, borderColor:errorMsg?T.red+'30':T.blue+'25' }}>
+                <Text style={{ fontSize:13*fontScale, color:errorMsg?T.red:T.blue, fontWeight:'800', textAlign:'center', fontStyle:'italic' }} numberOfLines={2}>
+                  {errorMsg || `"${transcript}"`}
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Progress steps */}
+            <View style={{ flexDirection:'row', marginBottom:16 }}>
+              {STEP_LABELS.map((l,i) => (
+                <View key={i} style={{ flex:1, alignItems:'center' }}>
+                  {i>0 && <View style={{ position:'absolute', top:13, left:0, right:'50%', height:2, backgroundColor:i<=stepIdx?T.blue:T.border }} />}
+                  {i<STEP_LABELS.length-1 && <View style={{ position:'absolute', top:13, left:'50%', right:0, height:2, backgroundColor:i<stepIdx?T.blue:T.border }} />}
+                  <View style={{
+                    width:26, height:26, borderRadius:13, zIndex:1,
+                    backgroundColor:stepIdx>i?T.green:(stepIdx===i?T.blue:T.bgInput),
+                    justifyContent:'center', alignItems:'center',
+                    borderWidth:1.5, borderColor:stepIdx>=i?'transparent':T.border,
+                  }}>
+                    {stepIdx>i
+                      ? <Feather name="check" size={12} color="#FFF" />
+                      : <Text style={{ fontSize:9, fontWeight:'900', color:stepIdx===i?'#FFF':T.textMuted }}>{i+1}</Text>
+                    }
+                  </View>
+                  <Text style={{ fontSize:7*fontScale, marginTop:4, color:stepIdx>=i?T.blue:T.textMuted, fontWeight:stepIdx===i?'900':'600', textAlign:'center' }}>{l}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Botão principal Deepgram */}
+            {voiceEngine === 'deepgram' && (
+              <TouchableOpacity
+                onPress={micPress}
+                disabled={isProcessing}
+                activeOpacity={0.82}
+                style={{
+                  height:56, borderRadius:18, justifyContent:'center', alignItems:'center',
+                  flexDirection:'row', gap:10, marginBottom:10,
+                  backgroundColor: isProcessing ? T.amber : (isRecording ? T.red : T.blue),
+                  shadowColor: isRecording ? T.red : T.blue,
+                  shadowOpacity:0.45, shadowRadius:14, elevation:8,
+                  opacity: isProcessing ? 0.9 : 1,
+                }}
+              >
+                {isProcessing
+                  ? <ActivityIndicator color="#FFF" />
+                  : <MaterialCommunityIcons name={isRecording?'stop-circle':'microphone'} size={22} color="#FFF" />
+                }
+                <Text style={{ color:'#FFF', fontSize:15*fontScale, fontWeight:'900' }}>
+                  {isProcessing ? 'Transcrevendo...' : isRecording ? 'Parar e Enviar' : 'Toque para Falar'}
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Ações rápidas */}
+            <View style={{ flexDirection:'row', gap:8 }}>
+              <TouchableOpacity
+                onPress={() => handleVoiceInput('cancelar')}
+                style={{ flex:1, height:46, borderRadius:14, backgroundColor:T.redGlow, justifyContent:'center', alignItems:'center', borderWidth:1, borderColor:T.red+'30' }}>
+                <Text style={{ color:T.red, fontWeight:'800', fontSize:13*fontScale }}>✕ Cancelar</Text>
+              </TouchableOpacity>
+
+              {vsState === VS.CONFIRM && (
+                <TouchableOpacity
+                  onPress={() => handleVoiceInput('sim')}
+                  style={{ flex:2, height:46, borderRadius:14, backgroundColor:T.green, justifyContent:'center', alignItems:'center', shadowColor:T.green, shadowOpacity:0.4, shadowRadius:8, elevation:4 }}>
+                  <Text style={{ color:'#FFF', fontWeight:'900', fontSize:14*fontScale }}>✓ Confirmar</Text>
+                </TouchableOpacity>
+              )}
+
+              {vsState === VS.CONFIRM && (
+                <TouchableOpacity
+                  onPress={() => handleVoiceInput('corrigir')}
+                  style={{ flex:1, height:46, borderRadius:14, backgroundColor:T.blueGlow, justifyContent:'center', alignItems:'center', borderWidth:1, borderColor:T.blue+'30' }}>
+                  <Text style={{ color:T.blue, fontWeight:'800', fontSize:13*fontScale }}>Corrigir</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+          {/* ── Animação de sucesso ─────────────────────────────────────── */}
+          {showSaveAnim && (
+            <Animated.View style={{
+              position:'absolute', top:0, left:0, right:0, bottom:0,
+              borderRadius:36, backgroundColor:'rgba(4,18,11,0.97)',
+              justifyContent:'center', alignItems:'center',
+              opacity:sOpac, zIndex:999,
+            }}>
+              {/* Anel 1 */}
+              <Animated.View style={{
+                position:'absolute',
+                width:180, height:180, borderRadius:90,
+                borderWidth:2.5, borderColor:'#00D068',
+                transform:[{scale:sRing1}], opacity:sRingO1,
+              }} />
+              {/* Anel 2 */}
+              <Animated.View style={{
+                position:'absolute',
+                width:240, height:240, borderRadius:120,
+                borderWidth:1.5, borderColor:'#00D06880',
+                transform:[{scale:sRing2}], opacity:sRingO2,
+              }} />
+              {/* Círculo principal */}
+              <Animated.View style={{
+                width:138, height:138, borderRadius:69,
+                backgroundColor:'#00D06820',
+                borderWidth:3.5, borderColor:'#00D068',
+                justifyContent:'center', alignItems:'center',
+                transform:[{scale:sCircle}],
+                shadowColor:'#00D068', shadowOpacity:1, shadowRadius:55, elevation:30,
+              }}>
+                <Animated.View style={{transform:[{scale:sCheck}]}}>
+                  <Feather name="check" size={66} color="#00D068" />
+                </Animated.View>
+              </Animated.View>
+              {/* Partículas */}
+              {[
+                {top:-95,left:10},{top:-70,right:-55},{top:10,right:-100},
+                {bottom:-80,right:-20},{bottom:-65,left:-60},{top:20,left:-100},
+                {top:-85,left:-50},{bottom:-40,right:-80},
+              ].map((pos,i) => (
+                <Animated.Text key={i} style={{
+                  position:'absolute', fontSize:22,...pos,
+                  opacity:sPartO, transform:[{scale:sPartS}],
+                }}>
+                  {['⭐','✨','🌟','💫','⭐','✨','🌟','💫'][i]}
+                </Animated.Text>
+              ))}
+              {/* Texto */}
+              <Animated.Text style={{
+                fontSize:28, fontWeight:'900', color:'#FFF',
+                marginTop:26, letterSpacing:-0.5,
+                opacity:sTextO, transform:[{translateY:sTextY}],
+              }}>
+                Produto Salvo! 🎉
+              </Animated.Text>
+              <Animated.Text style={{
+                fontSize:14, color:'#00D068', fontWeight:'700',
+                marginTop:8, opacity:sSubTextO,
+              }}>
+                Cadastro realizado com sucesso
+              </Animated.Text>
+            </Animated.View>
+          )}
+
+          </Animated.View>
+        </View>
+      </>
     </Modal>
   );
 };
+
 
 const styles = StyleSheet.create({
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 14, minHeight: 54 },
   btnTxt: { fontWeight: '800', letterSpacing: 0.3 },
 });
 
+
+// ─── DEEPGRAM CONFIG ─────────────────────────────────────────────────────────
+const DEEPGRAM_API_KEY = '99ddf828d4529173c6396612133bc671247a3966';
+
 // ─── ELEVEN LABS CONFIG ──────────────────────────────────────────────────────
 const ELEVEN_LABS_API_KEY = 'sk_5eeaa17369322e234f74a50aff06a52d6e6a2c5edb3878b9';
-const ELEVEN_LABS_VOICE_ID = 'pNInz6obpg8n9I4mqIBk';
+const ELEVEN_LABS_VOICE_ID = 'iP95p4xoKVk53GoZ742B'; // Premium voice — alta qualidade
 
-const speakWithAI = async (text) => {
+// ─── WEB AUDIOCONTEXT — unlock automático no primeiro uso de microfone ────────
+// Chrome bloqueia audio.play() até que haja interação humana. O microfone
+// (Speech Recognition) conta como interação — ao liberar, desbloqueamos o ctx.
+let _webAudioCtx = null;
+const _getWebAudioCtx = () => {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  if (!_webAudioCtx) {
+    try { _webAudioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* noop */ }
+  }
+  return _webAudioCtx;
+};
+const _unlockWebAudio = () => {
   try {
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'xi-api-key': ELEVEN_LABS_API_KEY },
-      body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability: 0.5, similarity_boost: 0.5 } }),
+    const ctx = _getWebAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  } catch { /* noop */ }
+};
+
+// Referência global para o Sound atual do ElevenLabs (evita sobreposição)
+let _elCurrentSound = null;
+
+// --- SOM audior.mp3: toca quando reconhecimento ativa (so dentro do VoiceAssistant) ---
+let _audioRSound = null;
+const playAudioR = async () => {
+  try {
+    if (_audioRSound) {
+      try { await _audioRSound.stopAsync(); await _audioRSound.unloadAsync(); } catch { /* noop */ }
+      _audioRSound = null;
+    }
+    try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch { /* noop */ }
+    const { sound } = await Audio.Sound.createAsync(
+      require('./assets/audior.mp3'),
+      { shouldPlay: true, volume: 0.9 }
+    );
+    _audioRSound = sound;
+    sound.setOnPlaybackStatusUpdate(async (status) => {
+      if (status.didJustFinish) {
+        try { await sound.unloadAsync(); } catch { /* noop */ }
+        if (_audioRSound === sound) _audioRSound = null;
+      }
     });
-    Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0 });
-  } catch (error) {
-    Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0 });
+  } catch { /* falha silenciosa */ }
+};
+
+// ─── SOM DE ATIVAÇÃO / ESCUTA ─────────────────────────────────────────────────
+// Toca um "bip" de ativação quando o wake word é detectado.
+// Web  → Web Audio API (oscilador, zero dependências)
+// Nativo → vibração suave + Speech curto silencioso
+const playListenBeep = () => {
+  try {
+    if (Platform.OS === 'web') {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const masterGain = ctx.createGain();
+      masterGain.connect(ctx.destination);
+      masterGain.gain.setValueAtTime(0, ctx.currentTime);
+
+      // Tom ascendente duplo — sensação de "ativação"
+      const tones = [
+        { freq: 660, start: 0,    dur: 0.10, vol: 0.22 },
+        { freq: 990, start: 0.12, dur: 0.14, vol: 0.28 },
+      ];
+      tones.forEach(({ freq, start, dur, vol }) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+        gain.gain.setValueAtTime(0, ctx.currentTime + start);
+        gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+        osc.connect(gain);
+        gain.connect(masterGain);
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + dur + 0.01);
+      });
+      setTimeout(() => { try { ctx.close(); } catch { /* noop */ } }, 600);
+    } else {
+      try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
+    }
+  } catch { /* nunca trava o app */ }
+};
+
+// ─── ELEVENLABS TTS REAL — voz humana, sem robô ───────────────────────────────
+// Web    → HTML5 Audio nativo (sem expo-av, sem setAudioModeAsync)
+// Native → FileReader base64 → data URI → expo-av (fallback: expo-speech)
+const speakWithElevenLabs = async (text, onDone) => {
+  if (!text) { if (onDone) setTimeout(onDone, 50); return; }
+
+  // Para fala anterior
+  Speech.stop();
+  if (_elCurrentSound) {
+    try { await _elCurrentSound.stopAsync(); await _elCurrentSound.unloadAsync(); } catch { /* noop */ }
+    _elCurrentSound = null;
+  }
+
+  // ── Chamada à API ElevenLabs ──────────────────────────────────────────────
+  let response;
+  try {
+    response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}?output_format=mp3_22050_32`,
+      {
+        method: 'POST',
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': ELEVEN_LABS_API_KEY,
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.45,
+            similarity_boost: 0.85,
+            style: 0.22,
+            use_speaker_boost: true,
+          },
+        }),
+      }
+    );
+  } catch {
+    // Erro de rede — 1 retry após 1.5s antes de cair no fallback
+    try {
+      await new Promise(r => setTimeout(r, 1500));
+      response = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}?output_format=mp3_22050_32`,
+        {
+          method: 'POST',
+          headers: { 'Accept': 'audio/mpeg', 'Content-Type': 'application/json', 'xi-api-key': ELEVEN_LABS_API_KEY },
+          body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability:0.45, similarity_boost:0.85, style:0.22, use_speaker_boost:true } }),
+        }
+      );
+    } catch {
+      try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
+      return;
+    }
+  }
+
+  if (!response.ok) {
+    try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
+    return;
+  }
+
+  try {
+    const blob = await response.blob();
+
+    // ── WEB: AudioContext.decodeAudioData — sem restrição de autoplay ───────
+    // Usa o AudioContext global (desbloqueado quando o microfone é ativado).
+    // Muito mais confiável que new Audio() que o Chrome bloqueia por política.
+    if (Platform.OS === 'web') {
+      try {
+        const ctx = _getWebAudioCtx();
+        if (!ctx) throw new Error('AudioContext indisponível');
+
+        // Garantir que o contexto está rodando (unlock após interação de mic)
+        if (ctx.state === 'suspended') await ctx.resume();
+
+        // Decodificar MP3 direto do ArrayBuffer — sem URL blob temporária
+        const arrayBuf = await blob.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuf);
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+        source.onended = () => { if (onDone) onDone(); };
+        source.start(0);
+      } catch {
+        // Fallback web: Speech.speak (apenas se AudioContext falhar)
+        try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
+      }
+      return;
+    }
+
+    // ── NATIVO: FileReader → data URI → expo-av ───────────────────────────────
+    const dataUri = await new Promise((resolve) => {
+      try {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+        reader.onerror   = () => resolve('');
+        reader.readAsDataURL(blob);
+      } catch { resolve(''); }
+    });
+
+    if (!dataUri) throw new Error('dataUri vazio');
+
+    // setAudioModeAsync dentro de try isolado — não bloqueia o fluxo
+    try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch { /* não crítico */ }
+
+    const { sound } = await Audio.Sound.createAsync({ uri: dataUri }, { shouldPlay: true });
+    _elCurrentSound = sound;
+
+    sound.setOnPlaybackStatusUpdate(async (status) => {
+      if (status.didJustFinish || (status.isLoaded === false && _elCurrentSound === sound)) {
+        try { await sound.unloadAsync(); } catch { /* noop */ }
+        if (_elCurrentSound === sound) _elCurrentSound = null;
+        if (onDone) onDone();
+      }
+    });
+
+  } catch {
+    // Fallback final — sempre funciona
+    try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
   }
 };
 
-// ─── VOICE MODALS (opcional) ────────────────────────────────────────────────
+// Alias de compatibilidade com chamadas antigas
+const speakWithAI = speakWithElevenLabs;
+
+// ─── VOICE MODALS ────────────────────────────────────────────────────────────
 const VoicePermissionModal = ({ visible, onAccept, onClose, T, fontScale }) => {
   const slideA = useRef(new Animated.Value(Dimensions.get('window').height)).current;
   useEffect(() => {
     if (visible) Animated.spring(slideA, { toValue: 0, tension: 50, friction: 10, useNativeDriver: true }).start();
     else Animated.timing(slideA, { toValue: Dimensions.get('window').height, duration: 300, useNativeDriver: true }).start();
-  }, [visible]);
+  }, [visible, slideA]);
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
@@ -3003,13 +3977,328 @@ const VoicePermissionModal = ({ visible, onAccept, onClose, T, fontScale }) => {
   );
 };
 
+
+const requestCameraPermission = async () => {
+  try {
+    const { status } = await Camera.requestCameraPermissionsAsync();
+    return status === 'granted';
+  } catch (err) {
+    console.error('❌ Erro ao solicitar permissão de câmera:', err);
+    return false;
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HOOK: useAlwaysOnWakeWord
+// Escuta de segundo plano sempre ativa — sem precisar clicar em nada.
+// • Chrome/Web  → Web Speech API nativa (contínua, sem biblioteca extra)
+// • Device nativo → expo-speech-recognition em loop curto
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Wrapper seguro para useSpeechRecognitionEvent (pode ser null em Expo Go)
+const _useSpeechEventSafe = _useSpeechRecognitionEventReal ||
+  ((eventName, handler) => { useEffect(() => {}, [eventName]); });
+
+const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
+  const [isAlwaysListening, setIsAlwaysListening] = useState(false);
+  const enabledRef      = useRef(false);
+  const onWakeRef       = useRef(onWakeWord);
+  const webRecRef       = useRef(null);
+  const restartTimerRef = useRef(null);
+  const didFireRef      = useRef(false);   // evita disparos duplos
+  const isStartingRef   = useRef(false);   // evita start concorrente
+  const failCountRef    = useRef(0);       // backoff exponencial em falhas
+
+  onWakeRef.current = onWakeWord;
+
+  // ── Resultado do reconhecimento nativo ──────────────────────────────────
+  _useSpeechEventSafe('result', (event) => {
+    if (!enabledRef.current || didFireRef.current) return;
+    const text = event?.results?.[0]?.transcript || '';
+    if (detectWakeWord(text)) {
+      didFireRef.current = true;
+      isStartingRef.current = false;
+      try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+      setIsAlwaysListening(false);
+      playListenBeep();
+      onWakeRef.current?.();
+    }
+  });
+
+  // ── Fim do reconhecimento nativo → reiniciar loop ────────────────────────
+  _useSpeechEventSafe('end', () => {
+    if (Platform.OS === 'web') return;
+    isStartingRef.current = false;
+    setIsAlwaysListening(false);
+    if (!enabledRef.current) return;
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    // Backoff exponencial: aumenta delay conforme falhas (max 5s)
+    const delay = Math.min(600 + failCountRef.current * 400, 5000);
+    restartTimerRef.current = setTimeout(async () => {
+      if (!enabledRef.current || isStartingRef.current) return;
+      didFireRef.current = false;
+      isStartingRef.current = true;
+      try {
+        await ExpoSpeechRecognitionModule.start({
+          lang: 'pt-BR', interimResults: true, continuous: false,
+        });
+        failCountRef.current = 0;
+        setIsAlwaysListening(true);
+      } catch {
+        isStartingRef.current = false;
+        failCountRef.current = Math.min(failCountRef.current + 1, 8);
+      }
+    }, delay);
+  });
+
+  // ── Web Speech API (Chrome) ────────────────────────────────────────────
+  const startWebSpeech = useCallback(() => {
+    if (Platform.OS !== 'web') return;
+    try {
+      const SpeechRec = (typeof window !== 'undefined') &&
+        (window.SpeechRecognition || window.webkitSpeechRecognition);
+      if (!SpeechRec) return;
+      if (webRecRef.current) { try { webRecRef.current.abort(); } catch { /* noop */ } webRecRef.current = null; }
+
+      const rec = new SpeechRec();
+      rec.lang = 'pt-BR';
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.maxAlternatives = 1;
+
+      rec.onstart  = () => { setIsAlwaysListening(true); _unlockWebAudio(); };
+      rec.onend    = () => {
+        setIsAlwaysListening(false);
+        webRecRef.current = null;
+        if (enabledRef.current) {
+          restartTimerRef.current = setTimeout(() => {
+            if (enabledRef.current) startWebSpeech();
+          }, 600);
+        }
+      };
+      rec.onerror  = (e) => {
+        setIsAlwaysListening(false);
+        webRecRef.current = null;
+        // 'not-allowed' / 'service-not-allowed' = sem permissão, não tenta novamente
+        const fatal = e.error === 'not-allowed' || e.error === 'service-not-allowed';
+        if (!fatal && e.error !== 'aborted' && enabledRef.current) {
+          // 'network' ou 'audio-capture' → delay maior para evitar loop rápido
+          const delay = (e.error === 'network' || e.error === 'audio-capture') ? 3000 : 900;
+          restartTimerRef.current = setTimeout(() => {
+            if (enabledRef.current) startWebSpeech();
+          }, delay);
+        }
+      };
+      rec.onresult = (event) => {
+        if (!enabledRef.current || didFireRef.current) return;
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i]?.[0]?.transcript || '';
+          if (detectWakeWord(text)) {
+            didFireRef.current = true;
+            try { rec.abort(); } catch { /* noop */ }
+            webRecRef.current = null;
+            setIsAlwaysListening(false);
+            playListenBeep();
+            onWakeRef.current?.();
+            return;
+          }
+        }
+      };
+
+      rec.start();
+      webRecRef.current = rec;
+    } catch { /* browser bloqueou */ }
+  }, []);
+
+  // ── Watchdog: reinicia o sistema de voz se travar ou morrer ────────────
+  // Verifica a cada 8 s — se enabled mas não está ouvindo, reinicia tudo.
+  const watchdogRef = useRef(null);
+  const _restartAll = useCallback(() => {
+    if (!enabledRef.current) return;
+    if (Platform.OS === 'web') {
+      // Abortar sessão atual e criar nova
+      if (webRecRef.current) { try { webRecRef.current.abort(); } catch { /* noop */ } webRecRef.current = null; }
+      setIsAlwaysListening(false);
+      setTimeout(() => { if (enabledRef.current) startWebSpeech(); }, 400);
+    } else if (SPEECH_RECOGNITION_AVAILABLE) {
+      if (isStartingRef.current) return;
+      try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+      isStartingRef.current = false;
+      setIsAlwaysListening(false);
+      setTimeout(async () => {
+        if (!enabledRef.current || isStartingRef.current) return;
+        isStartingRef.current = true;
+        try {
+          await ExpoSpeechRecognitionModule.start({ lang:'pt-BR', interimResults:true, continuous:false });
+          failCountRef.current = 0;
+          setIsAlwaysListening(true);
+        } catch {
+          isStartingRef.current = false;
+          failCountRef.current = Math.min(failCountRef.current + 1, 8);
+        }
+      }, 800);
+    }
+  }, [startWebSpeech]);
+
+  // ── Lifecycle: liga/desliga com base em enabled ──────────────────────────
+  useEffect(() => {
+    enabledRef.current = enabled;
+    didFireRef.current = false;
+    isStartingRef.current = false;
+    failCountRef.current = 0;
+    if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+    if (watchdogRef.current) { clearInterval(watchdogRef.current); watchdogRef.current = null; }
+
+    if (!enabled) {
+      setIsAlwaysListening(false);
+      if (Platform.OS === 'web' && webRecRef.current) {
+        try { webRecRef.current.abort(); } catch { /* noop */ }
+        webRecRef.current = null;
+      }
+      if (Platform.OS !== 'web' && SPEECH_RECOGNITION_AVAILABLE) {
+        try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+      }
+      return;
+    }
+
+    // Iniciar
+    if (Platform.OS === 'web') {
+      startWebSpeech();
+    } else if (SPEECH_RECOGNITION_AVAILABLE) {
+      (async () => {
+        try {
+          const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+          if (!granted || !enabledRef.current || isStartingRef.current) return;
+          isStartingRef.current = true;
+          await ExpoSpeechRecognitionModule.start({
+            lang: 'pt-BR', interimResults: true, continuous: false,
+          });
+          failCountRef.current = 0;
+          setIsAlwaysListening(true);
+        } catch {
+          isStartingRef.current = false;
+          failCountRef.current = Math.min(failCountRef.current + 1, 8);
+        }
+      })();
+    }
+
+    // Watchdog: verifica saude a cada 12s e reinicia se sistema morreu
+    watchdogRef.current = setInterval(() => {
+      if (!enabledRef.current || didFireRef.current) return;
+      if (Platform.OS === 'web') {
+        if (webRecRef.current === null) _restartAll();
+      } else if (SPEECH_RECOGNITION_AVAILABLE) {
+        // Nativo: se nao ouvindo, nao iniciando e sem timer pendente -> forca restart
+        if (!isStartingRef.current && !restartTimerRef.current) {
+          _restartAll();
+        }
+      }
+    }, 12000);
+
+    return () => {
+      enabledRef.current = false;
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      if (watchdogRef.current) { clearInterval(watchdogRef.current); watchdogRef.current = null; }
+    };
+  }, [enabled, startWebSpeech, _restartAll]);
+
+  return { isAlwaysListening };
+};
+
+// ─── INDICADOR FLUTUANTE "SEMPRE OUVINDO" ─────────────────────────────────────
+// Aparece no canto inferior esquerdo quando o usuário está logado.
+// Toque nele para abrir o assistente de voz diretamente.
+const AlwaysOnIndicator = ({ isListening, T, TAB_SAFE, onPress, onHide, visible }) => {
+  if (visible === false) return null;
+  const pulseA = useRef(new Animated.Value(1)).current;
+  const dotA   = useRef(new Animated.Value(0.4)).current;
+  const loopRef = useRef(null);
+
+  useEffect(() => {
+    if (loopRef.current) { loopRef.current.stop(); loopRef.current = null; }
+    if (isListening) {
+      loopRef.current = Animated.loop(Animated.parallel([
+        Animated.sequence([
+          Animated.timing(pulseA, { toValue: 1.22, duration: 700, useNativeDriver: false }),
+          Animated.timing(pulseA, { toValue: 1,    duration: 700, useNativeDriver: false }),
+        ]),
+        Animated.sequence([
+          Animated.timing(dotA, { toValue: 1,   duration: 500, useNativeDriver: false }),
+          Animated.timing(dotA, { toValue: 0.3, duration: 500, useNativeDriver: false }),
+        ]),
+      ]));
+      loopRef.current.start();
+    } else {
+      Animated.timing(pulseA, { toValue: 1,   duration: 200, useNativeDriver: false }).start();
+      Animated.timing(dotA,   { toValue: 0.4, duration: 200, useNativeDriver: false }).start();
+    }
+    return () => { if (loopRef.current) { loopRef.current.stop(); loopRef.current = null; } };
+  }, [isListening, pulseA, dotA]);
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.82}
+      style={{
+        position: 'absolute',
+        bottom: TAB_SAFE + 16,
+        left: 16,
+        zIndex: 9990,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+        backgroundColor: isListening ? T.blue : T.bgCard,
+        borderRadius: 50,
+        paddingHorizontal: 13,
+        paddingVertical: 8,
+        borderWidth: 1.5,
+        borderColor: isListening ? T.blue + '70' : T.border,
+        shadowColor: T.blue,
+        shadowOpacity: isListening ? 0.45 : 0.08,
+        shadowRadius: 10,
+        elevation: isListening ? 8 : 2,
+      }}
+    >
+      <Animated.View style={{ transform: [{ scale: pulseA }] }}>
+        <MaterialCommunityIcons
+          name={isListening ? 'microphone' : 'microphone-off'}
+          size={15}
+          color={isListening ? '#FFF' : T.textMuted}
+        />
+      </Animated.View>
+      <Animated.View style={{
+        width: 7, height: 7, borderRadius: 4,
+        backgroundColor: isListening ? '#FFF' : T.textMuted,
+        opacity: dotA,
+      }} />
+      <Text style={{
+        fontSize: 11,
+        fontWeight: '900',
+        color: isListening ? '#FFF' : T.textMuted,
+        letterSpacing: 0.4,
+      }}>
+        {isListening ? 'Ouvindo...' : 'Voz'}
+      </Text>
+      {onHide && (
+        <TouchableOpacity
+          onPress={(e) => { if (e && e.stopPropagation) e.stopPropagation(); onHide(); }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={{ marginLeft: 3, opacity: 0.75 }}
+        >
+          <Feather name="x" size={11} color={isListening ? '#FFF' : T.textMuted} />
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
+  );
+};
+
 export default function App() {
   const [currentTheme, setCurrentTheme] = useState('light');
   const [fontScale, setFontScale] = useState(1);
   const [notifOn, setNotifOn] = useState(true);
   const T = THEMES[currentTheme] || THEMES.dark;
   const [scanning, setScanning] = useState(false);
-  const darkEnv = useDarkEnvironment(scanning);
+  const { isDarkEnv, lightLevel } = useDarkEnvironment(scanning);
   const [torchOn, setTorchOn] = useState(false);
   const [erro, setErro] = useState('');
   const showErr = useCallback(m => { setErro(m); setTimeout(() => setErro(''), 6000); }, []);
@@ -3066,6 +4355,37 @@ export default function App() {
   const [showExpiryModal, setShowExpiryModal] = useState(false);
   const [voiceAssistantVisible, setVoiceAssistantVisible] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
+  const [voiceIndicatorVisible, setVoiceIndicatorVisible] = useState(true);
+
+  const hideVoiceIndicator = useCallback(async () => {
+    setVoiceIndicatorVisible(false);
+    try { await SafeStore.setItemAsync('voiceIndicatorHidden', 'true'); } catch { /* noop */ }
+  }, []);
+
+  // ── Escuta sempre ativa — wake word de qualquer tela ──────────────────────
+  const [openedByWakeWord, setOpenedByWakeWord] = useState(false);
+  const openVoiceAssistant = useCallback(() => {
+    setOpenedByWakeWord(true);
+    setVoiceAssistantVisible(true);
+  }, []);
+  const { isAlwaysListening } = useAlwaysOnWakeWord({
+    enabled: isLogged && !voiceAssistantVisible,
+    onWakeWord: openVoiceAssistant,
+  });
+
+  const handleStartScanning = async (mode = 'barcode') => {
+    const { status } = await Camera.getCameraPermissionsAsync();
+    if (status !== 'granted') {
+      const { status: newStatus } = await Camera.requestCameraPermissionsAsync();
+      if (newStatus !== 'granted') {
+        Alert.alert('Permissão Necessária', 'O GEI.AI precisa de acesso à câmera para ler códigos de barras.');
+        return;
+      }
+    }
+    setScanMode(mode);
+    setScanning(true);
+  };
+
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const scanAnim = useRef(new Animated.Value(0)).current;
@@ -3087,30 +4407,7 @@ export default function App() {
   useEffect(() => { if (scanning && scanMode === 'barcode') { Animated.loop(Animated.sequence([Animated.timing(scanAnim, { toValue: 1, duration: 2000, useNativeDriver: false }), Animated.timing(scanAnim, { toValue: 0, duration: 2000, useNativeDriver: false })])).start(); } else scanAnim.setValue(0); }, [scanning, scanMode, scanAnim]);
   useEffect(() => { if (scanning && scanMode === 'aiVision') { Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.07, duration: 800, useNativeDriver: false }), Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false })])).start(); } else pulseAnim.setValue(1); }, [scanning, scanMode, pulseAnim]);
 
-  const aiVisionTriggeredRef = useRef(false);
-  const onAIVisionCameraReady = useCallback(() => { if (aiVisionTriggeredRef.current) return; aiVisionTriggeredRef.current = true; setTimeout(() => { captureVision(); }, 1200); }, [captureVision]);
-
-  const sortProductsByDate = (products) => { return [...products].sort((a, b) => { const dateA = parseDate(a.DATAENVIO); const dateB = parseDate(b.DATAENVIO); if (!dateA && !dateB) return 0; if (!dateA) return 1; if (!dateB) return -1; return dateB - dateA; }); };
-  const filteredStock = useMemo(() => {
-    const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN'));
-    let filtered = activeFilter === 'all' ? base : base.filter(i => vencStatus(i.VENCIMENTO).status === activeFilter);
-    if (searchQuery.trim()) { const q = searchQuery.trim().toLowerCase(); filtered = filtered.filter(i => String(i.produto || '').toLowerCase().includes(q)); }
-    return sortProductsByDate(filtered);
-  }, [stockData, activeFilter, searchQuery]);
-  const counts = useMemo(() => { const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN')); return { all: base.length, ok: base.filter(i => vencStatus(i.VENCIMENTO).status === 'ok').length, warning: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').length, expired: base.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').length }; }, [stockData]);
-  const triggerAutoClean = useCallback(async () => { setCleanToast({ cleaning: true }); try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); } catch (_) { setCleanToast({ cleaning: false, deleted: [] }); } }, [activeShelf, userData]);
-  const loadStock = useCallback(async shelf => { const tid = SHELVES[shelf]; if (!tid) return; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true&size=200`); const products = res.data.results || []; setStockData(sortProductsByDate(products)); } catch (ex) { showErr('Erro ao carregar dados da prateleira.'); } }, [showErr]);
-  const deleteProduct = useCallback(async (product) => { if (!product?.id) return; const tableId = SHELVES[activeShelf]; if (!tableId) { showErr('Nenhuma prateleira ativa para apagar o produto.'); return; } setBusy(true); setBusyMsg('Apagando produto...'); try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${product.id}/`); await addAuditLog('PRODUCT_DELETED', `Produto "${product.produto}" apagado da prateleira ${activeShelf}`, userData?.id); setStockData(prev => sortProductsByDate(prev.filter(p => p.id !== product.id))); } catch (ex) { showErr('Não foi possível apagar o produto. Verifique a conexão.'); } finally { setBusy(false); } }, [activeShelf, showErr, userData]);
-
-  const updateLastLogin = async (userId) => { try { const now = new Date(); const novoLogin = { data: now.toLocaleDateString('pt-BR'), hora: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), iso: now.toISOString() }; let historicoAtual = []; try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { historicoAtual = JSON.parse(utimologin); } else if (utimologin) { historicoAtual = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { historicoAtual = []; } const historicoAtualizado = [novoLogin, ...historicoAtual].slice(0, 3); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`, { UTIMOLOGIN: JSON.stringify(historicoAtualizado) }); } catch (error) { console.warn('Nao foi possivel atualizar ultimo login', error); } };
-  const handleChangePassword = async (currentPass, newPass) => { if (!userData) return false; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.id === userData.id); if (!user || user.SENHA !== currentPass) { Alert.alert('Erro', 'Senha atual incorreta.'); return false; } await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { SENHA: newPass }); await addAuditLog('PASSWORD_CHANGED', 'Senha alterada com sucesso', userData.id); Alert.alert('Sucesso', 'Sua senha foi alterada.'); return true; } catch (error) { Alert.alert('Erro', 'Não foi possível alterar a senha. Tente novamente.'); return false; } };
-  const onBarcode = async ({ data }) => { if (Date.now() - lastScan.current < 2000) return; lastScan.current = Date.now(); if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); setScanning(false); setShowAchandoGif(true); setScannedEAN(data); try { const sources = await fetchProductSources(data); setShowAchandoGif(false); if (!sources || sources.length === 0) { showErr('Nenhum produto encontrado ou todas as fontes falharam.'); setScanning(true); setCurrentSources([]); setSourceModalVisible(false); } else { setCurrentSources(sources); setSourceModalVisible(true); } } catch (ex) { setShowAchandoGif(false); console.error('Erro ao buscar fontes:', ex); showErr('Erro ao consultar fontes de dados.'); setScanning(true); } };
-  const onSourceSelected = ({ nome, giro }) => { setProdName(nome); setGiro(giro); setSourceModalVisible(false); setCurrentSources([]); navTo('cadastro'); };
-  const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SecureStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass); if (!user) { const newAttempts = failedAttempts + 1; setFailedAttempts(newAttempts); const remaining = MAX_LOGIN_ATTEMPTS - newAttempts; await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} para ${sanitizedEmail}`, null); if (newAttempts >= MAX_LOGIN_ATTEMPTS) { startLockout(); showErr(`Acesso bloqueado por ${LOCKOUT_SECS} segundos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`); } else { showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`); } return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SecureStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
-  const onQR = async ({ data }) => { if (!data) return; try { const payload = JSON.parse(data); if (!payload.usuario || !payload.loginRapido || !payload.timestamp || !payload.expiraEm) { showErr('QR Code inválido ou corrompido.'); await addAuditLog('QR_INVALID', 'QR Code inválido', null); return; } if (Date.now() > payload.expiraEm) { showErr('QR Code expirado. Gere um novo.'); await addAuditLog('QR_EXPIRED', 'QR Code expirado', null); return; } const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === payload.usuario); if (!user) { showErr('Usuário não encontrado.'); await addAuditLog('QR_USER_NOT_FOUND', `Usuário ${payload.usuario} não encontrado`, null); return; } if (user.LOGINRAPIDO !== payload.loginRapido) { showErr('QR Code inválido - código de acesso não corresponde.'); await addAuditLog('QR_MISMATCH', `LOGINRAPIDO não confere para ${payload.usuario}`, user.id); return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('QR_ACCESS_DENIED', `Acesso negado para ${payload.usuario} via QR`, user.id); return; } user.PERFIL = qrRole; await addAuditLog('QR_LOGIN_SUCCESS', `Login via QR bem-sucedido para ${payload.usuario}`, user.id); await updateLastLogin(user.id); onOk(user); } catch (e) { showErr('QR Code inválido.'); await addAuditLog('QR_ERROR', `Erro ao processar QR: ${e.message}`, null); } };
-  const onOk = useCallback(user => { setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role'); const area = extractShelf(user.AREA); const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.()); const prat = !ehPerfil && SHELVES[area] ? area : ''; let def = ''; if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); } else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); } setActiveShelf(def); if (def) loadStock(def); setTimeout(() => triggerAutoClean(), 1500); }, [loadStock, triggerAutoClean]);
-  const switchShelf = async shelf => { setActiveShelf(shelf); setCadastroShelf(shelf); await loadStock(shelf); setShelfModal(false); };
-  const startScan = async mode => { if (!permission?.granted) { const { granted } = await requestPermission(); if (!granted) { showErr('Câmera necessária.'); return; } } setScanMode(mode); setTorchOn(false); setScanning(true); if (mode === 'aiVision') aiVisionTriggeredRef.current = false; };
+  // Define captureVision antes de usá-lo em onAIVisionCameraReady
   const captureVision = useCallback(async () => {
     if (!camRef.current) { showErr('Câmera não iniciada.'); return; }
     setCountdown(null); setBusy(true); setBusyMsg('IA Vision analisando imagem...');
@@ -3222,6 +4519,90 @@ export default function App() {
       setScanning(false); setBusy(false);
     }
   }, [showErr, setBusy, setBusyMsg, setCountdown, setScanning, setRoboMsg, setShowRoboGif, setProdName, setGiro, resetWiz, navTo]);
+
+  const aiVisionTriggeredRef = useRef(false);
+  const onAIVisionCameraReady = useCallback(() => { if (aiVisionTriggeredRef.current) return; aiVisionTriggeredRef.current = true; setTimeout(() => { captureVision(); }, 1200); }, [captureVision]);
+
+  const sortProductsByDate = (products) => { return [...products].sort((a, b) => { const dateA = parseDate(a.DATAENVIO); const dateB = parseDate(b.DATAENVIO); if (!dateA && !dateB) return 0; if (!dateA) return 1; if (!dateB) return -1; return dateB - dateA; }); };
+  const filteredStock = useMemo(() => {
+    const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN'));
+    let filtered = activeFilter === 'all' ? base : base.filter(i => vencStatus(i.VENCIMENTO).status === activeFilter);
+    if (searchQuery.trim()) { const q = searchQuery.trim().toLowerCase(); filtered = filtered.filter(i => String(i.produto || '').toLowerCase().includes(q)); }
+    return sortProductsByDate(filtered);
+  }, [stockData, activeFilter, searchQuery]);
+  const counts = useMemo(() => { const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN')); return { all: base.length, ok: base.filter(i => vencStatus(i.VENCIMENTO).status === 'ok').length, warning30: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning30').length, warning: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').length, expired: base.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').length }; }, [stockData]);
+  const triggerAutoClean = useCallback(async () => { setCleanToast({ cleaning: true }); try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); } catch (_) { setCleanToast({ cleaning: false, deleted: [] }); } }, [activeShelf, userData, loadStock]);
+  const loadStock = useCallback(async shelf => { const tid = SHELVES[shelf]; if (!tid) return; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true&size=200`); const products = res.data.results || []; setStockData(sortProductsByDate(products)); } catch (ex) { showErr('Erro ao carregar dados da prateleira.'); } }, [showErr]);
+  const deleteProduct = useCallback(async (product) => { if (!product?.id) return; const tableId = SHELVES[activeShelf]; if (!tableId) { showErr('Nenhuma prateleira ativa para apagar o produto.'); return; } setBusy(true); setBusyMsg('Apagando produto...'); try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${product.id}/`); await addAuditLog('PRODUCT_DELETED', `Produto "${product.produto}" apagado da prateleira ${activeShelf}`, userData?.id); setStockData(prev => sortProductsByDate(prev.filter(p => p.id !== product.id))); } catch (ex) { showErr('Não foi possível apagar o produto. Verifique a conexão.'); } finally { setBusy(false); } }, [activeShelf, showErr, userData]);
+
+  const updateLastLogin = async (userId) => { try { const now = new Date(); const novoLogin = { data: now.toLocaleDateString('pt-BR'), hora: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), iso: now.toISOString() }; let historicoAtual = []; try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { historicoAtual = JSON.parse(utimologin); } else if (utimologin) { historicoAtual = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { historicoAtual = []; } const historicoAtualizado = [novoLogin, ...historicoAtual].slice(0, 3); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`, { UTIMOLOGIN: JSON.stringify(historicoAtualizado) }); } catch (error) { console.warn('Nao foi possivel atualizar ultimo login', error); } };
+  const handleChangePassword = async (currentPass, newPass) => { if (!userData) return false; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.id === userData.id); if (!user || user.SENHA !== currentPass) { Alert.alert('Erro', 'Senha atual incorreta.'); return false; } await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { SENHA: newPass }); await addAuditLog('PASSWORD_CHANGED', 'Senha alterada com sucesso', userData.id); Alert.alert('Sucesso', 'Sua senha foi alterada.'); return true; } catch (error) { Alert.alert('Erro', 'Não foi possível alterar a senha. Tente novamente.'); return false; } };
+  const onBarcode = async ({ data }) => { if (Date.now() - lastScan.current < 2000) return; lastScan.current = Date.now(); if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); setScanning(false); setShowAchandoGif(true);     setScannedEAN(data);
+    try {
+      const sources = await fetchProductSources(data);
+      setShowAchandoGif(false);
+
+      if (!sources || sources.length === 0) {
+        showErr('Nenhum produto encontrado ou todas as fontes falharam.');
+        handleStartScanning();
+        setCurrentSources([]);
+        setSourceModalVisible(false);
+      } else if (sources.length === 1) {
+        // Se apenas uma fonte, seleciona automaticamente
+        onSourceSelected(sources[0]);
+      } else {
+        // Tenta encontrar o produto mais similar
+        const mainSource = sources[0]; // Assume a primeira fonte como a mais confiável para comparação
+        let bestMatch = mainSource;
+        let maxSimilarity = 0.7; // Limiar de similaridade para seleção automática
+
+        for (let i = 1; i < sources.length; i++) {
+          const currentSource = sources[i];
+          const similarity = stringSimilarity(mainSource.nome, currentSource.nome);
+          if (similarity > maxSimilarity) {
+            maxSimilarity = similarity;
+            bestMatch = currentSource;
+          }
+        }
+
+        if (maxSimilarity > 0.7) { // Se encontrou um produto com similaridade alta
+          onSourceSelected(bestMatch);
+        } else {
+          // Caso contrário, mostra o modal para seleção manual
+          setCurrentSources(sources);
+          setSourceModalVisible(true);
+        }
+      }
+    } catch (ex) {
+      setShowAchandoGif(false);
+      console.error('Erro ao buscar fontes:', ex);
+      showErr('Erro ao consultar fontes de dados.');
+      handleStartScanning();
+    }
+  };
+  const onSourceSelected = ({ nome, giro }) => { setProdName(nome); setGiro(giro); setSourceModalVisible(false); setCurrentSources([]); navTo('cadastro'); };
+  const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SafeStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass); if (!user) { const newAttempts = failedAttempts + 1; setFailedAttempts(newAttempts); const remaining = MAX_LOGIN_ATTEMPTS - newAttempts; await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} para ${sanitizedEmail}`, null); if (newAttempts >= MAX_LOGIN_ATTEMPTS) { startLockout(); showErr(`Acesso bloqueado por ${LOCKOUT_SECS} segundos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`); } else { showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`); } return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
+  const onQR = async ({ data }) => { if (!data) return; try { const payload = JSON.parse(data); if (!payload.usuario || !payload.loginRapido || !payload.timestamp || !payload.expiraEm) { showErr('QR Code inválido ou corrompido.'); await addAuditLog('QR_INVALID', 'QR Code inválido', null); return; } if (Date.now() > payload.expiraEm) { showErr('QR Code expirado. Gere um novo.'); await addAuditLog('QR_EXPIRED', 'QR Code expirado', null); return; } const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === payload.usuario); if (!user) { showErr('Usuário não encontrado.'); await addAuditLog('QR_USER_NOT_FOUND', `Usuário ${payload.usuario} não encontrado`, null); return; } if (user.LOGINRAPIDO !== payload.loginRapido) { showErr('QR Code inválido - código de acesso não corresponde.'); await addAuditLog('QR_MISMATCH', `LOGINRAPIDO não confere para ${payload.usuario}`, user.id); return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('QR_ACCESS_DENIED', `Acesso negado para ${payload.usuario} via QR`, user.id); return; } user.PERFIL = qrRole; await addAuditLog('QR_LOGIN_SUCCESS', `Login via QR bem-sucedido para ${payload.usuario}`, user.id); await updateLastLogin(user.id); onOk(user); } catch (e) { showErr('QR Code inválido.'); await addAuditLog('QR_ERROR', `Erro ao processar QR: ${e.message}`, null); } };
+  const onOk = useCallback(user => { setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role'); const area = extractShelf(user.AREA); const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.()); const prat = !ehPerfil && SHELVES[area] ? area : ''; let def = ''; if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); } else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); } setActiveShelf(def); if (def) loadStock(def); setTimeout(() => triggerAutoClean(), 1500); }, [loadStock, triggerAutoClean]);
+  const switchShelf = async shelf => { setActiveShelf(shelf); setCadastroShelf(shelf); await loadStock(shelf); setShelfModal(false); };
+  const startScan = async mode => {
+    try {
+      const { status } = await Camera.getCameraPermissionsAsync();
+      if (status !== 'granted') {
+        const { status: newStatus } = await Camera.requestCameraPermissionsAsync();
+        if (newStatus !== 'granted') {
+          showErr('Câmera necessária para usar esta função.');
+          return;
+        }
+      }
+      if (mode === 'aiVision') aiVisionTriggeredRef.current = false;
+      setScanMode(mode);
+      setTorchOn(false);
+      setScanning(true);
+    } catch (err) {
+      showErr('Erro ao iniciar câmera. Verifique as permissões.');
+    }
+  };
   const sendChat = async () => { if (!chatTxt.trim() || chatBusy) return; const txt = chatTxt.trim(); setChatTxt(''); setMsgs(p => [...p, { id: Date.now(), text: txt, isAi: false }]); setChatBusy(true); try { const sample = stockData.slice(0, 8).map(s => { const m = buildDepletionMetrics(s, fifoMode, stockData, s.codig); return `${s.produto}: ${m.remainingQty} restantes, ruptura em ${m.remainingDays}d`; }).join('; '); const expiring = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').map(i => i.produto).join(', '); const expired = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').map(i => i.produto).join(', '); const prompt = `Você é o GEI Assistant, assistente inteligente de gestão de estoque do sistema GEI.AI, especializado no varejo alimentício brasileiro. Você tem acesso ao estoque atual do usuário e deve combinar esse contexto com seu amplo conhecimento sobre produtos, legislação de validade, ANVISA, boas práticas de armazenagem e mercado supermercadista brasileiro para dar respostas precisas e práticas.
 
 CONTEXTO DO ESTOQUE ATUAL:
@@ -3244,14 +4625,34 @@ Pergunta do usuário: "${txt}"`;
     } catch (ex) { const isAbort = ex?.name === 'AbortError'; setMsgs(p => [...p, { id: Date.now() + 1, text: isAbort ? '⏱️ A IA demorou demais para responder. Verifique sua conexão e tente novamente.' : '⚠️ Erro de conexão com a IA. Verifique sua internet e tente novamente.', isAi: true }]); } finally { setChatBusy(false); } };
   const getTargetShelf = () => (isCoord(perf) || isDeposito(perf)) && cadastroShelf ? cadastroShelf : activeShelf;
   const calculatePrevisao = (qtd, giro, dataEnvio) => { const rateMap = { 'Grande giro': 5.2, 'Médio giro': 2.5, 'Pouco giro': 0.8 }; const dailyRate = rateMap[giro] || 2.5; const sendDate = parseDate(dataEnvio) || today(); const remainingDays = dailyRate > 0 ? Math.ceil(qtd / dailyRate) : 999; const depletionDate = addDays(sendDate, remainingDays); return fmtFull(depletionDate); };
-  const doSaveProductConfirmed = async () => { const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf]; if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; } setBusy(true); setBusyMsg('Salvando produto...'); try { const dataEnvio = new Date().toLocaleDateString('pt-BR'); const previsao = calculatePrevisao(Number(qtd), giro, dataEnvio); await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, { produto: prodName.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: validade, quantidade: String(qtd), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: dataEnvio, ALERTAMENSAGEM: '', MARGEM: giro, PREVISAO: previsao }); await addAuditLog('PRODUCT_ADDED', `Produto "${prodName}" adicionado à prateleira ${targetShelf}`, userData?.id); setBusy(false); setShowSuccess(true); setScannedEAN(''); if (targetShelf === activeShelf) loadStock(activeShelf); } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); } };
+  const doSaveProductConfirmed = async (overrides = {}) => { const nome = overrides.nome || prodName; const qtdUse = overrides.qty || qtd; const valUse = overrides.date || validade; const giroUse = overrides.giro || giro; const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf]; if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; } setBusy(true); setBusyMsg('Salvando produto...'); try { const dataEnvio = new Date().toLocaleDateString('pt-BR'); const previsao = calculatePrevisao(Number(qtdUse), giroUse, dataEnvio); await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, { produto: nome.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: valUse, quantidade: String(qtdUse), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: dataEnvio, ALERTAMENSAGEM: '', MARGEM: giroUse, PREVISAO: previsao }); await addAuditLog('PRODUCT_ADDED', `Produto "${nome}" adicionado à prateleira ${targetShelf}`, userData?.id); setBusy(false); setShowSuccess(true); setScannedEAN(''); if (targetShelf === activeShelf) loadStock(activeShelf); } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); } };
+  const doUpdateExisting = useCallback(async (rowId, overrides) => {
+    const tid = SHELVES[getTargetShelf()]; if (!tid || !rowId) return;
+    setBusy(true); setBusyMsg('Atualizando produto...');
+    try {
+      const body = {};
+      if (overrides.nome)  body.produto    = overrides.nome.trim();
+      if (overrides.qty)   body.quantidade = String(overrides.qty);
+      if (overrides.date)  body.VENCIMENTO = overrides.date;
+      if (overrides.giro)  body.MARGEM     = overrides.giro;
+      await secureAxiosInstance.patch(
+        'https://api.baserow.io/api/database/rows/table/' + tid + '/' + rowId + '/?user_field_names=true',
+        body
+      );
+      await addAuditLog('PRODUCT_UPDATED', 'Produto ID ' + rowId + ' atualizado via voz', userData && userData.id);
+      setBusy(false); setShowSuccess(true);
+      if (getTargetShelf() === activeShelf) loadStock(activeShelf);
+    } catch { showErr('Nao foi possivel atualizar.'); setBusy(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeShelf, loadStock, userData, showErr]);
+
   const saveProduct = async () => { if (!prodName) { showErr('O nome do produto é obrigatório.'); return; } if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data de validade inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } if (!qtd) { showErr('A quantidade é obrigatória.'); return; } if (!giro) { showErr('Selecione o giro estimado.'); return; } const eanAtual = scannedEAN && scannedEAN !== 'Sem EAN' ? scannedEAN : null; if (eanAtual) { const duplicado = stockData.find(p => String(p.codig || '').trim() === eanAtual && String(p.VENCIMENTO || '').trim() === validade); if (duplicado) { Alert.alert('⚠️ PRODUTO JÁ CADASTRADO', `ESTE PRODUTO JÁ ESTÁ CADASTRADO COM ESTA DATA.\n\nProduto: ${duplicado.produto || prodName}\nCódigo: ${eanAtual}\nValidade: ${validade}\n\nDeseja cadastrar mesmo assim?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Cadastrar mesmo assim', style: 'destructive', onPress: doSaveProductConfirmed }]); return; } } await doSaveProductConfirmed(); };
   const nextStep = () => { if (wStep === 1 && !prodName.trim()) { showErr('O nome do produto é obrigatório.'); return; } if (wStep === 2) { if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } } if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { showErr('A quantidade deve ser um número positivo.'); return; } if (wStep === 4 && !giro) { showErr('Selecione o giro estimado.'); return; } if (wStep < 4) setWStep(p => p + 1); else saveProduct(); };
   const onSuccessDone = () => { setShowSuccess(false); const target = getTargetShelf(); if (target === activeShelf) loadStock(activeShelf); navTo('home'); resetWiz(); setProdName(''); setGiro(''); setCadastroShelf(''); setScannedEAN(''); };
   const navTo = useCallback(tab => { Animated.timing(fadeAnim, { toValue: 0, duration: 110, useNativeDriver: false }).start(() => { setCurrentTab(tab); setScanning(false); Animated.timing(fadeAnim, { toValue: 1, duration: 170, useNativeDriver: false }).start(); }); }, [fadeAnim]);
   const resetWiz = useCallback(() => { setWStep(1); setValidade(''); setQtd(''); }, []);
   const viewAuditLogs = async () => { const logs = await getAuditLogs(); const now = new Date(); const last3Days = logs.filter(log => { const logDate = new Date(log.timestamp); const diffMs = now - logDate; return diffMs >= 0 && Math.floor(diffMs / 86400000) <= 3; }); let loginHistory = []; if (userData?.id) { try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { loginHistory = JSON.parse(utimologin); } else if (utimologin) { loginHistory = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { loginHistory = []; } } setAuditLogs({ logs: last3Days, loginHistory }); setShowAuditLogs(true); };
-  const enableBiometrics = async (value) => { if (value) { const { isAvailable } = await checkBiometricSupport(); if (!isAvailable) { Alert.alert('Biometria não disponível', 'Seu dispositivo não suporta ou não tem biometria configurada.'); return; } const auth = await authenticateWithBiometrics('Confirme para ativar login biométrico'); if (!auth.success) { Alert.alert('Falha na autenticação', 'Não foi possível ativar a biometria.'); return; } try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${userData?.USUARIO}-${Date.now()}-${Math.random()}`); await SecureStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData?.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } else { try { await SecureStore.deleteItemAsync('bio_token'); if (userData?.id) { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: '' }); } } catch (_) { /* noop */ } } setBiometricEnabled(value); await SecureStore.setItemAsync('biometric_enabled', value ? 'true' : 'false'); await addAuditLog(`BIOMETRIC_TOGGLED`, `Biometria ${value ? "ativada" : "desativada"}`, userData?.id); };
+  const enableBiometrics = async (value) => { if (value) { const { isAvailable } = await checkBiometricSupport(); if (!isAvailable) { Alert.alert('Biometria não disponível', 'Seu dispositivo não suporta ou não tem biometria configurada.'); return; } const auth = await authenticateWithBiometrics('Confirme para ativar login biométrico'); if (!auth.success) { Alert.alert('Falha na autenticação', 'Não foi possível ativar a biometria.'); return; } try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${userData?.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData?.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } else { try { await SafeStore.deleteItemAsync('bio_token'); if (userData?.id) { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: '' }); } } catch (_) { /* noop */ } } setBiometricEnabled(value); await SafeStore.setItemAsync('biometric_enabled', value ? 'true' : 'false'); await addAuditLog(`BIOMETRIC_TOGGLED`, `Biometria ${value ? "ativada" : "desativada"}`, userData?.id); };
 
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockedOut, setLockedOut] = useState(false);
@@ -3282,16 +4683,22 @@ Pergunta do usuário: "${txt}"`;
     const timeout = setTimeout(forceInit, 8000);
     const init = async () => {
       try { await initializeSecureTokens(); await cleanExpiredCache(); } catch (err) { console.error('Erro ao inicializar tokens:', err); showErr('Falha ao obter tokens de segurança. Verifique sua conexão.'); }
-      try { const bioPref = await SecureStore.getItemAsync('biometric_enabled'); if (bioPref === 'true') setBiometricEnabled(true); } catch (_) { /* noop */ }
+      try { const bioPref = await SafeStore.getItemAsync('biometric_enabled'); if (bioPref === 'true') setBiometricEnabled(true); } catch (_) { /* noop */ }
+      try { const vhPref = await SafeStore.getItemAsync('voiceIndicatorHidden'); if (vhPref === 'true') setVoiceIndicatorVisible(false); } catch (_) { /* noop */ }
       clearTimeout(timeout); forceInit();
     };
     init();
   }, [showErr]);
 
   const handleVoiceComplete = useCallback((data) => {
+    if (data?.nome) setProdName(data.nome);
+    if (data?.qty)  setQtd(data.qty);
+    if (data?.date) setValidade(data.date);
+    if (data?.giro) setGiro(data.giro || 'Médio giro');
     setWStep(4);
-    setTimeout(() => saveProduct(), 500);
-  }, []);
+    // Chama com overrides para evitar problema de timing do estado React
+    setTimeout(() => doSaveProductConfirmed(data || {}), 300);
+  }, [doSaveProductConfirmed, setProdName, setQtd, setValidade, setGiro]);
 
   if (!initialized) { return (<View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color={T.blue} /><Text style={{ marginTop: 20, color: T.text }}>Inicializando sistema seguro...</Text></View>); }
 
@@ -3370,7 +4777,7 @@ Pergunta do usuário: "${txt}"`;
   return (
     <View style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar hidden />
-      <DarkTorchPrompt isDarkEnv={darkEnv.isDarkEnv} lightLevel={darkEnv.lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(!torchOn)} T={T} fontScale={fontScale} />
+      <DarkTorchPrompt isDarkEnv={isDarkEnv} lightLevel={lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(!torchOn)} T={T} fontScale={fontScale} />
       <Modal visible={showQrGenerator} transparent animationType="fade" onRequestClose={() => setShowQrGenerator(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center' }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowQrGenerator(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 20, maxHeight: '85%', borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text }}>QR Code de Acesso</Text><TouchableOpacity onPress={() => setShowQrGenerator(false)} style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}><Feather name="x" size={20} color={T.textSub} /></TouchableOpacity></View><QrCodeGenerator T={T} fontScale={fontScale} userData={userData} onClose={() => setShowQrGenerator(false)} /></View></View></Modal>
       <Modal visible={showAuditLogs} transparent animationType="fade" onRequestClose={() => setShowAuditLogs(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-start', paddingTop: 52 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAuditLogs(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 16, maxHeight: WIN.height * 0.99, borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="shield" size={18} color={T.blue} /></View><View><Text style={{ fontSize: 16 * fontScale, fontWeight: '900', color: T.text }}>Auditoria & Logins</Text><Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600' }}>Últimos 3 dias</Text></View></View><TouchableOpacity onPress={() => setShowAuditLogs(false)} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}><Feather name="x" size={18} color={T.textSub} /></TouchableOpacity></View><ScrollView contentContainerStyle={{ padding: 16, gap: 8 }} showsVerticalScrollIndicator={false}>{auditLogs.loginHistory && auditLogs.loginHistory.length > 0 && (<View style={{ backgroundColor: T.bgElevated, borderRadius: 18, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: T.blue + '35' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}><View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="log-in" size={14} color={T.blue} /></View><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Histórico de Logins</Text><View style={{ marginLeft: 'auto', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: T.blue + '18', borderWidth: 1, borderColor: T.blue + '30' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue }}>{auditLogs.loginHistory.length} registro{auditLogs.loginHistory.length !== 1 ? 's' : ''}</Text></View></View>{auditLogs.loginHistory.map((login, idx) => (<View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: idx > 0 ? 1 : 0, borderColor: T.border }}><View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: idx === 0 ? T.green + '20' : T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: idx === 0 ? T.green + '50' : T.border }}><Text style={{ fontSize: 11, fontWeight: '900', color: idx === 0 ? T.green : T.textMuted }}>#{idx + 1}</Text></View><View style={{ flex: 1 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>{idx === 0 && (<View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: T.green + '18', borderWidth: 1, borderColor: T.green + '40' }}><Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.green }}>MAIS RECENTE</Text></View>)}<Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: idx === 0 ? T.text : T.textSub }}>{login.data || '—'}{login.hora ? `  ·  ${login.hora}` : ''}</Text></View>{login.iso ? (<Text style={{ fontSize: 10 * fontScale, color: T.textMuted, marginTop: 2, fontWeight: '600' }}>{new Date(login.iso).toLocaleString('pt-BR', { weekday: 'long' })}</Text>) : null}</View><Feather name={idx === 0 ? 'check-circle' : 'clock'} size={15} color={idx === 0 ? T.green : T.textMuted} /></View>))}</View>)}<View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 }}><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Eventos do Sistema</Text><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /></View>{(!auditLogs.logs || auditLogs.logs.length === 0) ? (<View style={{ alignItems: 'center', paddingVertical: 32 }}><Feather name="check-circle" size={36} color={T.green} /><Text style={{ textAlign: 'center', color: T.textSub, marginTop: 12, fontSize: 14 * fontScale, fontWeight: '700' }}>Nenhum evento nos últimos 3 dias.</Text></View>) : (auditLogs.logs.map((log, index) => { const isLogin = log.action?.includes('LOGIN') || log.action?.includes('QR'); const isWarning = log.action?.includes('FAILED') || log.action?.includes('DENIED') || log.action?.includes('ERROR') || log.action?.includes('INVALID'); const iconName = isWarning ? 'alert-triangle' : isLogin ? 'log-in' : 'activity'; const iconColor = isWarning ? T.amber : isLogin ? T.blue : T.teal; const bgColor = isWarning ? T.amberGlow : isLogin ? T.blueGlow : T.tealGlow; const borderColor = isWarning ? T.amber + '40' : isLogin ? T.blue + '30' : T.teal + '30'; return (<View key={index} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: T.bgElevated, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: borderColor }}><View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: bgColor, justifyContent: 'center', alignItems: 'center', marginTop: 1, borderWidth: 1, borderColor: borderColor }}><Feather name={iconName} size={13} color={iconColor} /></View><View style={{ flex: 1 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: iconColor, flex: 1, paddingRight: 8 }}>{log.action}</Text><Text style={{ fontSize: 9 * fontScale, color: T.textMuted, fontWeight: '700', flexShrink: 0 }}>{new Date(log.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</Text></View><Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 3, lineHeight: 16 }}>{log.details}</Text><Text style={{ fontSize: 9 * fontScale, color: T.textMuted, marginTop: 4, fontWeight: '600' }}>{new Date(log.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}{log.userId ? `  ·  ID ${log.userId}` : ''}</Text></View></View>); }))}</ScrollView></View></View></Modal>
       {!scanning && (<View style={{ paddingTop: 50, paddingHorizontal: 20, paddingBottom: 16, backgroundColor: T.bg, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>{userData?.PERFILFOTOURL ? <Image source={{ uri: userData.PERFILFOTOURL }} style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: T.blue }} /> : <View style={{ width: 52, height: 52, borderRadius: 18, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 10 }}><Text style={{ color: '#FFF', fontSize: 18, fontWeight: '900' }}>{initials}</Text></View>}<View style={{ flex: 1, paddingRight: 12 }}><Text style={{ fontWeight: '900', color: T.text, fontSize: 20 * fontScale, letterSpacing: -0.5 }} numberOfLines={1}>{userData?.NOME || 'Usuário'}</Text><Text style={{ color: T.textSub, fontSize: 12.5 * fontScale, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>Painel de estoque inteligente</Text></View><View style={{ flexDirection: 'row', gap: 10 }}>{(canSw || isDeposito(perf)) && (<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => setShelfModal(true)}><Feather name="layers" size={18} color={T.blue} /></TouchableOpacity>)}<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => { addAuditLog('LOGOUT', 'Usuário fez logout', userData?.id); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); setCleanToast(null); setFailedAttempts(0); setLockedOut(false); if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }}><Feather name="log-out" size={18} color={T.red} /></TouchableOpacity></View></View></View>)}
@@ -3394,6 +4801,7 @@ Pergunta do usuário: "${txt}"`;
             <ActionCard T={T} fontScale={fontScale} icon="camera" color={T.purple} title="Scanner IA Vision" desc="Identifique produtos via foto" onPress={() => startScan('aiVision')} />
             <ActionCard T={T} fontScale={fontScale} icon="box" color={T.teal} title="🏗️ Calculadora de Pinhas" desc="Simule e calcule pilhas de produtos visualmente" onPress={() => setShowPinhasModal(true)} />
             <ActionCard T={T} fontScale={fontScale} icon="settings" color={T.textSub} title="Configurações do App" desc="Aparência, fonte e automações" onPress={() => navTo('config')} />
+            {/* Botão de microfone na home */}
             <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: T.blueGlow, borderRadius: 50, padding: 12, marginTop: 10, borderWidth: 1, borderColor: T.blue }} onPress={() => setVoiceAssistantVisible(true)}>
               <Feather name="mic" size={24} color={T.blue} />
               <Text style={{ marginLeft: 8, fontSize: 14 * fontScale, fontWeight: '700', color: T.blue }}>Assistente de Voz</Text>
@@ -3421,7 +4829,8 @@ Pergunta do usuário: "${txt}"`;
         )}
         {currentTab === 'config' && <ConfigScreen T={T} currentTheme={currentTheme} onThemeChange={setCurrentTheme} fontScale={fontScale} setFontScale={setFontScale} notifOn={notifOn} setNotifOn={setNotifOn} TAB_SAFE={TAB_SAFE} onGenerateQR={() => setShowQrGenerator(true)} onViewAuditLogs={viewAuditLogs} onEnableBiometrics={enableBiometrics} biometricEnabled={biometricEnabled} onChangePassword={handleChangePassword} userData={userData} fifoMode={fifoMode} setFifoMode={setFifoMode} />}
       </Animated.View>
-      {scanning && (<View style={StyleSheet.absoluteFill}><CameraView ref={camRef} style={StyleSheet.absoluteFill} enableTorch={torchOn} onBarcodeScanned={scanMode === 'barcode' ? onBarcode : undefined} barcodeScannerSettings={scanMode === 'barcode' ? { barcodeTypes: ['ean13', 'upc_a', 'ean8'] } : undefined} onCameraReady={scanMode === 'aiVision' ? onAIVisionCameraReady : undefined} /><View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.32)' }}><View style={{ position: 'absolute', top: 40, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24 }}><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => { setScanning(false); setCountdown(null); setTorchOn(false); setShowAchandoGif(false); aiVisionTriggeredRef.current = false; if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); }}><Feather name="x" size={22} color="#FFF" /></TouchableOpacity><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: torchOn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setTorchOn(!torchOn)}><Feather name="zap" size={20} color={torchOn ? '#000' : '#FFF'} /></TouchableOpacity></View>{scanMode === 'barcode' && !showAchandoGif && (<View style={{ alignItems: 'center' }}><View style={{ width: 280, height: 180, borderWidth: 2, borderColor: T.blue, borderRadius: 24, backgroundColor: 'rgba(59,91,255,0.05)' }}><Animated.View style={{ height: 2, backgroundColor: T.blue, width: '100%', position: 'absolute', top: scanAnim.interpolate({ inputRange: [0, 1], outputRange: ['10%', '90%'] }), shadowColor: T.blue, shadowOpacity: 1, shadowRadius: 10, elevation: 10 }} /></View><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 }}>Posicione o código de barras</Text><Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Nome preenchido automaticamente pela IA</Text></View>)}{scanMode === 'aiVision' && (<View style={{ alignItems: 'center' }}><Animated.View style={{ width: 260, height: 260, borderWidth: 3, borderColor: T.purple, borderRadius: 130, backgroundColor: 'rgba(124,58,237,0.1)', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulseAnim }] }}><MaterialCommunityIcons name="robot-outline" size={80} color={T.purple} /></Animated.View><Text style={{ color: '#FFF', marginTop: 32, fontWeight: '800', fontSize: 18, textAlign: 'center', paddingHorizontal: 40 }}>IA Vision · Aponte para o produto</Text><Text style={{ color: 'rgba(255,255,255,0.65)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Captura automática em tempo real pelo Gemini</Text></View>)}</View></View>)}
+      <Modal visible={scanning} animationType='fade' transparent={false} onRequestClose={() => setScanning(false)}><View style={StyleSheet.absoluteFill}>          <CameraView ref={camRef} style={StyleSheet.absoluteFill} enableTorch={torchOn} onBarcodeScanned={scanMode === 'barcode' ? onBarcode : undefined} barcodeScannerSettings={{ barcodeTypes: ['ean13', 'upc_a', 'ean8', 'qr', 'code128'] }} onCameraReady={scanMode === 'aiVision' ? onAIVisionCameraReady : undefined} />
+          <DarkTorchPrompt isDarkEnv={isDarkEnv} lightLevel={lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(p => !p)} T={T} fontScale={fontScale} /><View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.32)' }}><View style={{ position: 'absolute', top: 40, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24 }}><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => { setScanning(false); setCountdown(null); setTorchOn(false); setShowAchandoGif(false); aiVisionTriggeredRef.current = false; if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); }}><Feather name="x" size={22} color="#FFF" /></TouchableOpacity><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: torchOn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setTorchOn(!torchOn)}><Feather name="zap" size={20} color={torchOn ? '#000' : '#FFF'} /></TouchableOpacity></View>{scanMode === 'barcode' && !showAchandoGif && (<View style={{ alignItems: 'center' }}><View style={{ width: 280, height: 180, borderWidth: 2, borderColor: T.blue, borderRadius: 24, backgroundColor: 'rgba(59,91,255,0.05)' }}><Animated.View style={{ height: 2, backgroundColor: T.blue, width: '100%', position: 'absolute', top: scanAnim.interpolate({ inputRange: [0, 1], outputRange: ['10%', '90%'] }), shadowColor: T.blue, shadowOpacity: 1, shadowRadius: 10, elevation: 10 }} /></View><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 }}>Posicione o código de barras</Text><Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Nome preenchido automaticamente pela IA</Text></View>)}{scanMode === 'aiVision' && (<View style={{ alignItems: 'center' }}><Animated.View style={{ width: 260, height: 260, borderWidth: 3, borderColor: T.purple, borderRadius: 130, backgroundColor: 'rgba(124,58,237,0.1)', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulseAnim }] }}><MaterialCommunityIcons name="robot-outline" size={80} color={T.purple} /></Animated.View><Text style={{ color: '#FFF', marginTop: 32, fontWeight: '800', fontSize: 18, textAlign: 'center', paddingHorizontal: 40 }}>IA Vision · Aponte para o produto</Text><Text style={{ color: 'rgba(255,255,255,0.65)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Captura automática em tempo real pelo Gemini</Text></View>)}</View></View></Modal>
       {showAchandoGif && (<View style={StyleSheet.absoluteFill}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}><View style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, padding: 25, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' }}><Image source={AchandoGif} style={{ width: 180, height: 180 }} resizeMode="contain" /></View><Text style={{ marginTop: 35, color: '#FFF', fontSize: 22, fontWeight: 'bold', letterSpacing: 1 }}>Consultando fontes...</Text><Text style={{ marginTop: 10, color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>Buscando em GEI.IA, Bluesoft e OpenFoodFacts</Text></View></View>)}
       <Modal visible={showRoboGif} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}><View style={{ flex: 1, backgroundColor: 'rgba(0,10,40,0.92)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}><View style={{ backgroundColor: '#FFFFFF', borderRadius: 36, padding: 28, width: '90%', alignItems: 'center', shadowColor: '#3B5BFF', shadowOpacity: 0.5, shadowRadius: 40, elevation: 20, borderWidth: 2, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(59,91,255,0.1)', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#3B5BFF' }} /><Text style={{ fontSize: 11, fontWeight: '900', color: '#3B5BFF', letterSpacing: 1.5, textTransform: 'uppercase' }}>IA Vision · GEI.AI</Text></View><View style={{ width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(59,91,255,0.06)', borderWidth: 3, borderColor: 'rgba(59,91,255,0.3)', justifyContent: 'center', alignItems: 'center', marginBottom: 20, shadowColor: '#3B5BFF', shadowOpacity: 0.3, shadowRadius: 20, elevation: 8 }}><Image source={RoboGif} style={{ width: 170, height: 170, borderRadius: 85 }} resizeMode="cover" fadeDuration={0} /></View><View style={{ width: '80%', height: 1, backgroundColor: 'rgba(59,91,255,0.12)', marginBottom: 16 }} /><Text style={{ fontSize: 13, fontWeight: '800', color: '#3B5BFF', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Produto Identificado!</Text><Text style={{ fontSize: 16, fontWeight: '900', color: '#0F172A', textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 }} numberOfLines={3}>{roboMsg.split('\n')[1]}</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18, backgroundColor: 'rgba(22,163,74,0.08)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(22,163,74,0.25)' }}><Feather name="check-circle" size={14} color="#16A34A" /><Text style={{ fontSize: 12, fontWeight: '800', color: '#16A34A' }}>Cadastro sendo aberto...</Text></View></View></View></Modal>
       {!scanning && (<View style={{ height: TAB_SAFE, backgroundColor: T.bgCard, borderTopWidth: 1, borderColor: T.border, flexDirection: 'row', paddingBottom: NAV_BAR_H, paddingHorizontal: 10 }}><TabBtn icon="home" label="Início" active={currentTab === 'home'} onPress={() => navTo('home')} T={T} fontScale={fontScale} /><TabBtn icon="layers" label="Estoque" active={currentTab === 'estoque'} onPress={() => navTo('estoque')} T={T} fontScale={fontScale} /><View style={{ flex: 1.2, alignItems: 'center', justifyContent: 'center' }}><TouchableOpacity activeOpacity={0.9} style={{ width: 58, height: 58, borderRadius: 22, backgroundColor: T.blue, marginTop: -34, justifyContent: 'center', alignItems: 'center', elevation: 10, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 12, borderWidth: 4, borderColor: T.bgCard }} onPress={() => { resetWiz(); setProdName(''); setGiro(''); navTo('cadastro'); }}><Feather name="plus" size={28} color="#FFF" /></TouchableOpacity></View><TabBtn icon="message-circle" label="IA Chat" active={currentTab === 'chat'} onPress={() => navTo('chat')} T={T} fontScale={fontScale} /><TabBtn icon="settings" label="Ajustes" active={currentTab === 'config'} onPress={() => navTo('config')} T={T} fontScale={fontScale} /></View>)}
@@ -3434,9 +4843,23 @@ Pergunta do usuário: "${txt}"`;
       {erro ? (<View style={{ position: 'absolute', bottom: TAB_SAFE + 16, left: 16, right: 16, zIndex: 9997 }}><ErrBanner msg={erro} onClose={() => setErro('')} /></View>) : null}
       <PinhasCalculatorModal visible={showPinhasModal} onClose={() => setShowPinhasModal(false)} T={T} fontScale={fontScale} />
       <ExpiryAnalysisModal visible={showExpiryModal} onClose={() => setShowExpiryModal(false)} products={stockData} T={T} fontScale={fontScale} />
+      {isLogged && !scanning && (
+        <AlwaysOnIndicator
+          isListening={isAlwaysListening}
+          T={T}
+          TAB_SAFE={TAB_SAFE}
+          onPress={() => { setOpenedByWakeWord(false); setVoiceAssistantVisible(true); }}
+          visible={voiceIndicatorVisible}
+          onHide={hideVoiceIndicator}
+        />
+      )}
       <VoiceAssistant
         visible={voiceAssistantVisible}
-        onClose={() => setVoiceAssistantVisible(false)}
+        fromWakeWord={openedByWakeWord}
+        stockData={stockData}
+        scannedEAN={scannedEAN}
+        doUpdateExisting={doUpdateExisting}
+        onClose={() => { setVoiceAssistantVisible(false); setOpenedByWakeWord(false); }}
         onComplete={handleVoiceComplete}
         T={T}
         fontScale={fontScale}
