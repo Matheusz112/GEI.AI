@@ -1,32 +1,30 @@
-# --- SEGURANÇA (O mais importante) ---
-# Ignora todos os arquivos de variáveis de ambiente
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# EAS
+.easignore
+
+# Ambiente / segredos — NUNCA suba isso
 .env
 .env.local
 .env.*.local
-.env.development
-.env.test
-.env.production
 
-# --- EXPO / REACT NATIVE ---
-node_modules/
-.expo/
-dist/
-npm-debug.*
-yarn-error.*
-
-# --- ANDROID & IOS (Se você fizer builds locais) ---
-android/
-ios/
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-*.orig.*
-
-# --- VERCEL ---
-.vercel
-
-# --- SISTEMA ---
+# OS
 .DS_Store
 Thumbs.db
+
+# Android build
+android/
+ios/
+
+# Metro bundler cache
+.metro-health-check*
