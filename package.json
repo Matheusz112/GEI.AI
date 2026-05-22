@@ -9,7 +9,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web"
   },
- "dependencies": {
+  "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "expo-navigation-bar": "~5.0.10",
     "expo-camera": "~17.0.10",
@@ -30,5 +30,8 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.0"
+  },
+  "resolutions": {
+    "lru-cache": "10.0.2"
   }
 }
