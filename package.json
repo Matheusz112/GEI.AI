@@ -35,6 +35,7 @@
   },
   "resolutions": {
     "lru-cache": "10.0.2",
-    "@expo/config-plugins": "~8.0.0"
+    "@expo/config-plugins": "~8.0.0",
+    "metro-runtime": "0.83.2"
   }
 }
