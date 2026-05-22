@@ -1,0 +1,25 @@
+{
+  "project_info": {
+    "project_number": "123456789012",
+    "project_id": "dummy-project",
+    "storage_bucket": "dummy-project.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123456789012:android:abcdef123456",
+        "android_client_info": {
+          "package_name": "com.matheus.geiai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDummyKey"
+        }
+      ],
+      "services": {}
+    }
+  ],
+  "configuration_version": "1"
+}
