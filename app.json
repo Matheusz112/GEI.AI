@@ -1,38 +1,58 @@
 {
   "expo": {
     "name": "GEI.AI",
-    "slug": "cordeiro",
-    "version": "5.0.0",
+    "slug": "gei-ai",
+    "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "backgroundColor": "#060B18"
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0F"
     },
-    "extra": {
-      "eas": {
-        "projectId": "73cce3af-c9c5-4521-9d91-c284184659df"
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.seudominio.geiai",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "O GEI.AI usa o microfone para reconhecimento de voz.",
+        "NSSpeechRecognitionUsageDescription": "O GEI.AI usa reconhecimento de voz para cadastrar produtos.",
+        "NSCameraUsageDescription": "O GEI.AI usa a câmera para ler códigos de barras e identificar produtos."
       }
     },
     "android": {
-      "package": "com.geiaicordeiro.app",
-      "versionCode": 50,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0F"
+      },
+      "package": "com.seudominio.geiai",
       "permissions": [
-        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT",
-        "android.permission.SYSTEM_ALERT_WINDOW"
+        "android.permission.CAMERA"
       ]
     },
     "plugins": [
       [
-        "expo-speech-recognition",
+        "expo-av",
         {
-          "microphonePermission": "Permitir que o GEI.AI use o microfone para comandos de voz e cadastro por voz.",
-          "speechRecognitionPermission": "Permitir que o GEI.AI reconheça sua fala."
+          "microphonePermission": "O GEI.AI usa o microfone para reconhecimento de voz."
         }
-      ]
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "O GEI.AI usa a câmera para ler produtos."
+        }
+      ],
+      "expo-speech-recognition",
+      "expo-secure-store",
+      "expo-local-authentication"
     ],
-    "platforms": ["ios", "android"]
+    "extra": {
+      "eas": {
+        "projectId": "feb7a18a-2e87-4d1c-a4ad-18d9747e9fb5"
+      }
+    }
   }
 }
