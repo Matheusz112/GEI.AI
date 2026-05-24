@@ -2,8 +2,7 @@
   "build": {
     "preview": {
       "android": {
-        "buildType": "apk",
-        "distribution": "internal"
+        "buildType": "apk"
       },
       "node": "20.19.4",
       "env": {
@@ -12,20 +11,11 @@
     },
     "production": {
       "android": {
-        "buildType": "aab",
-        "distribution": "store"
+        "buildType": "app-bundle"
       },
       "node": "20.19.4",
       "env": {
         "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "android": {
-        "serviceAccount": "./google-services.json",
-        "track": "internal"
       }
     }
   }
