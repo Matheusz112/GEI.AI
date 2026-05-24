@@ -1490,7 +1490,7 @@ const CalculatorModal = ({ visible, onClose, onResult, T, fontScale }) => {
   );
 };
 
-const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale, notifOn, setNotifOn, TAB_SAFE, onGenerateQR, onViewAuditLogs, onEnableBiometrics, biometricEnabled, onChangePassword, userData, fifoMode, setFifoMode }) => {
+const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale, notifOn, setNotifOn, TAB_SAFE, onGenerateQR, onViewAuditLogs, onEnableBiometrics, biometricEnabled, onChangePassword, userData, fifoMode, setFifoMode, micSoundEnabled, setMicSoundEnabled, micVibrationEnabled, setMicVibrationEnabled, micSoundVolume, setMicSoundVolume, elevenLabsQuota, onFetchQuota }) => {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [currentPass, setCurrentPass] = useState('');
   const [newPass, setNewPass] = useState('');
@@ -1530,6 +1530,136 @@ const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale,
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Tamanho da Fonte</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.blue }}>{Math.round(fontScale * 100)}%</Text></View>
         <View style={{ flexDirection: 'row', gap: 10 }}>{[0.85, 1, 1.15].map(s => (<TouchableOpacity key={s} onPress={() => setFontScale(s)} style={{ flex: 1, height: 50, borderRadius: 12, backgroundColor: fontScale === s ? T.blueMid : T.bgInput, borderWidth: 1.5, borderColor: fontScale === s ? T.blue : T.border, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 14 * s, fontWeight: '900', color: fontScale === s ? T.blue : T.textSub }}>Aa</Text></TouchableOpacity>))}</View>
       </View>
+      
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
+        <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Configurações de Microfone</Text>
+        
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Som ao Ativar Microfone</Text>
+            <Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Tocar som quando o reconhecimento iniciar</Text>
+          </View>
+          <Switch 
+            value={micSoundEnabled} 
+            onValueChange={setMicSoundEnabled} 
+            trackColor={{ false: T.border, true: T.blue + '80' }} 
+            thumbColor={micSoundEnabled ? T.blue : T.textMuted} 
+          />
+        </View>
+
+        {micSoundEnabled && (
+          <View style={{ marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Volume do Som</Text>
+              <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.blue }}>{Math.round(micSoundVolume * 100)}%</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {[0.3, 0.6, 1.0].map(v => (
+                <TouchableOpacity 
+                  key={v} 
+                  onPress={() => setMicSoundVolume(v)} 
+                  style={{ 
+                    flex: 1, 
+                    height: 50, 
+                    borderRadius: 12, 
+                    backgroundColor: micSoundVolume === v ? T.blueMid : T.bgInput, 
+                    borderWidth: 1.5, 
+                    borderColor: micSoundVolume === v ? T.blue : T.border, 
+                    justifyContent: 'center', 
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                >
+                  <MaterialCommunityIcons 
+                    name={v === 0.3 ? 'volume-low' : v === 0.6 ? 'volume-medium' : 'volume-high'} 
+                    size={20} 
+                    color={micSoundVolume === v ? T.blue : T.textSub} 
+                  />
+                  <Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: micSoundVolume === v ? T.blue : T.textSub }}>
+                    {v === 0.3 ? 'Baixo' : v === 0.6 ? 'Médio' : 'Alto'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderColor: T.border, paddingTop: 16 }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Vibração ao Reconhecer</Text>
+            <Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Vibrar o dispositivo quando iniciar o reconhecimento</Text>
+          </View>
+          <Switch 
+            value={micVibrationEnabled} 
+            onValueChange={setMicVibrationEnabled} 
+            trackColor={{ false: T.border, true: T.blue + '80' }} 
+            thumbColor={micVibrationEnabled ? T.blue : T.textMuted} 
+          />
+        </View>
+      </View>
+
+      <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: '#10B981' + '30', marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: '#10B981' + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#10B981' + '40' }}>
+            <MaterialCommunityIcons name="robot-outline" size={22} color="#10B981" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.text }}>Cotas ElevenLabs</Text>
+            <Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Uso de caracteres TTS</Text>
+          </View>
+          <TouchableOpacity 
+            onPress={onFetchQuota}
+            style={{ padding: 8, backgroundColor: '#10B981' + '20', borderRadius: 10 }}
+          >
+            <Feather name="refresh-cw" size={18} color="#10B981" />
+          </TouchableOpacity>
+        </View>
+        
+        {elevenLabsQuota ? (
+          <View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Caracteres usados:</Text>
+              <Text style={{ fontSize: 13 * fontScale, color: T.text, fontWeight: '700' }}>{elevenLabsQuota.characterCount.toLocaleString()}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Limite do plano:</Text>
+              <Text style={{ fontSize: 13 * fontScale, color: T.text, fontWeight: '700' }}>{elevenLabsQuota.characterLimit.toLocaleString()}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Restantes:</Text>
+              <Text style={{ fontSize: 13 * fontScale, color: '#10B981', fontWeight: '900' }}>{elevenLabsQuota.remaining.toLocaleString()}</Text>
+            </View>
+            <View style={{ height: 8, backgroundColor: T.bgInput, borderRadius: 8, overflow: 'hidden' }}>
+              <View style={{ 
+                width: `${elevenLabsQuota.percentUsed}%`, 
+                height: '100%', 
+                backgroundColor: parseFloat(elevenLabsQuota.percentUsed) > 90 ? T.red : parseFloat(elevenLabsQuota.percentUsed) > 70 ? T.amber : '#10B981',
+                borderRadius: 8 
+              }} />
+            </View>
+            <Text style={{ fontSize: 11 * fontScale, color: T.textMuted, marginTop: 6, textAlign: 'center' }}>
+              {elevenLabsQuota.percentUsed}% usado
+            </Text>
+          </View>
+        ) : (
+          <TouchableOpacity 
+            onPress={onFetchQuota}
+            style={{ 
+              padding: 14, 
+              backgroundColor: '#10B981' + '15', 
+              borderRadius: 12, 
+              alignItems: 'center',
+              borderWidth: 1.5,
+              borderColor: '#10B981' + '30'
+            }}
+          >
+            <Text style={{ fontSize: 13 * fontScale, color: '#10B981', fontWeight: '700' }}>
+              Toque para carregar cotas
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      
       <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: T.border, marginBottom: 16 }}>
         <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.textSub, textTransform: 'uppercase', marginBottom: 16, letterSpacing: 0.8 }}>Automação e Dados</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}><View style={{ flex: 1, paddingRight: 10 }}><Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Notificações de Ruptura</Text><Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Alertar quando um produto estiver próximo de acabar.</Text></View><Switch value={notifOn} onValueChange={setNotifOn} trackColor={{ false: T.border, true: T.blue + '80' }} thumbColor={notifOn ? T.blue : T.textMuted} /></View>
@@ -2967,12 +3097,21 @@ const isCorrectCmd = (text) => {
   const n = stripAccents(text||'');
   return ['corrigir','mudar','errado','errada','incorreto','nao','voltar','repetir','de novo','trocar','refazer'].some(w=>n.includes(w));
 };
+const isClosePanelCmd = (text) => {
+  const n = stripAccents(text||'');
+  return ['fechar painel','fechar o painel','fecha painel','encerrar painel','sair do painel','fecha o painel'].some(w=>n.includes(w));
+};
+const isOpenPanelCmd = (text) => {
+  const n = stripAccents(text||'');
+  return ['abrir painel','abrir o painel','abre painel','abre o painel','ativar painel','abra painel','abra o painel'].some(w=>n.includes(w));
+};
 
 // ── Estados do motor ─────────────────────────────────────────────────────────
 const VS = {
   IDLE:'idle', PROD:'product', QTY:'qty',
   DATE:'date', GIRO:'giro', CONFIRM:'confirm', SAVING:'saving',
   FIFO_MATCH:'fifo_match', EDIT_WHAT:'edit_what', EDIT_VALUE:'edit_value',
+  CORRECT_FIELD:'correct_field', CORRECT_VALUE:'correct_value', // ✅ correção inteligente mid-flow
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2982,6 +3121,7 @@ const VoiceAssistant = ({
   visible, onClose, onComplete, T, fontScale,
   setProdName, setGiro, setValidade, setQtd, setWStep,
   fromWakeWord, stockData, scannedEAN, doUpdateExisting,
+  micSoundEnabled, micVibrationEnabled, micSoundVolume,
 }) => {
   const [voiceEngine, setVoiceEngine] = useState('native');
   const voiceEngineRef = useRef('native');
@@ -2995,6 +3135,10 @@ const VoiceAssistant = ({
   // Dados coletados
   const dataRef = useRef({ nome:'', qty:'', date:'', giro:'Médio giro' });
   const [collected, setCollected] = useState({ nome:'', qty:'', date:'', giro:'' });
+
+  // ✅ Correção inteligente: guarda qual etapa retomar e qual campo está sendo corrigido
+  const lastCompletedStepRef = useRef(VS.IDLE); // última etapa concluída antes do "corrigir"
+  const correctingFieldRef   = useRef(null);    // 'nome' | 'qty' | 'date' | 'giro' | null
 
   // UI
   const [listening, setListening] = useState(false);
@@ -3031,15 +3175,25 @@ const VoiceAssistant = ({
   const recordingRef = useRef(null);
   const listeningRef = useRef(false);
   const autoRestartRef = useRef(null);
+  const isStartingMicRef = useRef(false); // ✅ guard: evita start() concorrente
+  const lastRestartRef   = useRef(0);     // ✅ cooldown: timestamp do último restart
+  const visibleRef       = useRef(false); // ✅ sincroniza visibilidade para callbacks async
+  const listenTimeoutsRef = useRef([]);   // ✅ rastreia todos os setTimeout de listenAfterSpeak
+  const closingRef        = useRef(false); // ✅ trava definitiva: true após primeira chamada de close
 
   // ── TTS ──────────────────────────────────────────────────────────────────
   const speak = useCallback((text, onDone) => {
+    if (!visibleRef.current || closingRef.current) return; // ✅ não fala se modal fechou
     isTtsActiveRef.current = true;
-    const wrapped = (...args) => { isTtsActiveRef.current = false; if (onDone) onDone(...args); };
+    const wrapped = (...args) => {
+      isTtsActiveRef.current = false;
+      if (!visibleRef.current || closingRef.current) return; // ✅ não executa callback se fechou durante TTS
+      if (onDone) onDone(...args);
+    };
     try {
       setLastSpoken(text);
       speakWithElevenLabs(text, wrapped);
-    } catch { isTtsActiveRef.current = false; if (onDone) setTimeout(onDone, 100); }
+    } catch { isTtsActiveRef.current = false; if (onDone && visibleRef.current && !closingRef.current) setTimeout(onDone, 100); }
   }, []);
 
   // ── Pulso animado ─────────────────────────────────────────────────────────
@@ -3108,16 +3262,41 @@ const VoiceAssistant = ({
   }, []);
 
   // ── Motor nativo ───────────────────────────────────────────────────────────
-  const onSpeechStart   = useCallback(() => { setListening(true); listeningRef.current=true; startPulse(); }, [startPulse]);
+  const onSpeechStart   = useCallback(() => {
+    isStartingMicRef.current = false; // start confirmado pelo SO
+    setListening(true); listeningRef.current = true; startPulse();
+  }, [startPulse]);
+
+  // ── Agenda restart seguro com cooldown e single-timer ─────────────────────
+  const _scheduleRestart = useCallback((delayMs = 900) => {
+    // Cancela qualquer timer pendente antes de agendar novo (evita acúmulo)
+    if (autoRestartRef.current) { clearTimeout(autoRestartRef.current); autoRestartRef.current = null; }
+    // Cooldown mínimo global de 700ms entre restarts consecutivos
+    const sinceLastRestart = Date.now() - lastRestartRef.current;
+    const effectiveDelay   = Math.max(delayMs, 700 - sinceLastRestart);
+    autoRestartRef.current = setTimeout(() => {
+      autoRestartRef.current = null;
+      if (!visibleRef.current || closingRef.current) return; // ✅ modal fechou
+      if (isTtsActiveRef.current) return;           // ✅ TTS falando, não inicia mic
+      if (isStartingMicRef.current) return;         // ✅ já em processo de start
+      if (listeningRef.current) return;             // ✅ já ouvindo
+      const cur = vsStateRef.current;
+      if (cur === VS.IDLE || cur === VS.SAVING) return; // ✅ não reinicia em idle/saving
+      startNativeListening();
+    }, effectiveDelay);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const onSpeechEnd     = useCallback(() => {
-    setListening(false); listeningRef.current=false; stopPulse();
-    // Auto-reinicia escuta se ainda em processo de cadastro (nao IDLE/SAVING)
+    isStartingMicRef.current = false;
+    setListening(false); listeningRef.current = false; stopPulse();
     const cur = vsStateRef.current;
     if (cur !== VS.IDLE && cur !== VS.SAVING) {
-      autoRestartRef.current = setTimeout(() => { if (!isTtsActiveRef.current) startNativeListening(); }, 800);
+      _scheduleRestart(900);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopPulse]);
+  }, [stopPulse, _scheduleRestart]);
+
   const onSpeechResult  = useCallback((event) => {
     const raw = event?.results?.[0]?.transcript || '';
     const text = normalizeVoiceInput(raw);
@@ -3125,28 +3304,46 @@ const VoiceAssistant = ({
     if (event.isFinal) handleVoiceInput(text);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   const onSpeechError = useCallback((event) => {
+    isStartingMicRef.current = false;
     setListening(false); listeningRef.current = false; stopPulse();
     const code = event?.error || '';
-    if (['no-match','network','aborted'].includes(code)) {
-      if (vsStateRef.current !== VS.IDLE && vsStateRef.current !== VS.SAVING) {
-        autoRestartRef.current = setTimeout(() => startNativeListening(), 900);
-      }
+    if (['no-match', 'network', 'aborted'].includes(code)) {
+      _scheduleRestart(1000);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stopPulse]);
+  }, [stopPulse, _scheduleRestart]);
 
   const startNativeListening = async () => {
-    if (listeningRef.current || isTtsActiveRef.current) return; // aguarda TTS
+    if (!visibleRef.current || closingRef.current) return; // ✅ modal fechou, não inicia
+    if (isStartingMicRef.current) return;         // ✅ já em processo de start (evita concorrência)
+    if (listeningRef.current) return;             // ✅ já ouvindo
+    if (isTtsActiveRef.current) return;           // ✅ aguarda TTS terminar
+    // Cooldown mínimo: 500ms entre starts consecutivos
+    const now = Date.now();
+    if (now - lastRestartRef.current < 500) return;
+    isStartingMicRef.current = true;
+    lastRestartRef.current   = now;
     try {
       const ok = await requestMicPermission();
-      if (!ok) { setErrorMsg('Permissão de microfone negada'); return; }
+      if (!ok) { isStartingMicRef.current = false; setErrorMsg('Permissão de microfone negada'); return; }
+      if (!visibleRef.current || closingRef.current || listeningRef.current) { isStartingMicRef.current = false; return; } // ✅ re-check após await
       setTranscript(''); setErrorMsg('');
-      playAudioR(); // toca audior.mp3 ao ativar microfone (so dentro do VoiceAssistant)
-      await ExpoSpeechRecognitionModule.start({ lang:'pt-BR', interimResults:true, continuous:false });
-    } catch { /* ignora */ }
+      if (micSoundEnabled) {
+        playAudioR(micSoundVolume, micVibrationEnabled); // toca audior.mp3 com configurações personalizadas
+      } else if (micVibrationEnabled) {
+        try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
+      }
+      await ExpoSpeechRecognitionModule.start({ lang: 'pt-BR', interimResults: true, continuous: false });
+      // onSpeechStart vai setar isStartingMicRef.current = false quando o SO confirmar
+    } catch {
+      isStartingMicRef.current = false; // ✅ libera guard em caso de falha
+    }
   };
   const stopNativeListening = async () => {
+    isStartingMicRef.current = false;
+    if (autoRestartRef.current) { clearTimeout(autoRestartRef.current); autoRestartRef.current = null; }
     try { await ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
     setListening(false); listeningRef.current = false; stopPulse();
   };
@@ -3161,7 +3358,11 @@ const VoiceAssistant = ({
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       recordingRef.current = recording;
       setIsRecording(true); setListening(true); setTranscript(''); setErrorMsg(''); startPulse();
-      playAudioR(); // toca audior.mp3 ao ativar microfone (so dentro do VoiceAssistant)
+      if (micSoundEnabled) {
+        playAudioR(micSoundVolume, micVibrationEnabled); // toca audior.mp3 com configurações personalizadas
+      } else if (micVibrationEnabled) {
+        try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
+      }
     } catch { setErrorMsg('Erro ao iniciar gravação'); }
   };
   const stopDeepgramRecording = async () => {
@@ -3201,11 +3402,17 @@ const VoiceAssistant = ({
   };
 
   const listenAfterSpeak = useCallback((delay=1300) => {
-    // Toca o beep suave indicando que o GEI esta pronto para ouvir
-    setTimeout(() => playListenBeep(), Math.max(0, delay - 180));
-    setTimeout(() => {
+    if (!visibleRef.current || closingRef.current) return; // ✅ modal fechou antes de chamar
+    const t1 = setTimeout(() => {
+      listenTimeoutsRef.current = listenTimeoutsRef.current.filter(t => t !== t1);
+      if (visibleRef.current && !closingRef.current) playListenBeep();
+    }, Math.max(0, delay - 180));
+    const t2 = setTimeout(() => {
+      listenTimeoutsRef.current = listenTimeoutsRef.current.filter(t => t !== t2);
+      if (!visibleRef.current || closingRef.current) return; // ✅ garante que modal ainda está aberto
       if (voiceEngineRef.current === 'native') startNativeListening();
     }, delay);
+    listenTimeoutsRef.current.push(t1, t2); // ✅ registra para cancelamento
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3229,6 +3436,19 @@ const VoiceAssistant = ({
     if (isCancelCmd(text)) {
       speak('Tudo bem, cancelado!');
       setTimeout(() => { setVsStateBoth(VS.IDLE); onClose(); }, 1200);
+      return;
+    }
+
+    // Comando para fechar painel
+    if (isClosePanelCmd(text)) {
+      speak('Fechando o painel agora!');
+      setTimeout(() => { setVsStateBoth(VS.IDLE); onClose(); }, 1000);
+      return;
+    }
+
+    // Comando para abrir painel (já está aberto, confirmar)
+    if (isOpenPanelCmd(text)) {
+      speak('O painel já está aberto! Como posso ajudar?', () => listenAfterSpeak());
       return;
     }
 
@@ -3431,7 +3651,9 @@ const VoiceAssistant = ({
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   useEffect(() => {
+    visibleRef.current = visible; // ✅ sempre sincronizado com prop visible
     if (visible) {
+      closingRef.current = false;  // ✅ reset da trava de fechamento ao abrir
       slideA.setValue(WIN.height); opacA.setValue(0);
       Animated.parallel([
         Animated.spring(slideA, { toValue:0, tension:65, friction:11, useNativeDriver:false }),
@@ -3440,6 +3662,8 @@ const VoiceAssistant = ({
       dataRef.current = { nome:'', qty:'', date:'', giro:'Médio giro' };
       setCollected({ nome:'', qty:'', date:'', giro:'' });
       setTranscript(''); setErrorMsg(''); retryRef.current = 0;
+      isStartingMicRef.current = false; // ✅ limpa guard ao abrir
+      lastRestartRef.current   = 0;     // ✅ zera cooldown ao abrir
       if (fromWakeWord) {
         // Wake word ja detectado: pula IDLE, ativa mic e vai direto para cadastro
         setVsStateBoth(VS.PROD);
@@ -3451,10 +3675,25 @@ const VoiceAssistant = ({
         });
       }
     } else {
+      // ✅ TRAVA DEFINITIVA: qualquer callback pendente que cheque closingRef vai abortar
+      closingRef.current = true;
+      // ✅ Cancela ABSOLUTAMENTE TODOS os timers e estados pendentes
+      // 1. Para TTS imediatamente — evita que o onDone dispare listenAfterSpeak após fechar
+      isTtsActiveRef.current = false;
+      try { Speech.stop(); } catch { /* noop */ }
+      // 2. Cancela timers de auto-restart
       if (autoRestartRef.current) { clearTimeout(autoRestartRef.current); autoRestartRef.current = null; }
+      // 3. Cancela TODOS os timers de listenAfterSpeak
+      listenTimeoutsRef.current.forEach(t => clearTimeout(t));
+      listenTimeoutsRef.current = [];
+      // 4. Reseta guards de concorrência
+      isStartingMicRef.current = false;
+      // 5. Para gravação Deepgram se ativa
       if (recordingRef.current) { recordingRef.current.stopAndUnloadAsync().catch(()=>{}); recordingRef.current = null; }
+      // 6. Para reconhecimento nativo (o `end` vai disparar mas visibleRef.current=false já bloqueia o restart)
       stopNativeListening();
       stopPulse();
+      setVsStateBoth(VS.IDLE); // ✅ força IDLE para bloquear _scheduleRestart via vsStateRef
       setIsRecording(false); setListening(false); setIsProcessing(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3744,6 +3983,32 @@ const DEEPGRAM_API_KEY = '99ddf828d4529173c6396612133bc671247a3966';
 const ELEVEN_LABS_API_KEY = 'sk_5eeaa17369322e234f74a50aff06a52d6e6a2c5edb3878b9';
 const ELEVEN_LABS_VOICE_ID = 'iP95p4xoKVk53GoZ742B'; // Premium voice — alta qualidade
 
+// ─── FUNÇÃO PARA BUSCAR COTAS DO ELEVEN LABS ──────────────────────────────────
+const fetchElevenLabsQuota = async () => {
+  try {
+    const response = await fetch('https://api.elevenlabs.io/v1/user/subscription', {
+      method: 'GET',
+      headers: {
+        'xi-api-key': ELEVEN_LABS_API_KEY,
+      },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        characterCount: data.character_count || 0,
+        characterLimit: data.character_limit || 0,
+        remaining: (data.character_limit || 0) - (data.character_count || 0),
+        percentUsed: data.character_limit ? ((data.character_count / data.character_limit) * 100).toFixed(1) : 0,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Erro ao buscar cotas ElevenLabs:', error);
+    return null;
+  }
+};
+
 // ─── WEB AUDIOCONTEXT — unlock automático no primeiro uso de microfone ────────
 // Chrome bloqueia audio.play() até que haja interação humana. O microfone
 // (Speech Recognition) conta como interação — ao liberar, desbloqueamos o ctx.
@@ -3766,8 +4031,9 @@ const _unlockWebAudio = () => {
 let _elCurrentSound = null;
 
 // --- SOM audior.mp3: toca quando reconhecimento ativa (so dentro do VoiceAssistant) ---
+// Agora com controle de volume e vibração
 let _audioRSound = null;
-const playAudioR = async () => {
+const playAudioR = async (volume = 0.9, vibrate = true) => {
   try {
     if (_audioRSound) {
       try { await _audioRSound.stopAsync(); await _audioRSound.unloadAsync(); } catch { /* noop */ }
@@ -3776,7 +4042,7 @@ const playAudioR = async () => {
     try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch { /* noop */ }
     const { sound } = await Audio.Sound.createAsync(
       require('./assets/audior.mp3'),
-      { shouldPlay: true, volume: 0.9 }
+      { shouldPlay: true, volume: Math.max(0, Math.min(1, volume)) } // Garante volume entre 0 e 1
     );
     _audioRSound = sound;
     sound.setOnPlaybackStatusUpdate(async (status) => {
@@ -3785,6 +4051,13 @@ const playAudioR = async () => {
         if (_audioRSound === sound) _audioRSound = null;
       }
     });
+    
+    // Vibração controlável
+    if (vibrate) {
+      try { 
+        Vibration.vibrate([40, 30, 60]); 
+      } catch { /* noop */ }
+    }
   } catch { /* falha silenciosa */ }
 };
 
@@ -4008,16 +4281,50 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
   const didFireRef      = useRef(false);   // evita disparos duplos
   const isStartingRef   = useRef(false);   // evita start concorrente
   const failCountRef    = useRef(0);       // backoff exponencial em falhas
+  const isMasterRef     = useRef(false);   // ✅ true só quando este hook é dono do mic
+  const lastNativeStop  = useRef(0);       // ✅ timestamp do último stop, para cooldown
 
   onWakeRef.current = onWakeWord;
 
+  // ── Agendador seguro — cancela timer anterior antes de criar novo ─────────
+  const _safeRestart = useCallback((delayMs) => {
+    if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+    if (!enabledRef.current) return;
+    restartTimerRef.current = setTimeout(async () => {
+      restartTimerRef.current = null;
+      if (!enabledRef.current || isStartingRef.current || didFireRef.current) return;
+      // Cooldown extra: garante >= 500ms desde o último stop
+      const msSinceStop = Date.now() - lastNativeStop.current;
+      if (msSinceStop < 500) {
+        _safeRestart(500 - msSinceStop);
+        return;
+      }
+      isMasterRef.current   = true;
+      isStartingRef.current = true;
+      try {
+        await ExpoSpeechRecognitionModule.start({ lang: 'pt-BR', interimResults: true, continuous: false });
+        failCountRef.current = 0;
+        setIsAlwaysListening(true);
+      } catch {
+        isMasterRef.current   = false;
+        isStartingRef.current = false;
+        failCountRef.current  = Math.min(failCountRef.current + 1, 8);
+        // Tenta novamente com backoff maior
+        _safeRestart(Math.min(1200 + failCountRef.current * 600, 8000));
+      }
+    }, delayMs);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Resultado do reconhecimento nativo ──────────────────────────────────
   _useSpeechEventSafe('result', (event) => {
-    if (!enabledRef.current || didFireRef.current) return;
+    if (!enabledRef.current || !isMasterRef.current || didFireRef.current) return; // ✅ só age se for dono
     const text = event?.results?.[0]?.transcript || '';
     if (detectWakeWord(text)) {
-      didFireRef.current = true;
+      didFireRef.current    = true;
       isStartingRef.current = false;
+      isMasterRef.current   = false;
+      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
       try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
       setIsAlwaysListening(false);
       playListenBeep();
@@ -4028,27 +4335,15 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
   // ── Fim do reconhecimento nativo → reiniciar loop ────────────────────────
   _useSpeechEventSafe('end', () => {
     if (Platform.OS === 'web') return;
+    lastNativeStop.current = Date.now(); // ✅ registra timestamp do stop
+    if (!isMasterRef.current) return;    // ✅ ignora eventos de outros donos do mic
+    isMasterRef.current   = false;
     isStartingRef.current = false;
     setIsAlwaysListening(false);
     if (!enabledRef.current) return;
-    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-    // Backoff exponencial: aumenta delay conforme falhas (max 5s)
-    const delay = Math.min(600 + failCountRef.current * 400, 5000);
-    restartTimerRef.current = setTimeout(async () => {
-      if (!enabledRef.current || isStartingRef.current) return;
-      didFireRef.current = false;
-      isStartingRef.current = true;
-      try {
-        await ExpoSpeechRecognitionModule.start({
-          lang: 'pt-BR', interimResults: true, continuous: false,
-        });
-        failCountRef.current = 0;
-        setIsAlwaysListening(true);
-      } catch {
-        isStartingRef.current = false;
-        failCountRef.current = Math.min(failCountRef.current + 1, 8);
-      }
-    }, delay);
+    // Backoff exponencial: aumenta delay conforme falhas (max 6s)
+    const delay = Math.min(700 + failCountRef.current * 500, 6000);
+    _safeRestart(delay);
   });
 
   // ── Web Speech API (Chrome) ────────────────────────────────────────────
@@ -4071,9 +4366,12 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
         setIsAlwaysListening(false);
         webRecRef.current = null;
         if (enabledRef.current) {
+          // ✅ cancela timer anterior antes de criar novo
+          if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
           restartTimerRef.current = setTimeout(() => {
+            restartTimerRef.current = null;
             if (enabledRef.current) startWebSpeech();
-          }, 600);
+          }, 700);
         }
       };
       rec.onerror  = (e) => {
@@ -4082,9 +4380,12 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
         // 'not-allowed' / 'service-not-allowed' = sem permissão, não tenta novamente
         const fatal = e.error === 'not-allowed' || e.error === 'service-not-allowed';
         if (!fatal && e.error !== 'aborted' && enabledRef.current) {
+          // ✅ cancela timer anterior antes de criar novo
+          if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
           // 'network' ou 'audio-capture' → delay maior para evitar loop rápido
-          const delay = (e.error === 'network' || e.error === 'audio-capture') ? 3000 : 900;
+          const delay = (e.error === 'network' || e.error === 'audio-capture') ? 3000 : 1000;
           restartTimerRef.current = setTimeout(() => {
+            restartTimerRef.current = null;
             if (enabledRef.current) startWebSpeech();
           }, delay);
         }
@@ -4111,7 +4412,7 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
   }, []);
 
   // ── Watchdog: reinicia o sistema de voz se travar ou morrer ────────────
-  // Verifica a cada 8 s — se enabled mas não está ouvindo, reinicia tudo.
+  // Verifica a cada 12s — se enabled mas não está ouvindo, reinicia tudo.
   const watchdogRef = useRef(null);
   const _restartAll = useCallback(() => {
     if (!enabledRef.current) return;
@@ -4119,33 +4420,27 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
       // Abortar sessão atual e criar nova
       if (webRecRef.current) { try { webRecRef.current.abort(); } catch { /* noop */ } webRecRef.current = null; }
       setIsAlwaysListening(false);
-      setTimeout(() => { if (enabledRef.current) startWebSpeech(); }, 400);
+      // ✅ usa _safeRestart para garantir single-timer
+      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+      restartTimerRef.current = setTimeout(() => { restartTimerRef.current = null; if (enabledRef.current) startWebSpeech(); }, 400);
     } else if (SPEECH_RECOGNITION_AVAILABLE) {
       if (isStartingRef.current) return;
-      try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+      isMasterRef.current   = false;
       isStartingRef.current = false;
+      try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
       setIsAlwaysListening(false);
-      setTimeout(async () => {
-        if (!enabledRef.current || isStartingRef.current) return;
-        isStartingRef.current = true;
-        try {
-          await ExpoSpeechRecognitionModule.start({ lang:'pt-BR', interimResults:true, continuous:false });
-          failCountRef.current = 0;
-          setIsAlwaysListening(true);
-        } catch {
-          isStartingRef.current = false;
-          failCountRef.current = Math.min(failCountRef.current + 1, 8);
-        }
-      }, 800);
+      _safeRestart(900);
     }
-  }, [startWebSpeech]);
+  }, [startWebSpeech, _safeRestart]);
 
   // ── Lifecycle: liga/desliga com base em enabled ──────────────────────────
   useEffect(() => {
-    enabledRef.current = enabled;
-    didFireRef.current = false;
+    enabledRef.current    = enabled;
+    didFireRef.current    = false;
     isStartingRef.current = false;
-    failCountRef.current = 0;
+    isMasterRef.current   = false; // ✅ reset dono ao mudar enabled
+    failCountRef.current  = 0;
+    lastNativeStop.current = 0;    // ✅ reset cooldown
     if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
     if (watchdogRef.current) { clearInterval(watchdogRef.current); watchdogRef.current = null; }
 
@@ -4169,6 +4464,7 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
         try {
           const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
           if (!granted || !enabledRef.current || isStartingRef.current) return;
+          isMasterRef.current   = true; // ✅ marca como dono antes de iniciar
           isStartingRef.current = true;
           await ExpoSpeechRecognitionModule.start({
             lang: 'pt-BR', interimResults: true, continuous: false,
@@ -4176,6 +4472,7 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
           failCountRef.current = 0;
           setIsAlwaysListening(true);
         } catch {
+          isMasterRef.current   = false;
           isStartingRef.current = false;
           failCountRef.current = Math.min(failCountRef.current + 1, 8);
         }
@@ -4197,10 +4494,11 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
 
     return () => {
       enabledRef.current = false;
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      isMasterRef.current = false;
+      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
       if (watchdogRef.current) { clearInterval(watchdogRef.current); watchdogRef.current = null; }
     };
-  }, [enabled, startWebSpeech, _restartAll]);
+  }, [enabled, startWebSpeech, _restartAll, _safeRestart]);
 
   return { isAlwaysListening };
 };
@@ -4356,6 +4654,12 @@ export default function App() {
   const [voiceAssistantVisible, setVoiceAssistantVisible] = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceIndicatorVisible, setVoiceIndicatorVisible] = useState(true);
+  
+  // ── Configurações de Microfone ────────────────────────────────────────────
+  const [micSoundEnabled, setMicSoundEnabled] = useState(true);
+  const [micVibrationEnabled, setMicVibrationEnabled] = useState(true);
+  const [micSoundVolume, setMicSoundVolume] = useState(1.0); // 0.0 a 1.0
+  const [elevenLabsQuota, setElevenLabsQuota] = useState(null);
 
   const hideVoiceIndicator = useCallback(async () => {
     setVoiceIndicatorVisible(false);
