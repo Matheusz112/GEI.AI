@@ -8,7 +8,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build": "eas build"
+    "build": "eas build",
+    "build:preview": "eas build -p android --profile preview",
+    "build:production": "eas build -p android --profile production"
   },
   "dependencies": {
     "react": "^18.2.0",
