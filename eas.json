@@ -1,33 +1,32 @@
 {
-  "cli": {
-    "appVersionSource": "remote"
-  },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "node": "22.11.0",
-      "autoIncrement": true,
+    "preview": {
       "android": {
         "buildType": "apk",
-        "withoutCredentials": true
+        "distribution": "internal"
+      },
+      "node": "20.19.4",
+      "env": {
+        "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
       }
     },
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk",
-        "withoutCredentials": true
-      },
-      "node": "22.11.0",
-      "autoIncrement": true
-    },
     "production": {
-      "autoIncrement": true,
-      "node": "22.11.0"
+      "android": {
+        "buildType": "aab",
+        "distribution": "store"
+      },
+      "node": "20.19.4",
+      "env": {
+        "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "android": {
+        "serviceAccount": "./google-services.json",
+        "track": "internal"
+      }
+    }
   }
 }
