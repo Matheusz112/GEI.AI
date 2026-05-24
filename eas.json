@@ -27,7 +27,8 @@
       },
       "env": {
         "YARN_ENABLE_IMMUTABLE_INSTALLS": "false",
-        "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
+        "EAS_BUILD_NO_EXPO_GO_WARNING": "true",
+        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=-Xmx4g"
       }
     }
   }
