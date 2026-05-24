@@ -42,7 +42,7 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "targetSdkVersion": "34",
+            "targetSdkVersion": 34,
             "buildToolsVersion": "34.0.0"
           }
         }
