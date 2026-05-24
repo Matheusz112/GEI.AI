@@ -9,23 +9,21 @@
       "android": {
         "buildType": "apk"
       }
-      "distribution": "internal"
     },
     "preview": {
       "distribution": "internal",
-@@ -14,14 +14,10 @@
+      "android": {
+        "buildType": "apk"
       }
     },
     "production": {
       "autoIncrement": true,
-      "node": "20.18.0",
       "android": {
         "buildType": "apk"
       },
       "env": {
         "YARN_ENABLE_IMMUTABLE_INSTALLS": "false"
       }
-      "autoIncrement": true
     }
   },
   "submit": {
