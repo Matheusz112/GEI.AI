@@ -1,13 +1,13 @@
 {
   "expo": {
-    "name": "GEI - IA Cordeiro",
+    "name": "GEI-IA",
     "slug": "gei-cordeiro",
     "version": "5.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/splash1.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -33,7 +33,7 @@
       }
     },
     "web": {
-      "favicon": "./assets/splash.png"
+      "favicon": "./assets/splash1.png"
     },
     "plugins": [
       [
