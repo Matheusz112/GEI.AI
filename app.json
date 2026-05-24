@@ -28,12 +28,12 @@
         "INTERNET"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/splash.png",
         "backgroundColor": "#ffffff"
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/splash.png"
     },
     "plugins": [
       [
@@ -41,8 +41,10 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0"
+            "targetSdkVersion": 35,
+            "compileSdkVersion": 35,
+            "buildToolsVersion": "35.0.0",
+            "minSdkVersion": 24
           }
         }
       ]
