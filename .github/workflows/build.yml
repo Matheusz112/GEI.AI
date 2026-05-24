@@ -1,0 +1,41 @@
+name: EAS Build Android
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: 'yarn'
+      
+      # ✅ ADICIONE ISTO AQUI
+      - name: 🔐 Create google-services.json from secret
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > google-services.json
+      
+      - name: 📱 Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      
+      - name: 📦 Install dependencies
+        run: yarn install
+      
+      - name: 🔨 Build with EAS
+        run: eas build -p android --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BUILD_NO_EXPO_GO_WARNING: true
