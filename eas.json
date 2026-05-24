@@ -18,5 +18,13 @@
         "EAS_BUILD_NO_EXPO_GO_WARNING": "true"
       }
     }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "production"
+      }
+    }
   }
 }
