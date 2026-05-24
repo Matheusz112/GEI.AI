@@ -1,68 +1,52 @@
 {
   "expo": {
-    "name": "GEI-CORDEIRO",
+    "name": "GEI - IA Cordeiro",
     "slug": "gei-cordeiro",
-    "version": "1.0.0",
+    "version": "5.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0A0A0F"
+      "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.seudominio.geiai",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "O GEI.AI usa o microfone para comandos de voz e reconhecimento.",
-        "NSSpeechRecognitionUsageDescription": "O GEI.AI usa reconhecimento de voz para cadastrar produtos.",
-        "NSCameraUsageDescription": "O GEI.AI usa a câmera para ler códigos de barras e identificar produtos com IA."
-      }
+      "supportsTabletMode": true
     },
     "android": {
+      "package": "com.seudominio.geiai",
+      "versionCode": 6,
+      "orientation": "portrait",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "INTERNET"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0A0A0F"
-      },
-      "package": "com.seudominio.geiai",
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.CAMERA"
-      ]
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "O GEI.AI usa a câmera para ler códigos de barras e identificar produtos com IA."
-        }
-      ],
-      [
-        "expo-speech-recognition",
-        {
-          "microphonePermission": "O GEI.AI precisa acessar seu microfone para comandos de voz.",
-          "speechRecognitionPermission": "O GEI.AI usa reconhecimento de voz para cadastrar produtos."
-        }
-      ],
-      "expo-secure-store",
-      "expo-local-authentication",
       [
         "expo-build-properties",
         {
           "android": {
-            "compileSdkVersion": 34,
-            "targetSdkVersion": 34,
+            "usesCleartextTraffic": true,
+            "targetSdkVersion": "34",
             "buildToolsVersion": "34.0.0"
           }
         }
       ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "feb7a18a-2e87-4d1c-a4ad-18d9747e9fb5"
-      }
-    }
+    ]
   }
 }
