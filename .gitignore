@@ -18,6 +18,9 @@ expo-env.d.ts
 .env.local
 .env.*.local
 
+# Secrets e credenciais
+google-services.json
+
 # OS
 .DS_Store
 Thumbs.db
