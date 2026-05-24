@@ -11,14 +11,15 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTabletMode": true
+      "requireFullScreen": false
     },
     "android": {
       "package": "com.seudominio.geiai",
       "versionCode": 6,
-      "orientation": "portrait",
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
