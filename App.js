@@ -3021,23 +3021,22 @@ const parsePortugueseDate = (raw) => {
       if (!isNaN(n) && n >= 1 && n <= 12) return n;
       return null;
     };
+    // ── nearestYear: devolve o ano mais próximo no futuro para d/m ───────────────────
+    // Lógica: se d/m/anoAtual ainda não passou (ou é hoje) → anoAtual
+    //         se já passou → anoAtual + 1
+    const nearestYear = (d, m) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const candidate = new Date(curYear, m - 1, d);
+      return candidate >= today ? curYear : curYear + 1;
+    };
+
     const resolveYear = (s) => {
       let n = parseInt(s);
       if (isNaN(n)) return curYear;
-      
-      // Correção inteligente de ano: se o ano for menor que o atual e estiver no passado distante, assume-se que é do ciclo atual (2024+)
-      const currentYear = new Date().getFullYear();
-      if (n < currentYear && n > 1900) {
-        // Se for algo como 2006 e estamos em 2024+, provavelmente o usuário quis dizer 2026
-        if (n < 2020) {
-          n = n + 20; 
-        }
-      }
-      
-      if (n >= 2000) return n;
-      if (n >= 100) return n;
-      if (n > 24) return 2000 + n;  // ex: "26" → 2026
-      if (n > 0) return 2000 + n;   // ex: "25" → 2025
+      if (n >= 2000 && n <= 2099) return n;
+      if (n >= 100) return curYear;
+      if (n >= 0 && n <= 99) return 2000 + n;
       return curYear;
     };
 
@@ -3083,7 +3082,7 @@ const parsePortugueseDate = (raw) => {
     const twoNums = t.match(/^\s*(\d{1,2})\s+(\d{1,2})\s*$/);
     if (twoNums) {
       const d = parseInt(twoNums[1]), m = parseInt(twoNums[2]);
-      if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,curYear), m, curYear);
+      if (m >= 1 && m <= 12 && d >= 1) { const y4 = nearestYear(d, m); return fmt(clampDay(d,m,y4), m, y4); }
     }
 
     // ── Estratégia 5: dia (nº) + nome_mês + ano opcional ─────────────────
@@ -3101,7 +3100,7 @@ const parsePortugueseDate = (raw) => {
       const afterMonth  = t.substring(monthEnd).trim();
 
       // Ano (número 4 dígitos ou 2 dígitos depois do mês)
-      let year = curYear;
+      let year = nearestYear(1, month); // padrão: próxima ocorrência do mês
       const yAfter = afterMonth.match(/\b(\d{2,4})\b/);
       if (yAfter) year = resolveYear(yAfter[1]);
       else {
@@ -3129,6 +3128,11 @@ const parsePortugueseDate = (raw) => {
 
       // "ultimo" → último dia do mês
       if (t.includes('ultimo')) day = new Date(year, month, 0).getDate();
+
+      // Se o ano não foi explicitado pelo usuário (veio do nearestYear(1,m)),
+      // recalcula com o dia real para garantir que a data não está no passado.
+      const hasExplicitYear = !!(yAfter || t.match(/\b(20[2-9]\d)\b/) || (t.match(/\b([2-9]\d)\b/) && parseInt((t.match(/\b([2-9]\d)\b/) || [])[1]) > 24));
+      if (!hasExplicitYear) year = nearestYear(clampDay(day, month, year), month);
 
       return fmt(clampDay(day, month, year), month, year);
     }
@@ -4542,7 +4546,13 @@ const VoiceAssistant = ({
   const onSpeechStart   = useCallback(() => {
     isStartingMicRef.current = false; // start confirmado pelo SO
     setListening(true); listeningRef.current = true; startPulse();
-  }, [startPulse]);
+    // ✅ Toca audior.mp3 AQUI — mic já confirmou início, hardware de áudio liberado
+    if (micSoundEnabled) {
+      playAudioR(micSoundVolume, micVibrationEnabled);
+    } else if (micVibrationEnabled) {
+      try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
+    }
+  }, [startPulse, micSoundEnabled, micSoundVolume, micVibrationEnabled]);
 
   // ── Agenda restart seguro com cooldown e single-timer ─────────────────────
   const _scheduleRestart = useCallback((delayMs = 900) => {
@@ -4607,11 +4617,8 @@ const VoiceAssistant = ({
       if (!ok) { isStartingMicRef.current = false; setErrorMsg('Permissão de microfone negada'); return; }
       if (!visibleRef.current || closingRef.current || listeningRef.current) { isStartingMicRef.current = false; return; } // ✅ re-check após await
       setTranscript(''); setErrorMsg('');
-      if (micSoundEnabled) {
-        playAudioR(micSoundVolume, micVibrationEnabled); // toca audior.mp3 com configurações personalizadas
-      } else if (micVibrationEnabled) {
-        try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
-      }
+      // ✅ Som/vibração tocados no onSpeechStart (após mic confirmar inicio)
+      // Tocar ANTES do start() causava conflito de hardware de áudio no Android
       await ExpoSpeechRecognitionModule.start({ lang: 'pt-BR', interimResults: true, continuous: false });
       // onSpeechStart vai setar isStartingMicRef.current = false quando o SO confirmar
     } catch {
@@ -4635,11 +4642,14 @@ const VoiceAssistant = ({
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       recordingRef.current = recording;
       setIsRecording(true); setListening(true); setTranscript(''); setErrorMsg(''); startPulse();
-      if (micSoundEnabled) {
-        playAudioR(micSoundVolume, micVibrationEnabled); // toca audior.mp3 com configurações personalizadas
-      } else if (micVibrationEnabled) {
-        try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
-      }
+      // ✅ Aguarda 150ms para o hardware de gravação liberar antes de tocar áudio
+      setTimeout(() => {
+        if (micSoundEnabled) {
+          playAudioR(micSoundVolume, micVibrationEnabled);
+        } else if (micVibrationEnabled) {
+          try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
+        }
+      }, 150);
     } catch { setErrorMsg('Erro ao iniciar gravação'); }
   };
   const stopDeepgramRecording = async () => {
@@ -5174,9 +5184,271 @@ const VoiceAssistant = ({
             <_SafeSpeechEventWrapper eventName="error"  onEvent={onSpeechError} />
           </>
         )}
-        <View style={{ flex:1, backgroundColor:'rgba(0,0,0,0.88)', justifyContent:'flex-end' }}>
+        <View style={{ flex:1, backgroundColor: isLembreteFlow ? 'rgba(0,0,0,0.92)' : 'rgba(0,0,0,0.88)', justifyContent:'flex-end' }}>
           <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
 
+          {/* ══════════════════════════════════════════════════════════════════
+              MODAL LEMBRETE — layout completamente separado, estilo âmbar
+          ══════════════════════════════════════════════════════════════════ */}
+          {isLembreteFlow ? (
+            <Animated.View style={{
+              backgroundColor: T.bgCard,
+              borderTopLeftRadius:40, borderTopRightRadius:40,
+              paddingHorizontal:20, paddingTop:0, paddingBottom:32 + NAV_BAR_H,
+              borderTopWidth:2.5, borderColor:'#F59E0B80',
+              transform:[{ translateY:slideA }], opacity:opacA,
+              shadowColor:'#F59E0B', shadowOffset:{width:0,height:-10},
+              shadowOpacity:0.35, shadowRadius:30, elevation:36,
+            }}>
+
+              {/* ── Tarja superior âmbar com ícone de sino ── */}
+              <View style={{
+                backgroundColor:'#F59E0B', borderTopLeftRadius:38, borderTopRightRadius:38,
+                paddingTop:16, paddingBottom:20, paddingHorizontal:22,
+                alignItems:'center', marginBottom:0,
+              }}>
+                {/* Handle */}
+                <View style={{ width:40, height:4, borderRadius:2, backgroundColor:'rgba(255,255,255,0.4)', marginBottom:14 }} />
+                {/* Ícone + título */}
+                <View style={{ flexDirection:'row', alignItems:'center', gap:12 }}>
+                  <Animated.View style={{
+                    width:54, height:54, borderRadius:18,
+                    backgroundColor: isActive ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.2)',
+                    justifyContent:'center', alignItems:'center',
+                    borderWidth:2, borderColor:'rgba(255,255,255,0.35)',
+                    transform:[{ scale:pulseA }],
+                    shadowColor:'#000', shadowOpacity:isActive?0.4:0, shadowRadius:10,
+                  }}>
+                    {isProcessing
+                      ? <ActivityIndicator size="small" color="#FFF" />
+                      : <MaterialCommunityIcons
+                          name={isActive ? 'microphone' : 'bell-ring'}
+                          size={26} color="#FFF"
+                        />
+                    }
+                  </Animated.View>
+                  <View style={{ flex:1 }}>
+                    <Text style={{ fontSize:9*fontScale, fontWeight:'900', color:'rgba(255,255,255,0.75)', textTransform:'uppercase', letterSpacing:1.6 }}>
+                      {isProcessing ? '⚙️  PROCESSANDO' : isActive ? '🔴  OUVINDO' : '🔔  NOVO LEMBRETE'}
+                    </Text>
+                    <Text style={{ fontSize:15*fontScale, fontWeight:'900', color:'#FFF', marginTop:3 }} numberOfLines={1}>
+                      {STATE_LABEL[vsState]}
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={onClose} style={{ width:34, height:34, borderRadius:12, backgroundColor:'rgba(0,0,0,0.18)', justifyContent:'center', alignItems:'center' }}>
+                    <Feather name="x" size={16} color="#FFF" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* ── Progress steps âmbar ── */}
+                <View style={{ flexDirection:'row', marginTop:18, width:'100%' }}>
+                  {['Texto','Data','Horário','Confirmar'].map((l,i) => {
+                    const si = stepIdx - 1; // stepIdx começa em 1 para lembrete
+                    const done = si > i, active = si === i;
+                    return (
+                      <View key={i} style={{ flex:1, alignItems:'center' }}>
+                        {i>0 && <View style={{ position:'absolute', top:11, left:0, right:'50%', height:2, backgroundColor:si>=i?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.25)' }} />}
+                        {i<3    && <View style={{ position:'absolute', top:11, left:'50%', right:0, height:2, backgroundColor:si>i?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.25)' }} />}
+                        <View style={{
+                          width:22, height:22, borderRadius:11, zIndex:1,
+                          backgroundColor: done ? 'rgba(255,255,255,0.9)' : active ? '#FFF' : 'rgba(255,255,255,0.2)',
+                          justifyContent:'center', alignItems:'center',
+                          borderWidth:1.5, borderColor: active ? '#FFF' : 'transparent',
+                        }}>
+                          {done
+                            ? <Feather name="check" size={11} color="#F59E0B" />
+                            : <Text style={{ fontSize:9, fontWeight:'900', color: active?'#F59E0B':'rgba(255,255,255,0.6)' }}>{i+1}</Text>
+                          }
+                        </View>
+                        <Text style={{ fontSize:8*fontScale, marginTop:4, color: active||done ? '#FFF' : 'rgba(255,255,255,0.55)', fontWeight: active?'900':'600', textAlign:'center' }}>{l}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* ── Corpo do modal ── */}
+              <View style={{ paddingHorizontal:2, paddingTop:16, gap:10 }}>
+
+                {/* Cards de campos coletados */}
+                <View style={{ gap:8 }}>
+                  {[
+                    { key:'texto', label:'Lembrete',  icon:'bell',     emoji:'📝', empty:'Diga o que quer lembrar...' },
+                    { key:'data',  label:'Data',      icon:'calendar', emoji:'📅', empty:'Amanhã, sexta-feira, 15 de julho...' },
+                    { key:'hora',  label:'Horário',   icon:'clock',    emoji:'⏰', empty:'8 da manhã, 2 da tarde, 8 da noite...' },
+                  ].map((f, idx) => {
+                    const isCurrentStep = (
+                      (f.key === 'texto' && vsState === VS.LEM_TEXTO) ||
+                      (f.key === 'data'  && vsState === VS.LEM_DATA)  ||
+                      (f.key === 'hora'  && vsState === VS.LEM_HORA)  ||
+                      (vsState === VS.LEM_CONFIRM)
+                    );
+                    const haVal = !!lemCollected[f.key];
+                    return (
+                      <View key={f.key} style={{
+                        flexDirection:'row', alignItems:'center',
+                        backgroundColor: haVal ? '#F59E0B12' : (isCurrentStep ? '#F59E0B08' : T.bgElevated),
+                        borderRadius:16, padding:14, gap:12,
+                        borderWidth:1.5,
+                        borderColor: haVal ? '#F59E0B50' : (isCurrentStep ? '#F59E0B30' : T.border),
+                      }}>
+                        <View style={{
+                          width:40, height:40, borderRadius:13,
+                          backgroundColor: haVal ? '#F59E0B22' : (isCurrentStep ? '#F59E0B15' : T.bgInput),
+                          justifyContent:'center', alignItems:'center',
+                        }}>
+                          {isCurrentStep && isActive && !haVal
+                            ? <Animated.View style={{ transform:[{scale:pulseA}] }}>
+                                <Text style={{ fontSize:18 }}>{f.emoji}</Text>
+                              </Animated.View>
+                            : <Text style={{ fontSize:18 }}>{haVal ? f.emoji : f.emoji}</Text>
+                          }
+                        </View>
+                        <View style={{ flex:1 }}>
+                          <Text style={{ fontSize:10*fontScale, fontWeight:'900', color: haVal ? '#F59E0B' : T.textMuted, textTransform:'uppercase', letterSpacing:0.8, marginBottom:3 }}>
+                            {f.label}
+                          </Text>
+                          <Text style={{ fontSize:13*fontScale, fontWeight: haVal ? '800' : '500', color: haVal ? T.text : T.textMuted }} numberOfLines={2}>
+                            {lemCollected[f.key] || f.empty}
+                          </Text>
+                        </View>
+                        {haVal && (
+                          <View style={{ width:26, height:26, borderRadius:13, backgroundColor:'#F59E0B20', justifyContent:'center', alignItems:'center' }}>
+                            <Feather name="check" size={13} color="#F59E0B" />
+                          </View>
+                        )}
+                        {isCurrentStep && !haVal && (
+                          <View style={{ width:8, height:8, borderRadius:4, backgroundColor:'#F59E0B', opacity: isActive ? 1 : 0.4 }} />
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {/* Atalhos rápidos de período — visíveis só na etapa de horário */}
+                {vsState === VS.LEM_HORA && (
+                  <View style={{ gap:6 }}>
+                    <Text style={{ fontSize:10*fontScale, fontWeight:'900', color:T.textMuted, textTransform:'uppercase', letterSpacing:1, marginBottom:2 }}>
+                      Atalhos rápidos
+                    </Text>
+                    <View style={{ flexDirection:'row', gap:8 }}>
+                      {[
+                        { label:'Manhã',  hora:'08:00', emoji:'🌅', voz:'8h00' },
+                        { label:'Tarde',  hora:'14:00', emoji:'☀️', voz:'14h00' },
+                        { label:'Noite',  hora:'20:00', emoji:'🌙', voz:'20h00' },
+                      ].map(a => (
+                        <TouchableOpacity key={a.hora}
+                          onPress={() => handleVoiceInput(a.voz)}
+                          activeOpacity={0.75}
+                          style={{
+                            flex:1, paddingVertical:11, borderRadius:14,
+                            backgroundColor: T.bgElevated,
+                            borderWidth:1.5, borderColor:'#F59E0B30',
+                            alignItems:'center', gap:4,
+                          }}>
+                          <Text style={{ fontSize:20 }}>{a.emoji}</Text>
+                          <Text style={{ fontSize:11*fontScale, fontWeight:'800', color:T.text }}>{a.label}</Text>
+                          <Text style={{ fontSize:10*fontScale, fontWeight:'700', color:'#F59E0B' }}>{a.hora}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Transcrição / erro */}
+                {(transcript || errorMsg) ? (
+                  <View style={{ backgroundColor: errorMsg ? T.redGlow : '#F59E0B14', borderRadius:14, padding:12, borderWidth:1, borderColor: errorMsg ? T.red+'30' : '#F59E0B30' }}>
+                    <Text style={{ fontSize:13*fontScale, color: errorMsg ? T.red : '#B45309', fontWeight:'800', textAlign:'center', fontStyle:'italic' }} numberOfLines={2}>
+                      {errorMsg || `"${transcript}"`}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* Seletor motor */}
+                <View style={{ flexDirection:'row', backgroundColor:T.bgInput, borderRadius:14, padding:3 }}>
+                  {[{key:'deepgram',label:'☁️ Deepgram',sub:'Expo Go'},{key:'native',label:'📱 Nativo',sub:'Build'}].map(opt => {
+                    const on = voiceEngine === opt.key;
+                    return (
+                      <TouchableOpacity key={opt.key}
+                        onPress={() => { setVoiceEngine(opt.key); voiceEngineRef.current = opt.key; setErrorMsg(''); setTranscript(''); }}
+                        style={{ flex:1, paddingVertical:8, borderRadius:11, alignItems:'center', backgroundColor:on?'#F59E0B':'transparent' }}>
+                        <Text style={{ fontSize:11*fontScale, fontWeight:'800', color:on?'#FFF':T.textSub }}>{opt.label}</Text>
+                        <Text style={{ fontSize:8*fontScale, color:on?'rgba(255,255,255,0.7)':T.textMuted, marginTop:1 }}>{opt.sub}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Botão mic Deepgram */}
+                {voiceEngine === 'deepgram' && (
+                  <TouchableOpacity onPress={micPress} disabled={isProcessing} activeOpacity={0.82}
+                    style={{ height:54, borderRadius:18, justifyContent:'center', alignItems:'center', flexDirection:'row', gap:10,
+                      backgroundColor: isProcessing ? T.amber : (isRecording ? T.red : '#F59E0B'),
+                      shadowColor: isRecording ? T.red : '#F59E0B', shadowOpacity:0.45, shadowRadius:14, elevation:8, opacity: isProcessing ? 0.9 : 1 }}>
+                    {isProcessing ? <ActivityIndicator color="#FFF" /> : <MaterialCommunityIcons name={isRecording?'stop-circle':'microphone'} size={22} color="#FFF" />}
+                    <Text style={{ color:'#FFF', fontSize:15*fontScale, fontWeight:'900' }}>
+                      {isProcessing ? 'Transcrevendo...' : isRecording ? 'Parar e Enviar' : 'Toque para Falar'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Ações */}
+                <View style={{ flexDirection:'row', gap:8 }}>
+                  <TouchableOpacity onPress={() => handleVoiceInput('cancelar')}
+                    style={{ flex:1, height:48, borderRadius:14, backgroundColor:T.redGlow, justifyContent:'center', alignItems:'center', borderWidth:1, borderColor:T.red+'30' }}>
+                    <Text style={{ color:T.red, fontWeight:'800', fontSize:13*fontScale }}>✕ Cancelar</Text>
+                  </TouchableOpacity>
+                  {vsState === VS.LEM_CONFIRM && (
+                    <>
+                      <TouchableOpacity onPress={() => handleVoiceInput('sim')}
+                        style={{ flex:2, height:48, borderRadius:14, backgroundColor:'#F59E0B', justifyContent:'center', alignItems:'center', shadowColor:'#F59E0B', shadowOpacity:0.45, shadowRadius:10, elevation:6, flexDirection:'row', gap:8 }}>
+                        <Feather name="bell" size={16} color="#FFF" />
+                        <Text style={{ color:'#FFF', fontWeight:'900', fontSize:15*fontScale }}>Salvar Lembrete</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleVoiceInput('corrigir')}
+                        style={{ flex:1, height:48, borderRadius:14, backgroundColor:T.bgElevated, justifyContent:'center', alignItems:'center', borderWidth:1, borderColor:'#F59E0B40' }}>
+                        <Text style={{ color:'#F59E0B', fontWeight:'800', fontSize:12*fontScale }}>Corrigir</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+              </View>
+
+              {/* ── Animação de sucesso (lembrete) ── */}
+              {showSaveAnim && (
+                <Animated.View style={{
+                  position:'absolute', top:0, left:0, right:0, bottom:0,
+                  borderRadius:40, backgroundColor:'rgba(15,10,0,0.97)',
+                  justifyContent:'center', alignItems:'center',
+                  opacity:sOpac, zIndex:999,
+                }}>
+                  <Animated.View style={{ position:'absolute', width:180, height:180, borderRadius:90, borderWidth:2.5, borderColor:'#F59E0B', transform:[{scale:sRing1}], opacity:sRingO1 }} />
+                  <Animated.View style={{ position:'absolute', width:240, height:240, borderRadius:120, borderWidth:1.5, borderColor:'#F59E0B80', transform:[{scale:sRing2}], opacity:sRingO2 }} />
+                  <Animated.View style={{ width:138, height:138, borderRadius:69, backgroundColor:'#F59E0B20', borderWidth:3.5, borderColor:'#F59E0B', justifyContent:'center', alignItems:'center', transform:[{scale:sCircle}], shadowColor:'#F59E0B', shadowOpacity:1, shadowRadius:55, elevation:30 }}>
+                    <Animated.View style={{transform:[{scale:sCheck}]}}>
+                      <MaterialCommunityIcons name="bell-check" size={60} color="#F59E0B" />
+                    </Animated.View>
+                  </Animated.View>
+                  {['⏰','🔔','📅','✨','⭐','🌟','💫','🔔'].map((e,i) => (
+                    <Animated.Text key={i} style={{ position:'absolute', fontSize:22, opacity:sPartO, transform:[{scale:sPartS}],
+                      ...[{top:-90,left:20},{top:-65,right:-50},{top:15,right:-95},{bottom:-75,right:-15},{bottom:-60,left:-55},{top:25,left:-95},{top:-80,left:-45},{bottom:-35,right:-75}][i] }}>
+                      {e}
+                    </Animated.Text>
+                  ))}
+                  <Animated.Text style={{ fontSize:26, fontWeight:'900', color:'#FFF', marginTop:26, opacity:sTextO, transform:[{translateY:sTextY}] }}>
+                    Lembrete Salvo! 🔔
+                  </Animated.Text>
+                  <Animated.Text style={{ fontSize:13, color:'#F59E0B', fontWeight:'700', marginTop:8, opacity:sSubTextO }}>
+                    Vou te avisar na hora certa
+                  </Animated.Text>
+                </Animated.View>
+              )}
+            </Animated.View>
+
+          ) : (
+          /* ══════════════════════════════════════════════════════════════════
+              MODAL PADRÃO — cadastro de produto (layout original mantido)
+          ══════════════════════════════════════════════════════════════════ */
           <Animated.View style={{
             backgroundColor:T.bgCard, borderTopLeftRadius:36, borderTopRightRadius:36,
             paddingHorizontal:22, paddingTop:14, paddingBottom:32 + NAV_BAR_H,
@@ -5237,51 +5509,24 @@ const VoiceAssistant = ({
             </View>
 
             {/* Dados coletados */}
-            <View style={{ backgroundColor:T.bgElevated, borderRadius:20, padding:14, marginBottom:14, gap:8, borderWidth:1, borderColor: isLembreteFlow ? T.amber+'40' : T.border }}>
-              {isLembreteFlow ? (
-                // ── Painel lembrete ──────────────────────────────────────────
-                <>
-                  <View style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:4 }}>
-                    <MaterialCommunityIcons name="bell-ring-outline" size={16} color={T.amber} />
-                    <Text style={{ fontSize:11*fontScale, fontWeight:'900', color:T.amber, textTransform:'uppercase', letterSpacing:1 }}>Criando Lembrete</Text>
+            <View style={{ backgroundColor:T.bgElevated, borderRadius:20, padding:14, marginBottom:14, gap:8, borderWidth:1, borderColor:T.border }}>
+              {[
+                { key:'nome',  label:'Produto',    icon:'package',    empty:'Aguardando...' },
+                { key:'qty',   label:'Quantidade', icon:'layers',     empty:'Aguardando...' },
+                { key:'date',  label:'Vencimento', icon:'calendar',   empty:'Aguardando...' },
+                { key:'giro',  label:'Giro',       icon:'trending-up',empty:'Aguardando...' },
+              ].map(f => (
+                <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
+                  <View style={{ width:32, height:32, borderRadius:10, backgroundColor:collected[f.key]?T.blue+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
+                    <Feather name={f.icon} size={15} color={collected[f.key]?T.blue:T.textMuted} />
                   </View>
-                  {[
-                    { key:'texto', label:'Lembrete', icon:'message-square', empty:'Aguardando descrição...' },
-                    { key:'data',  label:'Data',     icon:'calendar',       empty:'Aguardando data...' },
-                    { key:'hora',  label:'Horário',  icon:'clock',          empty:'Aguardando horário...' },
-                  ].map(f => (
-                    <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
-                      <View style={{ width:32, height:32, borderRadius:10, backgroundColor:lemCollected[f.key]?T.amber+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
-                        <Feather name={f.icon} size={15} color={lemCollected[f.key]?T.amber:T.textMuted} />
-                      </View>
-                      <Text style={{ fontSize:11*fontScale, fontWeight:'700', color:T.textMuted, width:66 }}>{f.label}</Text>
-                      <Text style={{ fontSize:13*fontScale, fontWeight:lemCollected[f.key]?'900':'500', color:lemCollected[f.key]?T.text:T.textMuted, flex:1 }} numberOfLines={2}>
-                        {lemCollected[f.key] || f.empty}
-                      </Text>
-                      {lemCollected[f.key] && <Feather name="check-circle" size={14} color={T.green} />}
-                    </View>
-                  ))}
-                </>
-              ) : (
-                // ── Painel cadastro produto ───────────────────────────────────
-                [
-                  { key:'nome',  label:'Produto',    icon:'package',    empty:'Aguardando...' },
-                  { key:'qty',   label:'Quantidade', icon:'layers',     empty:'Aguardando...' },
-                  { key:'date',  label:'Vencimento', icon:'calendar',   empty:'Aguardando...' },
-                  { key:'giro',  label:'Giro',       icon:'trending-up',empty:'Aguardando...' },
-                ].map(f => (
-                  <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
-                    <View style={{ width:32, height:32, borderRadius:10, backgroundColor:collected[f.key]?T.blue+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
-                      <Feather name={f.icon} size={15} color={collected[f.key]?T.blue:T.textMuted} />
-                    </View>
-                    <Text style={{ fontSize:11*fontScale, fontWeight:'700', color:T.textMuted, width:76 }}>{f.label}</Text>
-                    <Text style={{ fontSize:13*fontScale, fontWeight:collected[f.key]?'900':'500', color:collected[f.key]?T.text:T.textMuted, flex:1 }} numberOfLines={1}>
-                      {collected[f.key] || f.empty}
-                    </Text>
-                    {collected[f.key] && <Feather name="check-circle" size={14} color={T.green} />}
-                  </View>
-                ))
-              )}
+                  <Text style={{ fontSize:11*fontScale, fontWeight:'700', color:T.textMuted, width:76 }}>{f.label}</Text>
+                  <Text style={{ fontSize:13*fontScale, fontWeight:collected[f.key]?'900':'500', color:collected[f.key]?T.text:T.textMuted, flex:1 }} numberOfLines={1}>
+                    {collected[f.key] || f.empty}
+                  </Text>
+                  {collected[f.key] && <Feather name="check-circle" size={14} color={T.green} />}
+                </View>
+              ))}
             </View>
 
             {/* Transcrição / erro */}
@@ -5365,7 +5610,7 @@ const VoiceAssistant = ({
               )}
             </View>
 
-          {/* ── Animação de sucesso ─────────────────────────────────────── */}
+          {/* ── Animação de sucesso (produto) ─────────────────────────────── */}
           {showSaveAnim && (
             <Animated.View style={{
               position:'absolute', top:0, left:0, right:0, bottom:0,
@@ -5373,64 +5618,29 @@ const VoiceAssistant = ({
               justifyContent:'center', alignItems:'center',
               opacity:sOpac, zIndex:999,
             }}>
-              {/* Anel 1 */}
-              <Animated.View style={{
-                position:'absolute',
-                width:180, height:180, borderRadius:90,
-                borderWidth:2.5, borderColor:'#00D068',
-                transform:[{scale:sRing1}], opacity:sRingO1,
-              }} />
-              {/* Anel 2 */}
-              <Animated.View style={{
-                position:'absolute',
-                width:240, height:240, borderRadius:120,
-                borderWidth:1.5, borderColor:'#00D06880',
-                transform:[{scale:sRing2}], opacity:sRingO2,
-              }} />
-              {/* Círculo principal */}
-              <Animated.View style={{
-                width:138, height:138, borderRadius:69,
-                backgroundColor:'#00D06820',
-                borderWidth:3.5, borderColor:'#00D068',
-                justifyContent:'center', alignItems:'center',
-                transform:[{scale:sCircle}],
-                shadowColor:'#00D068', shadowOpacity:1, shadowRadius:55, elevation:30,
-              }}>
+              <Animated.View style={{ position:'absolute', width:180, height:180, borderRadius:90, borderWidth:2.5, borderColor:'#00D068', transform:[{scale:sRing1}], opacity:sRingO1 }} />
+              <Animated.View style={{ position:'absolute', width:240, height:240, borderRadius:120, borderWidth:1.5, borderColor:'#00D06880', transform:[{scale:sRing2}], opacity:sRingO2 }} />
+              <Animated.View style={{ width:138, height:138, borderRadius:69, backgroundColor:'#00D06820', borderWidth:3.5, borderColor:'#00D068', justifyContent:'center', alignItems:'center', transform:[{scale:sCircle}], shadowColor:'#00D068', shadowOpacity:1, shadowRadius:55, elevation:30 }}>
                 <Animated.View style={{transform:[{scale:sCheck}]}}>
                   <Feather name="check" size={66} color="#00D068" />
                 </Animated.View>
               </Animated.View>
-              {/* Partículas */}
-              {[
-                {top:-95,left:10},{top:-70,right:-55},{top:10,right:-100},
-                {bottom:-80,right:-20},{bottom:-65,left:-60},{top:20,left:-100},
-                {top:-85,left:-50},{bottom:-40,right:-80},
-              ].map((pos,i) => (
-                <Animated.Text key={i} style={{
-                  position:'absolute', fontSize:22,...pos,
-                  opacity:sPartO, transform:[{scale:sPartS}],
-                }}>
+              {[{top:-95,left:10},{top:-70,right:-55},{top:10,right:-100},{bottom:-80,right:-20},{bottom:-65,left:-60},{top:20,left:-100},{top:-85,left:-50},{bottom:-40,right:-80}].map((pos,i) => (
+                <Animated.Text key={i} style={{ position:'absolute', fontSize:22,...pos, opacity:sPartO, transform:[{scale:sPartS}] }}>
                   {['⭐','✨','🌟','💫','⭐','✨','🌟','💫'][i]}
                 </Animated.Text>
               ))}
-              {/* Texto */}
-              <Animated.Text style={{
-                fontSize:28, fontWeight:'900', color:'#FFF',
-                marginTop:26, letterSpacing:-0.5,
-                opacity:sTextO, transform:[{translateY:sTextY}],
-              }}>
+              <Animated.Text style={{ fontSize:28, fontWeight:'900', color:'#FFF', marginTop:26, letterSpacing:-0.5, opacity:sTextO, transform:[{translateY:sTextY}] }}>
                 Produto Salvo! 🎉
               </Animated.Text>
-              <Animated.Text style={{
-                fontSize:14, color:'#00D068', fontWeight:'700',
-                marginTop:8, opacity:sSubTextO,
-              }}>
+              <Animated.Text style={{ fontSize:14, color:'#00D068', fontWeight:'700', marginTop:8, opacity:sSubTextO }}>
                 Cadastro realizado com sucesso
               </Animated.Text>
             </Animated.View>
           )}
 
           </Animated.View>
+          )} {/* fim do else (modal padrão) */}
         </View>
       </>
     </Modal>
@@ -5775,6 +5985,17 @@ const _unlockWebAudio = () => {
 // --- SOM audior.mp3: toca quando reconhecimento ativa (so dentro do VoiceAssistant) ---
 // Agora com controle de volume e vibração
 let _audioRSound = null;
+// ─── REFS GLOBAIS: configurações de som/vibração do microfone ────────────────
+// Atualizadas pelo App principal via setGlobalMicSettings()
+let _globalMicSoundEnabled = true;
+let _globalMicVibrationEnabled = true;
+let _globalMicSoundVolume = 1.0;
+const setGlobalMicSettings = (soundEnabled, vibrationEnabled, volume) => {
+  _globalMicSoundEnabled    = soundEnabled;
+  _globalMicVibrationEnabled = vibrationEnabled;
+  _globalMicSoundVolume      = volume;
+};
+
 const playAudioR = async (volume = 0.9, vibrate = true) => {
   try {
     if (_audioRSound) {
@@ -5800,7 +6021,7 @@ const playAudioR = async (volume = 0.9, vibrate = true) => {
         Vibration.vibrate([40, 30, 60]); 
       } catch { /* noop */ }
     }
-  } catch { /* falha silenciosa */ }
+  } catch (e) { console.warn("[playAudioR] Falha ao tocar audior.mp3:", e?.message || e); }
 };
 
 // ─── SOM DE ATIVAÇÃO / ESCUTA ─────────────────────────────────────────────────
@@ -5808,8 +6029,16 @@ const playAudioR = async (volume = 0.9, vibrate = true) => {
 // Web  → Web Audio API (oscilador, zero dependências)
 // Nativo → vibração suave + Speech curto silencioso
 const playListenBeep = () => {
+  // ── Respeita as configurações de som e vibração do microfone ──────────────
+  // Se tanto som quanto vibração estão desabilitados, não faz nada.
+  const soundOn     = _globalMicSoundEnabled;
+  const vibrationOn = _globalMicVibrationEnabled;
+  if (!soundOn && !vibrationOn) return;
+
   try {
     if (Platform.OS === 'web') {
+      // Web: só toca se som estiver habilitado
+      if (!soundOn) return;
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
       const ctx = new Ctx();
@@ -5837,7 +6066,13 @@ const playListenBeep = () => {
       });
       setTimeout(() => { try { ctx.close(); } catch { /* noop */ } }, 600);
     } else {
-      try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
+      // Nativo: som tem prioridade; se desabilitado, tenta vibração como fallback
+      if (soundOn) {
+        // Reproduz via playAudioR usando as configurações globais (inclui vibração interna)
+        playAudioR(_globalMicSoundVolume, vibrationOn);
+      } else if (vibrationOn) {
+        try { Vibration.vibrate([40, 30, 60]); } catch { /* noop */ }
+      }
     }
   } catch { /* nunca trava o app */ }
 };
@@ -6965,6 +7200,12 @@ export default function App() {
       if (s !== null) setMicSoundEnabled(s === 'true');
       const v = await SafeStore.getItemAsync('micVibrationEnabled');
       if (v !== null) setMicVibrationEnabled(v === 'true');
+      // Sincroniza refs globais usadas por playListenBeep/playAudioR
+      setGlobalMicSettings(
+        s !== null ? s === 'true' : true,
+        v !== null ? v === 'true' : true,
+        vol !== null ? parseFloat(vol) : 1.0
+      );
       const vol = await SafeStore.getItemAsync('micSoundVolume');
       if (vol !== null) setMicSoundVolume(parseFloat(vol));
       const vr = await SafeStore.getItemAsync('voiceRecognitionEnabled');
@@ -6973,9 +7214,21 @@ export default function App() {
     loadMicSettings();
   }, []);
 
-  const updateMicSound = async (val) => { setMicSoundEnabled(val); await SafeStore.setItemAsync('micSoundEnabled', String(val)); };
-  const updateMicVibration = async (val) => { setMicVibrationEnabled(val); await SafeStore.setItemAsync('micVibrationEnabled', String(val)); };
-  const updateMicVolume = async (val) => { setMicSoundVolume(val); await SafeStore.setItemAsync('micSoundVolume', String(val)); };
+  const updateMicSound = async (val) => {
+    setMicSoundEnabled(val);
+    await SafeStore.setItemAsync('micSoundEnabled', String(val));
+    setGlobalMicSettings(val, micVibrationEnabled, micSoundVolume);
+  };
+  const updateMicVibration = async (val) => {
+    setMicVibrationEnabled(val);
+    await SafeStore.setItemAsync('micVibrationEnabled', String(val));
+    setGlobalMicSettings(micSoundEnabled, val, micSoundVolume);
+  };
+  const updateMicVolume = async (val) => {
+    setMicSoundVolume(val);
+    await SafeStore.setItemAsync('micSoundVolume', String(val));
+    setGlobalMicSettings(micSoundEnabled, micVibrationEnabled, val);
+  };
   const updateVoiceRecognition = async (val) => { setVoiceRecognitionEnabled(val); await SafeStore.setItemAsync('voiceRecognitionEnabled', String(val)); };
 
 
