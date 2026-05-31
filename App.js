@@ -42,6 +42,16 @@ import QRCode from 'react-native-qrcode-svg';
 import axios from 'axios';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
+import * as Notifications from 'expo-notifications';
+
+// ─── NOTIFICAÇÕES: configuração global ──────────────────────────────────────
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 // ─── EXPO-SPEECH-RECOGNITION: FALLBACK SEGURO PARA EXPO GO ────────────────────
 let ExpoSpeechRecognitionModule = null;
 let _useSpeechRecognitionEventReal = null;
@@ -103,6 +113,7 @@ let BASEROW_TOKEN = '';
 let RT_API_KEY_IA = '';
 let RT_BLUESOFT_TOKEN = '';
 let GROQ_API_KEY = '';
+let ELEVEN_LABS_API_KEY_SECONDARY = '';
 
 // ─── LOGS DE AUDITORIA ─────────────────────────────────────────────────────
 const AUDIT_LOGS_KEY = 'GEI_AuditLogs';
@@ -139,39 +150,59 @@ const clearAuditLogs = async () => { await SafeStore.deleteItemAsync(AUDIT_LOGS_
 let tokensFetched = false;
 let tokensFetching = false;
 let tokensCallbacks = [];
-const fetchSecureTokens = () => new Promise((resolve, reject) => {
-  if (tokensFetched && BASEROW_TOKEN && RT_API_KEY_IA && RT_BLUESOFT_TOKEN && GROQ_API_KEY) {
-    resolve();
-    return;
-  }
-  tokensCallbacks.push({ resolve, reject });
-  if (tokensFetching) return;
-  tokensFetching = true;
-  fetch(TOKEN_API_URL, {
-    method: 'GET',
-    headers: { 'x-api-key': TOKEN_API_KEY, 'Content-Type': 'application/json' }
-  })
-    .then(async (response) => {
-      if (response.status === 401) throw new Error('Acesso negado: chave da API inválida ou expirada.');
-      if (!response.ok) throw new Error(`Erro HTTP ${response.status}: ${response.statusText}`);
-      const data = await response.json();
-      if (!data.BASEROW_TOKEN || !data.API_KEY_IA || !data.BLUESOFT_TOKEN || !data.API_KEY_GROQ) {
-        throw new Error('Resposta da API não contém todos os tokens necessários.');
-      }
-      BASEROW_TOKEN = data.BASEROW_TOKEN;
-      RT_API_KEY_IA = data.API_KEY_IA;
-      RT_BLUESOFT_TOKEN = data.BLUESOFT_TOKEN;
-      GROQ_API_KEY = data.API_KEY_GROQ;
-      await SafeStore.setItemAsync('BASEROW_TOKEN', BASEROW_TOKEN);
-      await SafeStore.setItemAsync('API_KEY_IA', RT_API_KEY_IA);
-      await SafeStore.setItemAsync('BLUESOFT_TOKEN', RT_BLUESOFT_TOKEN);
-      await SafeStore.setItemAsync('GROQ_API_KEY', GROQ_API_KEY);
-      tokensFetched = true;
-      tokensFetching = false;
-      tokensCallbacks.forEach(cb => cb.resolve());
-      tokensCallbacks = [];
-      await addAuditLog('TOKENS_FETCHED', 'Tokens obtidos com sucesso da API segura');
+  const fetchSecureTokens = () => new Promise((resolve, reject) => {
+    if (tokensFetched && BASEROW_TOKEN && RT_API_KEY_IA && RT_BLUESOFT_TOKEN && GROQ_API_KEY) {
+      resolve();
+      return;
+    }
+    tokensCallbacks.push({ resolve, reject });
+    if (tokensFetching) return;
+    tokensFetching = true;
+    fetch(TOKEN_API_URL, {
+      method: 'GET',
+      headers: { 'x-api-key': TOKEN_API_KEY, 'Content-Type': 'application/json' }
     })
+      .then(async (response) => {
+        if (response.status === 401) throw new Error('Acesso negado: chave da API inválida ou expirada.');
+        if (!response.ok) throw new Error(`Erro HTTP ${response.status}: ${response.statusText}`);
+        const data = await response.json();
+        if (!data.BASEROW_TOKEN || !data.API_KEY_IA || !data.BLUESOFT_TOKEN || !data.API_KEY_GROQ) {
+          throw new Error('Resposta da API não contém todos os tokens necessários.');
+        }
+        BASEROW_TOKEN = data.BASEROW_TOKEN;
+        RT_API_KEY_IA = data.API_KEY_IA;
+        RT_BLUESOFT_TOKEN = data.BLUESOFT_TOKEN;
+        GROQ_API_KEY = data.API_KEY_GROQ;
+        
+        // Tenta buscar API secundária ElevenLabs do Baserow (Tabela 915031)
+        try {
+          const resB = await fetch(`https://api.baserow.io/api/database/rows/table/915031/?user_field_names=true&size=1`, {
+            headers: { 'Authorization': `Token ${BASEROW_TOKEN}` }
+          });
+          if (resB.ok) {
+            const dB = await resB.json();
+            if (dB.results && dB.results[0] && dB.results[0].API_ELEVENLABS1) {
+              ELEVEN_LABS_API_KEY_SECONDARY = dB.results[0].API_ELEVENLABS1;
+              await SafeStore.setItemAsync('ELEVEN_LABS_API_KEY_SECONDARY', ELEVEN_LABS_API_KEY_SECONDARY);
+              console.log('✅ API Secundária ElevenLabs carregada do Baserow');
+            } else {
+              console.warn('[ElevenLabs] Campo API_ELEVENLABS1 não encontrado na tabela 915031 do Baserow. Verifique se o campo existe e tem valor.');
+            }
+          } else {
+            console.error(`[ElevenLabs] Baserow retornou status ${resB.status} ao buscar chave secundária.`);
+          }
+        } catch (errB) { console.warn('Falha ao buscar API secundária no Baserow:', errB.message); }
+
+        await SafeStore.setItemAsync('BASEROW_TOKEN', BASEROW_TOKEN);
+        await SafeStore.setItemAsync('API_KEY_IA', RT_API_KEY_IA);
+        await SafeStore.setItemAsync('BLUESOFT_TOKEN', RT_BLUESOFT_TOKEN);
+        await SafeStore.setItemAsync('GROQ_API_KEY', GROQ_API_KEY);
+        tokensFetched = true;
+        tokensFetching = false;
+        tokensCallbacks.forEach(cb => cb.resolve());
+        tokensCallbacks = [];
+        await addAuditLog('TOKENS_FETCHED', 'Tokens obtidos com sucesso da API segura');
+      })
     .catch(err => {
       console.error('Erro ao buscar tokens da API segura:', err);
       tokensFetching = false;
@@ -189,6 +220,7 @@ const initializeSecureTokens = async () => {
       BASEROW_TOKEN = cachedBaserow;
       RT_API_KEY_IA = cachedApiIa;
       RT_BLUESOFT_TOKEN = cachedBluesoft;
+      ELEVEN_LABS_API_KEY_SECONDARY = await SafeStore.getItemAsync('ELEVEN_LABS_API_KEY_SECONDARY') || '';
       GROQ_API_KEY = cachedGroq;
       tokensFetched = true;
       return true;
@@ -721,7 +753,8 @@ const DarkTorchPrompt = ({ isDarkEnv, lightLevel, torchOn, onToggleTorch, T, fon
 };
 
 // ─── AUTO-DELETE ENGINE ────────────────────────────────────────────────────
-const isExpiredOver30 = vencimento => { const dt = parseDate(vencimento); if (!dt) return false; return diffDays(today(), dt) > 30; };
+// Considera vencido qualquer produto cuja data de validade já passou (≥1 dia)
+const isExpiredOver30 = vencimento => { const dt = parseDate(vencimento); if (!dt) return false; return diffDays(today(), dt) >= 1; };
 const cleanShelf = async (shelfKey, tableId) => {
   const deleted = [];
   try {
@@ -837,12 +870,63 @@ const buildDepletionMetricsOriginal = (product = {}) => {
   const remainingPct = qty > 0 ? Math.round((remainingQty / qty) * 100) : 0;
   return { qty, giro, dailyRate, elapsedDays, remainingDays, depletionDate, depletionDateLabel: fmt(depletionDate), depletionDateFull: fmtFull(depletionDate), soldEstimate, initialEstimate, salesPct, cyclePct, remainingPct, remainingQty, cycleTotal };
 };
+// ── Agrupa produtos por nome (primeiros 6 chars norm.) para FIFO sem EAN ─────
+const groupProductsByName = (products) => {
+  const groups = new Map();
+  for (const prod of products) {
+    const key = stripAccents((prod.produto || '').toLowerCase().trim()).substring(0, 8);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(prod);
+  }
+  for (const [, lotes] of groups.entries()) {
+    lotes.sort((a, b) => {
+      const da = parseDate(a.VENCIMENTO), db = parseDate(b.VENCIMENTO);
+      if (!da && !db) return 0; if (!da) return 1; if (!db) return -1;
+      return da - db;
+    });
+  }
+  return groups;
+};
+
+// ── Detecta se o estoque tem grupos FIFO (por EAN ou nome ≥4 itens) ──────────
+const detectFifoGroups = (products) => {
+  if (!products || products.length === 0) return { hasFifo: false, groups: [] };
+  const eanCount = {};
+  for (const p of products) {
+    const ean = (p.codig||'').trim();
+    if (ean && ean !== 'Sem EAN') eanCount[ean] = (eanCount[ean]||0) + 1;
+  }
+  const nameCount = {};
+  for (const p of products) {
+    const k = stripAccents((p.produto||'').toLowerCase().trim()).substring(0, 8);
+    if (k) nameCount[k] = (nameCount[k]||0) + 1;
+  }
+  const eanGroups = Object.entries(eanCount).filter(([,c]) => c >= 2).map(([ean, count]) => ({ key: ean, type: 'ean', count }));
+  const nameGroups = Object.entries(nameCount).filter(([,c]) => c >= 4).map(([name, count]) => ({ key: name, type: 'nome', count }));
+  const groups = [...eanGroups, ...nameGroups];
+  return { hasFifo: groups.length > 0, groups };
+};
+
 const buildDepletionMetrics = (productOrLotes, fifoMode = false, allProducts = null, ean = null) => {
-  if (!fifoMode || !allProducts || !ean) {
+  if (!fifoMode || !allProducts) {
     return buildDepletionMetricsOriginal(productOrLotes);
   }
-  const groups = groupProductsByEAN(allProducts);
-  const lotes = groups.get(ean);
+  // 1) Tenta agrupamento por EAN
+  const eanGroups = groupProductsByEAN(allProducts);
+  let lotes = ean ? eanGroups.get(ean) : null;
+
+  // 2) Se sem EAN ou grupo de 1, tenta agrupamento por nome (≥2 itens)
+  if (!lotes || lotes.length <= 1) {
+    const nomeProduto = stripAccents((productOrLotes?.produto || '').toLowerCase().trim());
+    if (nomeProduto.length >= 4) {
+      const nameKey = nomeProduto.substring(0, Math.min(8, nomeProduto.length));
+      const nameGroups = groupProductsByName(allProducts);
+      const nameLotes = nameGroups.get(nameKey);
+      if (nameLotes && nameLotes.length >= 2) lotes = nameLotes;
+    }
+  }
+
   if (!lotes || lotes.length === 0) return buildDepletionMetricsOriginal(productOrLotes);
   const giroProduto = lotes[0]?.MARGEM || 'Médio giro';
   const metrics = calculateFIFOMetrics(lotes, giroProduto);
@@ -1081,6 +1165,7 @@ const SuccessOverlay = ({ visible, onClose, T, fontScale }) => {
         <Animated.Text style={{ marginTop: 32, fontSize: 28 * fontScale, fontWeight: '900', color: '#FFF', textAlign: 'center', opacity, transform: [{ scale }] }}>Cadastro Concluído!</Animated.Text>
         <Animated.Text style={{ marginTop: 12, fontSize: 16 * fontScale, color: 'rgba(255,255,255,0.7)', textAlign: 'center', paddingHorizontal: 32, opacity }}>Produto adicionado com sucesso.</Animated.Text>
       </View>
+      <NotificationPermissionModal visible={showNotifPermission} onConfirm={handleConfirmNotif} onCancel={() => setShowNotifPermission(false)} T={T} fontScale={fontScale} />
     </View>
   );
 };
@@ -1490,7 +1575,7 @@ const CalculatorModal = ({ visible, onClose, onResult, T, fontScale }) => {
   );
 };
 
-const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale, notifOn, setNotifOn, TAB_SAFE, onGenerateQR, onViewAuditLogs, onEnableBiometrics, biometricEnabled, onChangePassword, userData, fifoMode, setFifoMode, micSoundEnabled, setMicSoundEnabled, micVibrationEnabled, setMicVibrationEnabled, micSoundVolume, setMicSoundVolume, elevenLabsQuota, onFetchQuota }) => {
+const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale, notifOn, setNotifOn, TAB_SAFE, onGenerateQR, onViewAuditLogs, onEnableBiometrics, biometricEnabled, onChangePassword, userData, fifoMode, setFifoMode, micSoundEnabled, setMicSoundEnabled, micVibrationEnabled, setMicVibrationEnabled, micSoundVolume, setMicSoundVolume, voiceRecognitionEnabled, setVoiceRecognitionEnabled, elevenLabsQuota, onFetchQuota }) => {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [currentPass, setCurrentPass] = useState('');
   const [newPass, setNewPass] = useState('');
@@ -1596,6 +1681,19 @@ const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale,
             thumbColor={micVibrationEnabled ? T.blue : T.textMuted} 
           />
         </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderColor: T.border, paddingTop: 16, marginTop: 16 }}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={{ fontSize: 15 * fontScale, fontWeight: '700', color: T.text }}>Assistente de Voz (Sempre Ativo)</Text>
+            <Text style={{ fontSize: 12 * fontScale, color: T.textSub, marginTop: 2 }}>Permite ativar o GEI.AI falando "Hey GEI" a qualquer momento</Text>
+          </View>
+          <Switch 
+            value={voiceRecognitionEnabled} 
+            onValueChange={setVoiceRecognitionEnabled} 
+            trackColor={{ false: T.border, true: T.blue + '80' }} 
+            thumbColor={voiceRecognitionEnabled ? T.blue : T.textMuted} 
+          />
+        </View>
+
       </View>
 
       <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 20, borderWidth: 1, borderColor: '#10B981' + '30', marginBottom: 16 }}>
@@ -2785,7 +2883,7 @@ const RastreioModal = ({ visible, onClose, T, fontScale }) => {
 
 // ── Tabela completa de números em português ──────────────────────────────────
 const PT_NUM_MAP = {
-  'zero':0,'um':1,'uma':1,'dois':2,'duas':2,'tres':3,'tres':3,
+  'zero':0,'um':1,'uma':1,'dois':2,'duas':2,'tres':3,'três':3,
   'quatro':4,'cinco':5,'seis':6,'sete':7,'oito':8,'nove':9,
   'dez':10,'onze':11,'doze':12,'treze':13,'catorze':14,'quatorze':14,
   'quinze':15,'dezesseis':16,'dezasseis':16,'dezessete':17,'dezoito':18,
@@ -2847,7 +2945,7 @@ const PT_MONTH_MAP = {
   'junho':'06','jun':'06','juho':'06',
   'julho':'07','jul':'07','juio':'07','jullio':'07',
   'agosto':'08','ago':'08','agost':'08',
-  'setembro':'09','set':'09','setembro':'09',
+  'setembro':'09','set':'09','setembr':'09',
   'outubro':'10','out':'10','otubro':'10',
   'novembro':'11','nov':'11','novembr':'11',
   'dezembro':'12','dez':'12','decembro':'12',
@@ -2898,10 +2996,16 @@ const parsePortugueseDate = (raw) => {
       t = t.replace(new RegExp('\\b' + k.replace(/ /g,'\\s+') + '\\b', 'g'), String(PT_ORDINAL_MAP[k]));
     }
 
+    // Limpar frases de "data de cadastro / registro / entrada / envio do produto"
+    // Essas frases ocorrem quando o usuário diz a data de cadastramento de um produto
+    t = t
+      .replace(/\b(data\s+(de\s+)?(cadastro|cadastramento|registro|entrada|envio|compra|aquisicao|recebimento)(\s+do\s+produto)?)\b/gi, '')
+      .replace(/\bdata\b/g, '');
+
     // Limpar ruído
     t = t
       .replace(/[º°]/g, '')
-      .replace(/\b(de|do|da|no|na|em|ao|aos|dia|mes|ano|o|a|para|ate|vence|vencimento|validade|prazo)\b/g, ' ')
+      .replace(/\b(de|do|da|no|na|em|ao|aos|dia|mes|ano|o|a|para|ate|vence|vencimento|validade|prazo|produto|lote|fabricacao|fabricado|produzido)\b/g, ' ')
       .replace(/[.,]/g, ' ')
       .replace(/\s+/g, ' ').trim();
 
@@ -2918,8 +3022,18 @@ const parsePortugueseDate = (raw) => {
       return null;
     };
     const resolveYear = (s) => {
-      const n = parseInt(s);
+      let n = parseInt(s);
       if (isNaN(n)) return curYear;
+      
+      // Correção inteligente de ano: se o ano for menor que o atual e estiver no passado distante, assume-se que é do ciclo atual (2024+)
+      const currentYear = new Date().getFullYear();
+      if (n < currentYear && n > 1900) {
+        // Se for algo como 2006 e estamos em 2024+, provavelmente o usuário quis dizer 2026
+        if (n < 2020) {
+          n = n + 20; 
+        }
+      }
+      
       if (n >= 2000) return n;
       if (n >= 100) return n;
       if (n > 24) return 2000 + n;  // ex: "26" → 2026
@@ -2938,6 +3052,22 @@ const parsePortugueseDate = (raw) => {
     const sepDate = t.match(/(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2,4})/);
     if (sepDate) {
       const d = parseInt(sepDate[1]), m = parseInt(sepDate[2]), y = resolveYear(sepDate[3]);
+      if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,y), m, y);
+    }
+
+    // ── Estratégia 2b: DD/MM YYYY — separador entre dia/mês mas espaço antes do ano ─
+    // Captura "28/06 2026", "28/06 26", "15-03 2027", "05.11 2026"
+    const sepSpaceYear = t.match(/(\d{1,2})[\/\.\-](\d{1,2})\s+(\d{2,4})/);
+    if (sepSpaceYear) {
+      const d = parseInt(sepSpaceYear[1]), m = parseInt(sepSpaceYear[2]), y = resolveYear(sepSpaceYear[3]);
+      if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,y), m, y);
+    }
+
+    // ── Estratégia 2c: DD MM/YYYY — só o mês tem separador com o ano ──────────
+    // Captura "28 06/2026", "28 06/26"
+    const daySpaceSep = t.match(/(\d{1,2})\s+(\d{1,2})[\/\.\-](\d{2,4})/);
+    if (daySpaceSep) {
+      const d = parseInt(daySpaceSep[1]), m = parseInt(daySpaceSep[2]), y = resolveYear(daySpaceSep[3]);
       if (m >= 1 && m <= 12 && d >= 1) return fmt(clampDay(d,m,y), m, y);
     }
 
@@ -3017,6 +3147,12 @@ const normalizeVoiceInput = (raw) => {
     let t = String(raw).trim();
     const FIXES = [
       // Wake words / app
+      
+      // Correções inteligentes de termos
+      // NOTA: \bmedio\b NÃO deve ser corrigido para "remédio" — conflito com "médio giro"
+      [/\bremedio\b/gi, 'remédio'],
+      [/\bquantid\b/gi, 'quantidade'],
+      [/\bvencim\b/gi, 'vencimento'],
       [/\bgei\s+a[ií]\b/gi,'GEI'],
       [/\bge[iy]\b/gi,'GEI'],
       // Compostos vinte-e-algo → número
@@ -3072,12 +3208,1144 @@ const normalizeVoiceInput = (raw) => {
   } catch { return raw; }
 };
 
+// ── Detecção de comando "Novidades" / "Qual é a boa" ────────────────────────
+const detectNovidades = (text) => {
+  if (!text) return false;
+  const n = stripAccents(text);
+  return /(novidade|novidades|boa|boas|resumo|resumos|novidade do estoque|me conta|me fala|relatorio|relatorio do estoque|o que tem|quais produtos|produtos vencendo|vencimentos|status do estoque|qual a boa|qual e a boa|qual e a novidade|como esta o estoque|como ta o estoque)/.test(n);
+};
+
+// ── Detecção de comando de lembrete por voz ────────────────────────────────
+const detectLembreteCmd = (text) => {
+  if (!text) return false;
+  const n = stripAccents(text.toLowerCase());
+  return /(criar lembrete|novo lembrete|adicionar lembrete|lembrete novo|me lembra|me avisa|agenda lembrete|quero um lembrete|cria lembrete|me lembre)/.test(n);
+};
+
+// ── Extrai texto de lembrete de frases como "me lembre de passar data amanhã" ──
+const extractLembreteTexto = (text) => {
+  if (!text) return '';
+  const t = text.trim();
+  // Tenta extrair o que vem depois de palavras-gatilho
+  const match = t.match(/(?:me lembra(?:r)?|me lembre(?:\s+de)?|me avisa(?:r)?|lembrete de|lembrete:|cria(?:r)? lembrete|novo lembrete|adicionar lembrete)\s+(.+)/i);
+  if (match) return match[1].trim();
+  return t;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SISTEMA DE TERÇAS-FEIRAS: aviso semanal automático de produtos quase vencendo
+// Agenda toda terça-feira às 08:00 uma notificação falada com a lista
+// ─────────────────────────────────────────────────────────────────────────────
+const TERCA_NOTIF_ID_KEY = 'GEI_TercaNotifId';
+const TERCA_CHANNEL_ID   = 'terca_vencimento';
+
+const initTercaChannel = async () => {
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(TERCA_CHANNEL_ID, {
+      name: '📅 Aviso de Terça-Feira',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 300, 200, 300],
+      sound: true,
+    });
+  }
+};
+
+// Calcula a próxima terça-feira às 08:00
+const proximaTerca = (hora = 8, min = 0) => {
+  const now = new Date();
+  const d = new Date(now);
+  // dia 2 = terça (0=dom, 1=seg, 2=ter...)
+  const diasAteProximaTerca = (2 - d.getDay() + 7) % 7 || 7;
+  d.setDate(d.getDate() + diasAteProximaTerca);
+  d.setHours(hora, min, 0, 0);
+  if (d <= now) d.setDate(d.getDate() + 7); // se já passou, próxima semana
+  return d;
+};
+
+// Monta o texto do aviso de terça com os produtos quase vencendo
+const buildTercaMsg = (stockData) => {
+  if (!stockData || stockData.length === 0) return null;
+  const agora = new Date(); agora.setHours(0,0,0,0);
+  const parseD = s => { if (!s) return null; const [d,m,y]=String(s).split('/'); const dt=new Date(`${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}T00:00:00`); return isNaN(dt)?null:dt; };
+  const urgentes = stockData.filter(p => {
+    const dt = parseD(p.VENCIMENTO || p.validade);
+    if (!dt) return false;
+    const dias = Math.floor((dt - agora) / 86400000);
+    return dias >= 0 && dias <= 15;
+  }).sort((a, b) => {
+    const da = parseD(a.VENCIMENTO || a.validade);
+    const db = parseD(b.VENCIMENTO || b.validade);
+    return (da || 0) - (db || 0);
+  });
+  if (urgentes.length === 0) return null;
+  const nomes = urgentes.slice(0, 5).map(p => {
+    const dt = parseD(p.VENCIMENTO || p.validade);
+    const dias = Math.floor((dt - agora) / 86400000);
+    const nome = (p.produto || p.nome || 'Produto').split('·')[0].trim();
+    return `${nome}, vence em ${dias} dia${dias !== 1 ? 's' : ''}`;
+  });
+  const resto = urgentes.length > 5 ? ` e mais ${urgentes.length - 5} outros` : '';
+  return `Atenção! Hoje é terça-feira, dia de passar data. Produtos quase vencendo: ${nomes.join('; ')}${resto}. Corra para passar a data!`;
+};
+
+// Agenda (ou re-agenda) a notificação semanal de terça
+const agendarTercaSemanal = async (stockData) => {
+  if (Platform.OS === 'web') return null; // IDB readonly error na web
+  try {
+    const granted = await requestNotifPermission();
+    if (!granted) return;
+    await initTercaChannel();
+    // Cancela anterior se houver
+    const oldId = await SafeStore.getItemAsync(TERCA_NOTIF_ID_KEY);
+    if (oldId) { try { await Notifications.cancelScheduledNotificationAsync(oldId); } catch { /* noop */ } }
+
+    const msg = buildTercaMsg(stockData);
+    const body = msg || 'Hoje é terça-feira! Lembre-se de verificar as datas dos produtos no estoque.';
+    const nextTerca = proximaTerca(8, 0);
+
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '📅 GEI.AI — Dia de Passar Data!',
+        body,
+        sound: true,
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        data: { tipo: 'terca_semanal', stockCount: stockData?.length || 0 },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: nextTerca,
+        channelId: TERCA_CHANNEL_ID,
+      },
+    });
+    await SafeStore.setItemAsync(TERCA_NOTIF_ID_KEY, id);
+    console.log(`[TERÇA] Notificação agendada para ${nextTerca.toLocaleString('pt-BR')}`);
+    return id;
+  } catch (e) {
+    console.warn('[TERÇA] Falha ao agendar:', e?.message);
+    return null;
+  }
+};
+
+// Verifica se hoje é terça e fala o aviso via ElevenLabs (chamado no boot)
+const verificarTercaHoje = async (stockData) => {
+  const hoje = new Date().getDay(); // 2 = terça
+  if (hoje !== 2) return false;
+  const KEY = 'GEI_TercaFaladaHoje';
+  const ultimaData = await SafeStore.getItemAsync(KEY);
+  const hoje_str = new Date().toLocaleDateString('pt-BR');
+  if (ultimaData === hoje_str) return false; // já falou hoje
+  const msg = buildTercaMsg(stockData);
+  if (!msg) return false;
+  await SafeStore.setItemAsync(KEY, hoje_str);
+  // Fala após 3s do boot para não sobrepor outras falas
+  setTimeout(() => speakWithElevenLabs(msg, () => {}), 3000);
+  return true;
+};
+
+// ── Utilidades de notificação de vencimento ──────────────────────────────────
+const NOTIF_CHANNEL_ID = 'vencimento_produtos';
+const initNotifChannel = async () => {
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(NOTIF_CHANNEL_ID, {
+      name: 'Vencimento de Produtos',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+    });
+  }
+};
+// ── requestNotifPermission — verifica status real antes de pedir ─────────────
+// Se já foi concedida: retorna true sem chamar o dialog.
+// Se `canAskAgain` for false (usuário negou definitivamente): retorna false
+//   e oferece abertura das configurações do sistema.
+// Se ainda não foi perguntado: pede via requestPermissionsAsync.
+const requestNotifPermission = async () => {
+  try {
+    if (Platform.OS === 'web') {
+      if (!('Notification' in window)) return false;
+      if (Notification.permission === 'granted') return true;
+      if (Notification.permission === 'denied') return false;
+      const perm = await Notification.requestPermission();
+      return perm === 'granted';
+    }
+    // Native (iOS / Android)
+    const { status: existing, canAskAgain } = await Notifications.getPermissionsAsync();
+    if (existing === 'granted') return true;
+    if (!canAskAgain) {
+      // Permissão bloqueada — só configurações do sistema podem desbloquear
+      Alert.alert(
+        '🔔 Notificações bloqueadas',
+        'Você bloqueou as notificações anteriormente. Para receber avisos de vencimento e lembretes, abra as Configurações do dispositivo e ative as notificações para o GEI.AI.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Abrir Configurações', onPress: () => { try { Linking.openSettings(); } catch { /* noop */ } } },
+        ]
+      );
+      return false;
+    }
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
+  } catch {
+    return false;
+  }
+};
+const scheduleVencimentoNotif = async (produto, vencimentoStr) => {
+  return await scheduleVencimentoNotifCustom(produto, vencimentoStr, 15, '10:00');
+};
+const cancelNotifById = async (notifId) => {
+  try { await Notifications.cancelScheduledNotificationAsync(notifId); } catch { /* noop */ }
+};
+const LEMBRETES_STORE_KEY = 'GEI_Lembretes';
+const getLembretes = async () => {
+  try { const r = await SafeStore.getItemAsync(LEMBRETES_STORE_KEY); return r ? JSON.parse(r) : []; } catch { return []; }
+};
+const saveLembretes = async (list) => {
+  try { await SafeStore.setItemAsync(LEMBRETES_STORE_KEY, JSON.stringify(list)); } catch { /* noop */ }
+};
+
+// ── Utilitário: agendar notificação em horário específico ────────────────────
+const scheduleVencimentoNotifCustom = async (produto, vencimentoStr, diasAntes = 15, horario = '10:00') => {
+  // expo-notifications usa IndexedDB na web e causa "readonly transaction" error — skip silenciosamente
+  if (Platform.OS === 'web') return null;
+  const [d, m, y] = String(vencimentoStr || '').split('/');
+  if (!d || !m || !y) return null;
+  const [hora, min] = String(horario).split(':').map(Number);
+  const venc = new Date(`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00`);
+  const notifDate = new Date(venc.getTime() - diasAntes * 24 * 60 * 60 * 1000);
+  notifDate.setHours(isNaN(hora) ? 10 : hora, isNaN(min) ? 0 : min, 0, 0);
+  if (notifDate <= new Date()) return null;
+  try {
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '⚠️ GEI.AI — Produto Vencendo!',
+        body: `${produto} vence em ${vencimentoStr}. Faltam ${diasAntes} dias!`,
+        sound: true,
+        priority: Notifications.AndroidNotificationPriority.MAX,
+        data: { produto, vencimento: vencimentoStr, tipo: 'vencimento' },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: notifDate,
+        channelId: NOTIF_CHANNEL_ID,
+      },
+    });
+    return id;
+  } catch (e) {
+    console.warn('[NOTIF] Falha ao agendar:', e.message);
+    return null;
+  }
+};
+
+// ── Agendador de lembrete personalizado por voz/texto ────────────────────────
+const scheduleCustomLembrete = async (texto, horario = '10:00', dataStr = null) => {
+  if (Platform.OS === 'web') return null; // IDB readonly error na web
+  const [hora, min] = String(horario).split(':').map(Number);
+  let notifDate;
+  if (dataStr) {
+    const [d, m, y] = String(dataStr).split('/');
+    notifDate = new Date(`${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}T00:00:00`);
+    notifDate.setHours(isNaN(hora) ? 10 : hora, isNaN(min) ? 0 : min, 0, 0);
+  } else {
+    notifDate = new Date();
+    notifDate.setHours(isNaN(hora) ? 10 : hora, isNaN(min) ? 0 : min, 0, 0);
+    if (notifDate <= new Date()) {
+      // Agenda para amanhã se a hora já passou hoje
+      notifDate.setDate(notifDate.getDate() + 1);
+    }
+  }
+  if (notifDate <= new Date()) return null;
+  try {
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '🔔 GEI.AI — Lembrete',
+        body: texto,
+        sound: true,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        data: { tipo: 'personalizado', texto },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: notifDate,
+        channelId: NOTIF_CHANNEL_ID,
+      },
+    });
+    return id;
+  } catch { return null; }
+};
+
+// ── Parse de horário falado em voz — parser completo com períodos e minutos ──
+const parseHorarioVoz = (text) => {
+  if (!text) return null;
+  const t = stripAccents(text.toLowerCase()).trim();
+
+  // ── Mapa de horas por extenso (mais compridos primeiro para evitar match parcial) ──
+  const hrMap = {
+    'meia noite':0, 'meia-noite':0, 'midnight':0,
+    'vinte e tres':23, 'vinte e tres horas':23,
+    'vinte e duas':22, 'vinte e dois':22,
+    'vinte e uma':21, 'vinte e um':21,
+    'vinte':20,
+    'dezanove':19, 'dezenove':19,
+    'dezoito':18,
+    'dezassete':17, 'dezessete':17,
+    'dezasseis':16, 'dezeseis':16, 'dezesseis':16,
+    'quinze':15, 'catorze':14, 'quatorze':14, 'treze':13,
+    'meio dia':12, 'meio-dia':12, 'doze':12,
+    'onze':11, 'dez':10, 'nove':9, 'oito':8, 'sete':7, 'seis':6,
+    'cinco':5, 'quatro':4, 'tres':3, 'duas':2, 'dois':2,
+    'uma':1, 'um':1, 'zero':0,
+  };
+
+  // ── Mapa de minutos por extenso (mais compridos primeiro) ────────────────
+  const minMap = [
+    ['cinquenta e cinco',55],['cinquenta',50],
+    ['quarenta e cinco',45],['tres quartos',45],
+    ['quarenta',40],['trinta e cinco',35],
+    ['trinta',30],['meia',30],
+    ['vinte e cinco',25],['vinte',20],
+    ['quinze',15],['um quarto',15],
+    ['dez',10],['cinco',5],
+  ];
+
+  // ── Detecta período do dia ────────────────────────────────────────────────
+  const isManha = /\b(manha|madrugada|am)\b/.test(t);
+  const isTarde = /\b(tarde|pm)\b/.test(t);
+  const isNoite = /\b(noite)\b/.test(t);
+
+  // ── Aplica período → converte para formato 24h ───────────────────────────
+  const applyPeriod = (h, m) => {
+    let hour = h;
+    if ((isTarde || isNoite) && hour > 0 && hour < 12) hour += 12;
+    if (isManha && hour === 12) hour = 0; // "doze da manha" → 00:00
+    return `${String(Math.min(hour, 23)).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  };
+
+  // ── Extrai minutos de uma substring (depois da hora) ─────────────────────
+  const getMinutes = (str) => {
+    for (const [k, v] of minMap) if (str.includes(k)) return v;
+    // "e XX" — número direto de minutos
+    const mE = str.match(/\be\s+(\d{1,2})\b/);
+    if (mE) { const n = parseInt(mE[1]); if (n >= 0 && n <= 59) return n; }
+    return 0;
+  };
+
+  // ── 1. Formato digital "14:30", "14h30", "14h" ───────────────────────────
+  const mDig = t.match(/(\d{1,2})[h:](\d{2})/);
+  if (mDig) {
+    const h = parseInt(mDig[1]), min = parseInt(mDig[2]);
+    if (h <= 23 && min <= 59) return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+  }
+  const mDigH = t.match(/\b(\d{1,2})h\b/);
+  if (mDigH) {
+    const h = parseInt(mDigH[1]);
+    if (h <= 23) return applyPeriod(h, 0);
+  }
+
+  // ── 2. Hora por extenso com potenciais minutos após ───────────────────────
+  // Ordena chaves por comprimento desc para evitar match prematuro de "dez" em "dezoito"
+  const hrKeys = Object.keys(hrMap).sort((a, b) => b.length - a.length);
+  for (const k of hrKeys) {
+    const idx = t.indexOf(k);
+    if (idx >= 0) {
+      const h = hrMap[k];
+      // Procura minutos APENAS no trecho após a palavra da hora
+      const afterHour = t.substring(idx + k.length);
+      const mins = getMinutes(afterHour);
+      return applyPeriod(h, mins);
+    }
+  }
+
+  // ── 3. Número digital + período ("8 horas da tarde", "as 14", "as 8 da manha") ─
+  const mHoras = t.match(/(?:a[os]?\s+)?(\d{1,2})\s*(?:hora[s]?)\b/);
+  if (mHoras) {
+    const h = parseInt(mHoras[1]);
+    if (h <= 23) return applyPeriod(h, getMinutes(t.substring(t.indexOf(mHoras[0]) + mHoras[0].length)));
+  }
+  const mNum = t.match(/\b(?:a[os]\s+)?(\d{1,2})\b/);
+  if (mNum) {
+    const h = parseInt(mNum[1]);
+    if (h >= 0 && h <= 23) return applyPeriod(h, getMinutes(t.substring(t.indexOf(mNum[0]) + mNum[0].length)));
+  }
+
+  return null;
+};
+
+// ── Estado global para lembretes personalizados aguardando horário ────────
+let _pendingCustomLembreteTexto = null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPONENTE: NovidadesModal — REDESIGN COMPLETO
+// Painel bonito, 3 abas, lembretes visuais, anti-duplicata, horário por voz
+// ─────────────────────────────────────────────────────────────────────────────
+const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData }) => {
+  const [displayedText, setDisplayedText] = useState('');
+  const [isTyping, setIsTyping]   = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [lembretes, setLembretes] = useState([]);
+  const [autoAgendado, setAutoAgendado] = useState(false);
+  const [activeTab, setActiveTab] = useState('resumo');
+  const [novoTexto, setNovoTexto]     = useState('');
+  const [novoHorario, setNovoHorario] = useState('10:00');
+  const [novoData, setNovoData]       = useState('');
+  const [salvando, setSalvando]       = useState(false);
+  const [ouvinHorario, setOuvindoHor] = useState(false);
+  const [saveAnim]                    = useState(new Animated.Value(0));
+  const typingTimerRef = useRef(null);
+  const isMountedRef   = useRef(false);
+  const slideA         = useRef(new Animated.Value(WIN.height)).current;
+  const opacA          = useRef(new Animated.Value(0)).current;
+  const tabLineA       = useRef(new Animated.Value(0)).current;
+  const avatarPulseA   = useRef(new Animated.Value(1)).current;
+  const dotPulseA      = useRef(new Animated.Value(0.5)).current;
+  const avatarLoopRef  = useRef(null);
+  const nomeUsuario    = userData?.NOME?.split(' ')?.[0] || 'você';
+
+  // ── Typewriter ───────────────────────────────────────────────────────────
+  const typeText = useCallback((text) => {
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    setDisplayedText(''); setIsTyping(true);
+    let i = 0;
+    const tick = () => {
+      if (!isMountedRef.current) return;
+      i++;
+      setDisplayedText(text.slice(0, i));
+      if (i < text.length) typingTimerRef.current = setTimeout(tick, 14);
+      else { setIsTyping(false); speakWithElevenLabs(text, () => {}); }
+    };
+    typingTimerRef.current = setTimeout(tick, 60);
+  }, []);
+
+  // ── Animação da tab selecionada ─────────────────────────────────────────
+  const TABS = [
+    { key:'resumo',    icon:'cpu',            label:'Resumo IA',  color: T.purple },
+    { key:'lembretes', icon:'bell',           label:'Lembretes',  color: T.amber },
+    { key:'novo',      icon:'plus-circle',    label:'Criar',      color: T.green },
+  ];
+  const tabIdx = TABS.findIndex(t => t.key === activeTab);
+  useEffect(() => {
+    Animated.spring(tabLineA, { toValue: tabIdx, tension: 80, friction: 12, useNativeDriver: false }).start();
+  }, [tabIdx, tabLineA]);
+  const tabLineLeft = tabLineA.interpolate({ inputRange: [0,1,2], outputRange: ['0%','33.33%','66.66%'] });
+
+  // ── Geração do resumo ────────────────────────────────────────────────────
+  const gerarResumo = useCallback(async (stock) => {
+    if (!stock || stock.length === 0) { typeText(`Tudo certo, ${nomeUsuario}! Nenhum produto cadastrado ainda. 📦`); return; }
+    setIsLoading(true); setDisplayedText('');
+    const agora = new Date(); agora.setHours(0,0,0,0);
+    const parseD = s => { if (!s) return null; const [d,m,y]=String(s).split('/'); const dt=new Date(`${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}T00:00:00`); return isNaN(dt)?null:dt; };
+    const getVal = p => p.VENCIMENTO||p.validade||'';
+    const venc  = stock.filter(p=>{const dt=parseD(getVal(p));return dt&&dt<agora;});
+    const r7    = stock.filter(p=>{const dt=parseD(getVal(p));if(!dt)return false;const d=Math.floor((dt-agora)/86400000);return d>=0&&d<=7;});
+    const r15   = stock.filter(p=>{const dt=parseD(getVal(p));if(!dt)return false;const d=Math.floor((dt-agora)/86400000);return d>7&&d<=15;});
+    const r30   = stock.filter(p=>{const dt=parseD(getVal(p));if(!dt)return false;const d=Math.floor((dt-agora)/86400000);return d>15&&d<=30;});
+    const obj = { nomeUsuario, total:stock.length,
+      vencidos:venc.map(p=>`${p.produto||p.nome} (${getVal(p)})`),
+      em7:r7.map(p=>`${p.produto||p.nome} — vence ${getVal(p)}`),
+      em15:r15.map(p=>`${p.produto||p.nome} — vence ${getVal(p)}`),
+      em30:r30.map(p=>`${p.produto||p.nome} — vence ${getVal(p)}`),
+    };
+    const prompt = `Você é GEI, assistente de estoque. Gere resumo CURTO (máximo 5 linhas) em português com emojis. Chame por "${nomeUsuario}" (sem "gerente"). Destaque urgências. Se houver produtos ≤15 dias, diga que notificações foram agendadas automaticamente. Dados: ${JSON.stringify(obj)}`;
+    try {
+      await initializeSecureTokens();
+      let txt = null;
+      try {
+        const r = await fetch('https://api.groq.com/openai/v1/chat/completions',{ method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${GROQ_API_KEY}`}, body:JSON.stringify({model:'llama-3.3-70b-versatile',messages:[{role:'user',content:prompt}],max_tokens:280,temperature:0.65}) });
+        const d = await r.json(); txt = d?.choices?.[0]?.message?.content?.trim();
+      } catch { /* fallback Gemini */ }
+      if (!txt) { try { txt = await callGeminiOptimized(prompt, false); } catch { /* noop */ } }
+      if (isMountedRef.current) typeText(txt || _resumoLocal(obj));
+    } catch { if (isMountedRef.current) typeText(_resumoLocal(obj)); }
+    finally  { if (isMountedRef.current) setIsLoading(false); }
+  }, [nomeUsuario, typeText]);
+
+  const _resumoLocal = r => {
+    if (!r.vencidos.length&&!r.em7.length&&!r.em15.length&&!r.em30.length)
+      return `Tudo certo, ${r.nomeUsuario}! ✅ ${r.total} produtos sem urgências.`;
+    let t=`Olá, ${r.nomeUsuario}! Resumo rápido:\n`;
+    if (r.vencidos.length) t+=`💀 ${r.vencidos.length} produto(s) VENCIDO(S)\n`;
+    if (r.em7.length)      t+=`🔴 ${r.em7.length} vence(m) em até 7 dias\n`;
+    if (r.em15.length)     t+=`🟠 ${r.em15.length} vence(m) em até 15 dias\n`;
+    if (r.em30.length)     t+=`🟡 ${r.em30.length} vence(m) em até 30 dias`;
+    return t;
+  };
+
+  // ── Auto-agenda lembretes (com anti-duplicata completo) ──────────────────
+  const autoAgendarLembretes = useCallback(async (stock) => {
+    if (!stock||stock.length===0||autoAgendado) return;
+    const granted = await requestNotifPermission();
+    if (!granted) return;
+    await initNotifChannel();
+    const agora = new Date(); agora.setHours(0,0,0,0);
+    const existentes = await getLembretes();
+    // Remove expirados
+    const ativos = [];
+    for (const l of existentes) {
+      if (l.tipo!=='auto') { ativos.push(l); continue; }
+      const [d,m,y]=String(l.validade||'').split('/');
+      const dt=new Date(`${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}T00:00:00`);
+      const dias=isNaN(dt)?999:Math.floor((dt-agora)/86400000);
+      if (dias<-1) { await cancelNotifById(l.notifId); }
+      else ativos.push(l);
+    }
+    const novos=[];
+    for (const p of stock) {
+      const nome=p.produto||p.nome||'Produto', val=p.VENCIMENTO||p.validade||'';
+      const [d,m,y]=String(val).split('/');
+      const dt=new Date(`${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}T00:00:00`);
+      if (isNaN(dt)) continue;
+      const dias=Math.floor((dt-agora)/86400000);
+      if (dias<0||dias>15) continue;
+      const jaExiste=ativos.some(l=>l.produto===nome&&l.validade===val&&l.tipo!=='personalizado');
+      if (jaExiste) continue;
+      const notifId=await scheduleVencimentoNotifCustom(nome,val,15,'10:00');
+      if (!notifId) continue;
+      novos.push({ id:`auto-${Date.now()}-${Math.random()}`, produto:nome, validade:val, notifId, horario:'10:00', tipo:'auto', criadoEm:new Date().toISOString() });
+    }
+    const updated=[...novos,...ativos];
+    await saveLembretes(updated);
+    if (isMountedRef.current) setLembretes(updated);
+    setAutoAgendado(true);
+  }, [autoAgendado]);
+
+  // ── Salvar lembrete personalizado (com anti-duplicata) ───────────────────
+  const salvarLembrete = async () => {
+    if (!novoTexto.trim()) { Alert.alert('Atenção','Descreva o lembrete.'); return; }
+    const horValido=/^\d{2}:\d{2}$/.test(novoHorario)?novoHorario:'10:00';
+    // Auto-completa ano se o usuário digitou apenas DD/MM
+    let dataNorm=(novoData||'').trim();
+    if (/^\d{1,2}\/\d{1,2}$/.test(dataNorm)) {
+      dataNorm = `${dataNorm}/${new Date().getFullYear()}`;
+    }
+    setSalvando(true);
+    const normalizar=s=>stripAccents(String(s||'').toLowerCase().trim().replace(/\s+/g,' '));
+    const textoNorm=normalizar(novoTexto.trim());
+    const existentes=await getLembretes();
+    const duplicado=existentes.find(l=>normalizar(l.produto)===textoNorm&&(!dataNorm||!l.validade||l.validade===dataNorm)&&l.horario===horValido);
+    if (duplicado) {
+      setSalvando(false);
+      Alert.alert('⚠️ Já existe',`Lembrete idêntico já agendado:\n"${duplicado.produto}" às ${duplicado.horario}\n\nNão é necessário criar outro.`,[{text:'OK',style:'cancel'}]);
+      return;
+    }
+    const similar=existentes.find(l=>normalizar(l.produto)===textoNorm);
+    if (similar) {
+      const continuar=await new Promise(r=>Alert.alert('🔔 Similar encontrado',`Já existe um lembrete similar:\n"${similar.produto}" às ${similar.horario}\n\nCriar outro mesmo assim?`,[{text:'Cancelar',style:'cancel',onPress:()=>r(false)},{text:'Criar mesmo assim',onPress:()=>r(true)}]));
+      if (!continuar) { setSalvando(false); return; }
+    }
+    const granted=await requestNotifPermission();
+    if (!granted) { 
+      speakWithElevenLabs('Para agendar lembretes, eu preciso da sua permissão para enviar notificações. Por favor, ative-as para continuar.', () => {});
+      Alert.alert('Permissão necessária','Permita notificações para agendar lembretes.'); 
+      setSalvando(false); 
+      return; 
+    }
+    await initNotifChannel();
+    const notifId=await scheduleCustomLembrete(novoTexto.trim(),horValido,dataNorm||null);
+    if (!notifId) { Alert.alert('Horário inválido','Horário já passou. Escolha um horário futuro ou informe uma data.'); setSalvando(false); return; }
+    const novo={ id:`custom-${Date.now()}-${Math.random()}`, produto:novoTexto.trim(), validade:dataNorm||'', notifId, horario:horValido, tipo:'personalizado', criadoEm:new Date().toISOString() };
+    const updated=[novo,...existentes];
+    await saveLembretes(updated);
+    // Animação de salvar
+    Animated.sequence([
+      Animated.timing(saveAnim,{toValue:1,duration:300,useNativeDriver:false}),
+      Animated.delay(800),
+      Animated.timing(saveAnim,{toValue:0,duration:300,useNativeDriver:false}),
+    ]).start();
+    if (isMountedRef.current) {
+      setLembretes(updated); setNovoTexto(''); setNovoHorario('10:00'); setNovoData('');
+      // Vai para aba de lembretes para mostrar o novo item
+      setTimeout(()=>{ if(isMountedRef.current) setActiveTab('lembretes'); },400);
+      // Fecha o modal após a animação de sucesso
+      setTimeout(()=>{ if(isMountedRef.current) onClose(); },1600);
+    }
+    setSalvando(false);
+    speakWithElevenLabs(`Lembrete criado! Vou te avisar às ${horValido.replace(':',' horas e ')} minutos.`,()=>{});
+  };
+
+  // ── Remover lembrete ────────────────────────────────────────────────────
+  const removerLembrete = async (item) => {
+    await cancelNotifById(item.notifId);
+    const list=await getLembretes();
+    const updated=list.filter(l=>l.id!==item.id);
+    await saveLembretes(updated);
+    if (isMountedRef.current) setLembretes(updated);
+  };
+
+  // ── Ouvir horário por voz ────────────────────────────────────────────────
+  const ouvirHorarioPorVoz = () => {
+    if (!SPEECH_RECOGNITION_AVAILABLE) { Alert.alert('Indisponível','Use o teclado para digitar o horário.'); return; }
+    setOuvindoHor(true);
+    speakWithElevenLabs('Diga o horário. Por exemplo: às dez da manhã, ou às quatorze horas.',async()=>{
+      try { await ExpoSpeechRecognitionModule.start({lang:'pt-BR',interimResults:false,continuous:false}); } catch { setOuvindoHor(false); }
+    });
+    setTimeout(()=>{ if(isMountedRef.current) setOuvindoHor(false); },9000);
+  };
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    isMountedRef.current = visible;
+    if (visible) {
+      setAutoAgendado(false);
+      slideA.setValue(WIN.height); opacA.setValue(0);
+      Animated.parallel([
+        Animated.spring(slideA,{toValue:0,tension:55,friction:11,useNativeDriver:false}),
+        Animated.timing(opacA,{toValue:1,duration:260,useNativeDriver:false}),
+      ]).start();
+      setDisplayedText(''); setIsTyping(false); setActiveTab('resumo');
+      gerarResumo(stockData);
+      autoAgendarLembretes(stockData);
+      getLembretes().then(list=>{ if(isMountedRef.current) setLembretes(list); });
+      // Inicia animação do avatar e dot
+      avatarLoopRef.current = Animated.loop(Animated.sequence([
+        Animated.timing(avatarPulseA,{toValue:1.08,duration:1100,useNativeDriver:false}),
+        Animated.timing(avatarPulseA,{toValue:1,duration:1100,useNativeDriver:false}),
+      ]));
+      avatarLoopRef.current.start();
+      Animated.loop(Animated.sequence([
+        Animated.timing(dotPulseA,{toValue:1,duration:600,useNativeDriver:false}),
+        Animated.timing(dotPulseA,{toValue:0.35,duration:600,useNativeDriver:false}),
+      ])).start();
+    } else {
+      avatarLoopRef.current?.stop();
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      try { Speech.stop(); } catch { /* noop */ }
+    }
+    return () => { isMountedRef.current = false; avatarLoopRef.current?.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  if (!visible) return null;
+
+  // helpers visuais
+  const agora2 = new Date(); agora2.setHours(0,0,0,0);
+  const getDias = val => { const [d,m,y]=String(val||'').split('/'); const dt=new Date(`${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}T00:00:00`); return isNaN(dt)?999:Math.floor((dt-agora2)/86400000); };
+  const getDiasCorAndEmoji = dias => {
+    if (dias<0)  return { cor:T.red,    emoji:'💀', label:'VENCIDO',              bg:T.redGlow   };
+    if (dias<=3) return { cor:T.red,    emoji:'🔴', label:`${dias}d — CRÍTICO`,   bg:T.redGlow   };
+    if (dias<=7) return { cor:T.orange, emoji:'🟠', label:`${dias}d — URGENTE`,   bg:T.orangeGlow };
+    if (dias<=15)return { cor:T.amber,  emoji:'🟡', label:`${dias}d — ATENÇÃO`,   bg:T.amberGlow  };
+    return         { cor:T.green,  emoji:'🟢', label:`${dias}d — OK`,        bg:T.greenGlow  };
+  };
+  const lAuto = lembretes.filter(l=>l.tipo!=='personalizado');
+  const lCustom= lembretes.filter(l=>l.tipo==='personalizado');
+  const totalUrgentes = lembretes.filter(l=>l.tipo!=='personalizado'&&getDias(l.validade)<=7).length;
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.85)',justifyContent:'center',padding:16}}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+
+        <Animated.View style={{
+          backgroundColor:T.bgCard,
+          borderRadius:42,
+          paddingBottom:24,
+          borderWidth:2, borderColor:T.purple+'80',
+          overflow: 'hidden',
+          transform:[{translateY:slideA}], opacity:opacA,
+          maxHeight:WIN.height*0.94,
+          shadowColor:'#000', shadowOffset:{width:0,height:-16},
+          shadowOpacity:0.7, shadowRadius:36, elevation:40,
+        }}>
+
+          {/* ── Faixa decorativa topo (acento de cor IA) ── */}
+          <View style={{height:5,width:'100%',backgroundColor:T.purple,opacity:0.85}} />
+
+          {/* ── Handle decorativo ── */}
+          <View style={{alignItems:'center',paddingTop:10,paddingBottom:2}}>
+            <View style={{width:36,height:4,borderRadius:2,backgroundColor:T.purple+'50'}} />
+          </View>
+
+          {/* ── Header ── */}
+          <View style={{flexDirection:'row',alignItems:'center',paddingHorizontal:22,paddingVertical:10,gap:14}}>
+            {/* Avatar IA animado com anel pulsante */}
+            <View style={{width:74,height:74,justifyContent:'center',alignItems:'center'}}>
+              {/* Anel pulsante externo */}
+              <Animated.View style={{
+                position:'absolute',
+                width:74,height:74,borderRadius:37,
+                borderWidth:1.5,borderColor:T.purple+'35',
+                transform:[{scale:avatarPulseA}],
+              }} />
+              {/* Avatar principal */}
+              <Animated.View style={{
+                width:58,height:58,borderRadius:20,
+                backgroundColor:T.purple,
+                justifyContent:'center',alignItems:'center',
+                borderWidth:2.5,borderColor:T.purple+'80',
+                shadowColor:T.purple,shadowOpacity:0.65,shadowRadius:18,elevation:14,
+                transform:[{scale:avatarPulseA}],
+              }}>
+                <MaterialCommunityIcons name="brain" size={30} color="#FFF" />
+              </Animated.View>
+            </View>
+
+            <View style={{flex:1}}>
+              {/* Badge online com dot pulsante */}
+              <View style={{flexDirection:'row',alignItems:'center',gap:5,marginBottom:3}}>
+                <Animated.View style={{
+                  width:7,height:7,borderRadius:4,
+                  backgroundColor:T.green,
+                  shadowColor:T.green,shadowOpacity:1,shadowRadius:5,elevation:3,
+                  opacity:dotPulseA,
+                }} />
+                <Text style={{fontSize:9*fontScale,fontWeight:'900',color:T.green,textTransform:'uppercase',letterSpacing:1.6}}>GEI.AI · ONLINE</Text>
+                {isLoading&&(
+                  <View style={{marginLeft:4,backgroundColor:T.purple+'18',borderRadius:8,paddingHorizontal:6,paddingVertical:1,borderWidth:1,borderColor:T.purple+'30'}}>
+                    <Text style={{fontSize:8*fontScale,fontWeight:'800',color:T.purple}}>ANALISANDO</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={{fontSize:18*fontScale,fontWeight:'900',color:T.text,letterSpacing:-0.4}}>
+                Painel de Inteligência
+              </Text>
+              {totalUrgentes>0 && (
+                <View style={{flexDirection:'row',alignItems:'center',gap:4,marginTop:3,backgroundColor:T.red+'12',borderRadius:8,paddingHorizontal:6,paddingVertical:2,alignSelf:'flex-start',borderWidth:1,borderColor:T.red+'25'}}>
+                  <View style={{width:5,height:5,borderRadius:3,backgroundColor:T.red}} />
+                  <Text style={{fontSize:10*fontScale,fontWeight:'800',color:T.red}}>{totalUrgentes} produto{totalUrgentes>1?'s':''} crítico{totalUrgentes>1?'s':''}</Text>
+                </View>
+              )}
+            </View>
+            <TouchableOpacity onPress={onClose}
+              style={{width:38,height:38,borderRadius:13,backgroundColor:T.bgInput,justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:T.border}}>
+              <Feather name="x" size={17} color={T.textSub} />
+            </TouchableOpacity>
+          </View>
+
+          {/* ── Stats rápidos ── */}
+          <View style={{flexDirection:'row',gap:8,paddingHorizontal:22,marginBottom:14}}>
+            {[
+              { label:'Total', value:stockData?.length||0, icon:'package', color:T.blue },
+              { label:'Lembretes', value:lembretes.length, icon:'bell', color:T.amber },
+              { label:'Urgentes', value:totalUrgentes, icon:'alert-triangle', color:totalUrgentes>0?T.red:T.green },
+            ].map(s=>(
+              <View key={s.label} style={{
+                flex:1, backgroundColor:T.bgElevated, borderRadius:16, padding:10,
+                borderWidth:1.5, borderColor:s.color+'25', alignItems:'center',
+                shadowColor:s.color, shadowOpacity:0.08, shadowRadius:6, elevation:2,
+              }}>
+                <Feather name={s.icon} size={16} color={s.color} style={{marginBottom:4}} />
+                <Text style={{fontSize:18*fontScale,fontWeight:'900',color:s.color,lineHeight:20*fontScale}}>{s.value}</Text>
+                <Text style={{fontSize:9*fontScale,color:T.textMuted,fontWeight:'700',textTransform:'uppercase',letterSpacing:0.5,marginTop:2}}>{s.label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* ── Navegação por abas (pill pill pill) ── */}
+          <View style={{marginHorizontal:22,marginBottom:16}}>
+            <View style={{flexDirection:'row',backgroundColor:T.bgElevated,borderRadius:18,padding:4,position:'relative'}}>
+              {/* Indicador deslizante */}
+              <Animated.View style={{
+                position:'absolute', top:4, bottom:4, width:'33.33%',
+                left:tabLineLeft, borderRadius:14,
+                backgroundColor: TABS[tabIdx]?.color||T.purple,
+                shadowColor:TABS[tabIdx]?.color||T.purple,
+                shadowOpacity:0.5, shadowRadius:10, elevation:6,
+              }} />
+              {TABS.map((tab,i)=>{
+                const on=activeTab===tab.key;
+                const hasBadge=tab.key==='lembretes'&&lembretes.length>0;
+                return (
+                  <TouchableOpacity key={tab.key} onPress={()=>setActiveTab(tab.key)}
+                    style={{flex:1,paddingVertical:10,alignItems:'center',zIndex:1}}>
+                    <View style={{flexDirection:'row',alignItems:'center',gap:5}}>
+                      <Feather name={tab.icon} size={14} color={on?'#FFF':T.textMuted} />
+                      <Text style={{fontSize:11*fontScale,fontWeight:'900',color:on?'#FFF':T.textMuted}}>{tab.label}</Text>
+                      {hasBadge&&(
+                        <View style={{width:16,height:16,borderRadius:8,backgroundColor:on?'rgba(255,255,255,0.3)':tab.color,justifyContent:'center',alignItems:'center'}}>
+                          <Text style={{fontSize:8,fontWeight:'900',color:on?'#FFF':'#FFF'}}>{lembretes.length}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1}}>
+            <ScrollView style={{flex:1,paddingHorizontal:22}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+              {/* ══════════════════ ABA RESUMO ══════════════════ */}
+              {activeTab==='resumo'&&(<>
+                {/* Caixa de texto IA com borda animada */}
+                <View style={{
+                  backgroundColor:T.bgElevated, borderRadius:24, padding:20,
+                  borderWidth:1.5, borderColor:T.purple+'30', marginBottom:14,
+                  minHeight:90,
+                  shadowColor:T.purple, shadowOpacity:0.06, shadowRadius:12, elevation:3,
+                }}>
+                  <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:10}}>
+                    <View style={{width:28,height:28,borderRadius:9,backgroundColor:T.purple+'18',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.purple+'30'}}>
+                      <MaterialCommunityIcons name="brain" size={14} color={T.purple} />
+                    </View>
+                    <Text style={{fontSize:10*fontScale,fontWeight:'900',color:T.purple,textTransform:'uppercase',letterSpacing:1.2}}>Análise IA — Groq + Gemini</Text>
+                    {isLoading&&<ActivityIndicator size="small" color={T.purple} style={{marginLeft:'auto'}} />}
+                  </View>
+                  {isLoading&&!displayedText
+                    ? <View style={{alignItems:'center',paddingVertical:16,gap:8}}>
+                        <MaterialCommunityIcons name="robot-excited-outline" size={36} color={T.purple+'60'} />
+                        <Text style={{color:T.textSub,fontSize:12*fontScale,fontWeight:'700'}}>GEI analisando o estoque...</Text>
+                      </View>
+                    : <>
+                        <Text style={{fontSize:13.5*fontScale,color:T.text,fontWeight:'500',lineHeight:22}}>{displayedText}</Text>
+                        {isTyping&&<Text style={{color:T.purple,fontSize:20,fontWeight:'900'}}>▌</Text>}
+                      </>
+                  }
+                </View>
+
+                {/* Botão atualizar */}
+                <TouchableOpacity onPress={()=>{if(!isLoading&&!isTyping){setDisplayedText('');gerarResumo(stockData);}}}
+                  disabled={isLoading||isTyping}
+                  style={{flexDirection:'row',alignItems:'center',justifyContent:'center',gap:8,
+                    backgroundColor:T.purple+'12',borderRadius:14,paddingVertical:11,
+                    borderWidth:1,borderColor:T.purple+'25',marginBottom:16,
+                    opacity:(isLoading||isTyping)?0.5:1}}>
+                  <Feather name="refresh-cw" size={14} color={T.purple} />
+                  <Text style={{fontSize:13*fontScale,fontWeight:'800',color:T.purple}}>
+                    {isLoading?'Analisando...':isTyping?'Digitando...':'Nova análise'}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Preview de alertas rápidos */}
+                {lAuto.length>0&&(
+                  <View style={{backgroundColor:T.amberGlow,borderRadius:18,padding:14,borderWidth:1.5,borderColor:T.amber+'35',marginBottom:14}}>
+                    <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:8}}>
+                      <View style={{width:32,height:32,borderRadius:10,backgroundColor:T.amber+'25',justifyContent:'center',alignItems:'center'}}>
+                        <MaterialCommunityIcons name="bell-badge-outline" size={17} color={T.amber} />
+                      </View>
+                      <Text style={{fontSize:12*fontScale,fontWeight:'900',color:T.amber}}>
+                        {lAuto.length} lembrete{lAuto.length>1?'s':''} de vencimento ativo{lAuto.length>1?'s':''}
+                      </Text>
+                    </View>
+                    <Text style={{fontSize:11*fontScale,color:T.amber,fontWeight:'600',lineHeight:17,marginBottom:8}}>
+                      🔔 Notificações agendadas automaticamente para {lAuto.length} produto{lAuto.length>1?'s':''} vencendo em ≤15 dias — ativas mesmo com app fechado.
+                    </Text>
+                    <TouchableOpacity onPress={()=>setActiveTab('lembretes')}
+                      style={{paddingVertical:8,borderRadius:10,backgroundColor:T.amber+'20',alignItems:'center',borderWidth:1,borderColor:T.amber+'40'}}>
+                      <Text style={{fontSize:11*fontScale,fontWeight:'900',color:T.amber}}>Ver lembretes →</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* CTA criar lembrete */}
+                <TouchableOpacity onPress={()=>setActiveTab('novo')}
+                  style={{flexDirection:'row',alignItems:'center',gap:10,
+                    backgroundColor:T.green+'12',borderRadius:16,paddingVertical:12,paddingHorizontal:14,
+                    borderWidth:1.5,borderColor:T.green+'25',marginBottom:20}}>
+                  <View style={{width:34,height:34,borderRadius:11,backgroundColor:T.greenGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.green+'30'}}>
+                    <MaterialCommunityIcons name="bell-plus-outline" size={18} color={T.green} />
+                  </View>
+                  <View style={{flex:1}}>
+                    <Text style={{fontSize:13*fontScale,fontWeight:'900',color:T.green}}>Criar lembrete personalizado</Text>
+                    <Text style={{fontSize:10*fontScale,color:T.textSub,fontWeight:'600',marginTop:1}}>Defina texto, horário e data por voz ou teclado</Text>
+                  </View>
+                  <Feather name="chevron-right" size={16} color={T.green} />
+                </TouchableOpacity>
+              </>)}
+
+              {/* ══════════════════ ABA LEMBRETES ══════════════════ */}
+              {activeTab==='lembretes'&&(<>
+
+                {/* Lembretes de vencimento automáticos */}
+                {lAuto.length>0&&(
+                  <View style={{marginBottom:22}}>
+                    <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:12}}>
+                      <View style={{width:26,height:26,borderRadius:8,backgroundColor:T.amberGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.amber+'30'}}>
+                        <Feather name="clock" size={13} color={T.amber} />
+                      </View>
+                      <Text style={{fontSize:11*fontScale,fontWeight:'900',color:T.amber,textTransform:'uppercase',letterSpacing:1.1}}>
+                        Vencimentos ({lAuto.length})
+                      </Text>
+                    </View>
+                    {lAuto.map(item=>{
+                      const dias=getDias(item.validade);
+                      const {cor,emoji,label,bg}=getDiasCorAndEmoji(dias);
+                      return (
+                        <View key={item.id} style={{
+                          backgroundColor:T.bgElevated, borderRadius:18, padding:14,
+                          borderWidth:1.5, borderColor:cor+'25', marginBottom:8,
+                          flexDirection:'row', alignItems:'center', gap:12,
+                          shadowColor:cor, shadowOpacity:0.06, shadowRadius:8, elevation:2,
+                        }}>
+                          {/* Indicador de urgência */}
+                          <View style={{width:46,height:46,borderRadius:14,backgroundColor:bg,justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:cor+'35'}}>
+                            <Text style={{fontSize:20}}>{emoji}</Text>
+                          </View>
+                          <View style={{flex:1,gap:3}}>
+                            <Text style={{fontSize:13*fontScale,fontWeight:'900',color:T.text}} numberOfLines={1}>{item.produto}</Text>
+                            <View style={{flexDirection:'row',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                              <View style={{paddingHorizontal:7,paddingVertical:2,borderRadius:6,backgroundColor:cor+'18',borderWidth:1,borderColor:cor+'35'}}>
+                                <Text style={{fontSize:10*fontScale,fontWeight:'800',color:cor}}>{label}</Text>
+                              </View>
+                              <View style={{flexDirection:'row',alignItems:'center',gap:3,paddingHorizontal:6,paddingVertical:2,borderRadius:6,backgroundColor:T.bgInput,borderWidth:1,borderColor:T.border}}>
+                                <Feather name="clock" size={9} color={T.textMuted} />
+                                <Text style={{fontSize:9*fontScale,color:T.textMuted,fontWeight:'700'}}>{item.horario||'10:00'}</Text>
+                              </View>
+                              {item.validade?<Text style={{fontSize:9*fontScale,color:T.textMuted}}>📅 {item.validade}</Text>:null}
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            onPress={()=>Alert.alert('Remover',`Remover lembrete de "${item.produto}"?`,[{text:'Cancelar',style:'cancel'},{text:'Remover',style:'destructive',onPress:()=>removerLembrete(item)}])}
+                            style={{width:32,height:32,borderRadius:10,backgroundColor:T.redGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.red+'25'}}>
+                            <Feather name="trash-2" size={13} color={T.red} />
+                          </TouchableOpacity>
+                        </View>
+                      );
+                    })}
+                    <View style={{backgroundColor:T.amberGlow,borderRadius:12,padding:10,borderWidth:1,borderColor:T.amber+'25',marginTop:2}}>
+                      <Text style={{fontSize:10*fontScale,color:T.amber,fontWeight:'700',lineHeight:16}}>
+                        🔔 Notificações ativas mesmo com o app em segundo plano ou fechado.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Lembretes personalizados */}
+                {lCustom.length>0&&(
+                  <View style={{marginBottom:22}}>
+                    <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:12}}>
+                      <View style={{width:26,height:26,borderRadius:8,backgroundColor:T.blueGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.blue+'30'}}>
+                        <Feather name="star" size={12} color={T.blue} />
+                      </View>
+                      <Text style={{fontSize:11*fontScale,fontWeight:'900',color:T.blue,textTransform:'uppercase',letterSpacing:1.1}}>
+                        Personalizados ({lCustom.length})
+                      </Text>
+                    </View>
+                    {lCustom.map(item=>(
+                      <View key={item.id} style={{
+                        backgroundColor:T.bgElevated, borderRadius:18, padding:14,
+                        borderWidth:1.5, borderColor:T.blue+'25', marginBottom:8,
+                        shadowColor:T.blue, shadowOpacity:0.06, shadowRadius:8, elevation:2,
+                      }}>
+                        <View style={{flexDirection:'row',alignItems:'flex-start',gap:12}}>
+                          <View style={{width:42,height:42,borderRadius:13,backgroundColor:T.blueGlow,justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:T.blue+'30'}}>
+                            <MaterialCommunityIcons name="bell-ring-outline" size={20} color={T.blue} />
+                          </View>
+                          <View style={{flex:1}}>
+                            <Text style={{fontSize:13*fontScale,fontWeight:'900',color:T.text,marginBottom:5}} numberOfLines={2}>{item.produto}</Text>
+                            <View style={{flexDirection:'row',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                              <View style={{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:T.blue+'14',paddingHorizontal:8,paddingVertical:3,borderRadius:8,borderWidth:1,borderColor:T.blue+'25'}}>
+                                <Feather name="clock" size={11} color={T.blue} />
+                                <Text style={{fontSize:11*fontScale,fontWeight:'800',color:T.blue}}>às {item.horario||'10:00'}</Text>
+                              </View>
+                              {item.validade?<View style={{flexDirection:'row',alignItems:'center',gap:4,backgroundColor:T.bgInput,paddingHorizontal:7,paddingVertical:3,borderRadius:8,borderWidth:1,borderColor:T.border}}><Feather name="calendar" size={10} color={T.textMuted}/><Text style={{fontSize:10*fontScale,color:T.textMuted,fontWeight:'600'}}>{item.validade}</Text></View>:null}
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            onPress={()=>Alert.alert('Remover',`Remover "${item.produto}"?`,[{text:'Cancelar',style:'cancel'},{text:'Remover',style:'destructive',onPress:()=>removerLembrete(item)}])}
+                            style={{width:32,height:32,borderRadius:10,backgroundColor:T.redGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.red+'25'}}>
+                            <Feather name="trash-2" size={13} color={T.red} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Estado vazio */}
+                {lembretes.length===0&&(
+                  <View style={{alignItems:'center',paddingVertical:50,gap:12}}>
+                    <View style={{width:80,height:80,borderRadius:28,backgroundColor:T.bgElevated,justifyContent:'center',alignItems:'center',borderWidth:2,borderColor:T.border,borderStyle:'dashed'}}>
+                      <MaterialCommunityIcons name="bell-off-outline" size={40} color={T.textMuted} />
+                    </View>
+                    <Text style={{fontSize:16*fontScale,fontWeight:'900',color:T.text,marginTop:6}}>Nenhum lembrete ativo</Text>
+                    <Text style={{fontSize:12*fontScale,color:T.textSub,textAlign:'center',lineHeight:18,paddingHorizontal:30}}>
+                      Produtos vencendo em ≤15 dias serão notificados automaticamente. Ou crie um lembrete personalizado agora.
+                    </Text>
+                    <TouchableOpacity onPress={()=>setActiveTab('novo')}
+                      style={{marginTop:8,paddingHorizontal:24,paddingVertical:13,borderRadius:16,backgroundColor:T.green,shadowColor:T.green,shadowOpacity:0.4,shadowRadius:12,elevation:6,flexDirection:'row',alignItems:'center',gap:8}}>
+                      <MaterialCommunityIcons name="bell-plus-outline" size={18} color="#FFF" />
+                      <Text style={{fontSize:14*fontScale,fontWeight:'900',color:'#FFF'}}>Criar primeiro lembrete</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>)}
+
+              {/* ══════════════════ ABA NOVO LEMBRETE ══════════════════ */}
+              {activeTab==='novo'&&(<>
+
+                {/* Feedback de salvo */}
+                <Animated.View style={{
+                  overflow:'hidden',
+                  maxHeight:saveAnim.interpolate({inputRange:[0,1],outputRange:[0,52]}),
+                  opacity:saveAnim,marginBottom:saveAnim.interpolate({inputRange:[0,1],outputRange:[0,12]}),
+                }}>
+                  <View style={{backgroundColor:T.greenGlow,borderRadius:14,padding:12,flexDirection:'row',alignItems:'center',gap:10,borderWidth:1.5,borderColor:T.green+'40'}}>
+                    <Feather name="check-circle" size={18} color={T.green} />
+                    <Text style={{fontSize:13*fontScale,fontWeight:'800',color:T.green}}>Lembrete criado com sucesso!</Text>
+                  </View>
+                </Animated.View>
+
+                <View style={{
+                  backgroundColor:T.bgElevated,borderRadius:24,padding:20,
+                  borderWidth:1.5,borderColor:T.green+'25',marginBottom:16,
+                  shadowColor:T.green,shadowOpacity:0.05,shadowRadius:16,elevation:3,
+                }}>
+                  {/* Título */}
+                  <View style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:18}}>
+                    <View style={{width:44,height:44,borderRadius:14,backgroundColor:T.greenGlow,justifyContent:'center',alignItems:'center',borderWidth:2,borderColor:T.green+'35',shadowColor:T.green,shadowOpacity:0.3,shadowRadius:8,elevation:4}}>
+                      <MaterialCommunityIcons name="bell-plus-outline" size={23} color={T.green} />
+                    </View>
+                    <View>
+                      <Text style={{fontSize:15*fontScale,fontWeight:'900',color:T.text}}>Novo Lembrete</Text>
+                      <Text style={{fontSize:10*fontScale,color:T.textSub,fontWeight:'600',marginTop:1}}>Horário pode ser definido por voz 🎤</Text>
+                    </View>
+                  </View>
+
+                  {/* Campo texto */}
+                  <Text style={{fontSize:11*fontScale,fontWeight:'800',color:T.textSub,marginBottom:7,textTransform:'uppercase',letterSpacing:0.6}}>📝 Descrição</Text>
+                  <TextInput
+                    style={{
+                      backgroundColor:T.bgInput, borderWidth:1.5,
+                      borderColor:novoTexto?T.green:T.border, borderRadius:16,
+                      padding:14, color:T.text, fontSize:14*fontScale,
+                      marginBottom:4, minHeight:60, textAlignVertical:'top',
+                    }}
+                    placeholder="Ex: Verificar estoque de bebidas, Pedir reposição..."
+                    placeholderTextColor={T.textMuted}
+                    value={novoTexto}
+                    onChangeText={setNovoTexto}
+                    multiline maxLength={200}
+                  />
+                  <Text style={{fontSize:9*fontScale,color:T.textMuted,textAlign:'right',marginBottom:16}}>{novoTexto.length}/200</Text>
+
+                  {/* Campo horário + botão voz */}
+                  <Text style={{fontSize:11*fontScale,fontWeight:'800',color:T.textSub,marginBottom:7,textTransform:'uppercase',letterSpacing:0.6}}>🕐 Horário da notificação</Text>
+                  <View style={{flexDirection:'row',gap:10,marginBottom:8,alignItems:'center'}}>
+                    <View style={{flex:1,position:'relative'}}>
+                      <TextInput
+                        style={{
+                          backgroundColor:T.bgInput, borderWidth:1.5,
+                          borderColor:novoHorario?T.blue:T.border, borderRadius:16,
+                          padding:14, paddingRight:14, color:T.text,
+                          fontSize:20*fontScale, fontWeight:'900', textAlign:'center',
+                          letterSpacing:2,
+                        }}
+                        placeholder="10:00"
+                        placeholderTextColor={T.textMuted}
+                        value={novoHorario}
+                        onChangeText={v=>{
+                          let n=v.replace(/[^0-9:]/g,'');
+                          if(n.length===4&&!n.includes(':')) n=`${n.slice(0,2)}:${n.slice(2)}`;
+                          setNovoHorario(n.slice(0,5));
+                        }}
+                        keyboardType="numbers-and-punctuation" maxLength={5}
+                      />
+                      {/* Badge de turno ao lado do campo de horário */}
+                      {/^\d{2}:\d{2}$/.test(novoHorario) && (() => {
+                        const h = parseInt(novoHorario.split(':')[0], 10);
+                        const turno = h >= 5 && h < 12 ? { label:'Manhã', emoji:'🌅', color:T.amber }
+                                    : h >= 12 && h < 18 ? { label:'Tarde', emoji:'☀️', color:T.orange }
+                                    : { label:'Noite', emoji:'🌙', color:T.purple };
+                        return (
+                          <View style={{
+                            position:'absolute', top:10, right:10,
+                            flexDirection:'row', alignItems:'center', gap:4,
+                            backgroundColor:turno.color+'18', borderRadius:10,
+                            paddingHorizontal:8, paddingVertical:3,
+                            borderWidth:1, borderColor:turno.color+'35',
+                          }}>
+                            <Text style={{fontSize:12}}>{turno.emoji}</Text>
+                            <Text style={{fontSize:10*fontScale, fontWeight:'800', color:turno.color}}>{turno.label}</Text>
+                          </View>
+                        );
+                      })()}
+                    </View>
+                    {/* Botão mic com feedback visual */}
+                    <TouchableOpacity onPress={ouvirHorarioPorVoz}
+                      style={{
+                        width:58,height:58,borderRadius:18,
+                        justifyContent:'center',alignItems:'center',
+                        backgroundColor:ouvinHorario?T.red:T.blue,
+                        shadowColor:ouvinHorario?T.red:T.blue,
+                        shadowOpacity:0.5,shadowRadius:12,elevation:6,
+                        borderWidth:2,borderColor:ouvinHorario?T.red:T.blue+'80',
+                      }}>
+                      {ouvinHorario
+                        ? <ActivityIndicator size="small" color="#FFF" />
+                        : <MaterialCommunityIcons name="microphone" size={26} color="#FFF" />
+                      }
+                    </TouchableOpacity>
+                  </View>
+                  {ouvinHorario&&(
+                    <View style={{backgroundColor:T.redGlow,borderRadius:12,padding:10,marginBottom:8,borderWidth:1,borderColor:T.red+'30',flexDirection:'row',alignItems:'center',gap:8}}>
+                      <View style={{width:8,height:8,borderRadius:4,backgroundColor:T.red}} />
+                      <Text style={{fontSize:11*fontScale,color:T.red,fontWeight:'800'}}>Ouvindo... diga o horário agora!</Text>
+                    </View>
+                  )}
+                  <Text style={{fontSize:10*fontScale,color:T.textMuted,marginBottom:18,lineHeight:15}}>
+                    💡 Diga: "às dez da manhã", "às quatorze horas e trinta", "8h30"...
+                  </Text>
+
+                  {/* Campo data opcional */}
+                  <Text style={{fontSize:11*fontScale,fontWeight:'800',color:T.textSub,marginBottom:7,textTransform:'uppercase',letterSpacing:0.6}}>📅 Data (opcional)</Text>
+                  <TextInput
+                    style={{
+                      backgroundColor:T.bgInput, borderWidth:1.5,
+                      borderColor:novoData?T.teal:T.border, borderRadius:16,
+                      padding:14, color:T.text, fontSize:14*fontScale, marginBottom:5,
+                    }}
+                    placeholder="dd/mm/aaaa — deixe vazio para hoje/amanhã"
+                    placeholderTextColor={T.textMuted}
+                    value={novoData}
+                    onChangeText={v=>{
+                      let n=v.replace(/[^0-9/]/g,'');
+                      if(n.length===2&&!n.includes('/')&&novoData.length<2) n+='/';
+                      else if(n.length===5&&n.split('/').length<3) n+='/';
+                      setNovoData(n.slice(0,10));
+                    }}
+                    keyboardType="numbers-and-punctuation" maxLength={10}
+                  />
+                  <Text style={{fontSize:9*fontScale,color:T.textMuted,marginBottom:20,lineHeight:14}}>
+                    Sem data = notificação hoje (se horário futuro) ou amanhã.
+                  </Text>
+
+                  {/* Botão salvar */}
+                  <TouchableOpacity onPress={salvarLembrete} disabled={salvando||!novoTexto.trim()}
+                    style={{
+                      height:58, borderRadius:18,
+                      backgroundColor:(!novoTexto.trim())?T.bgInput:T.green,
+                      justifyContent:'center', alignItems:'center',
+                      flexDirection:'row', gap:10,
+                      shadowColor:T.green, shadowOpacity:(!novoTexto.trim())?0:0.5,
+                      shadowRadius:16, elevation:(!novoTexto.trim())?0:8,
+                      borderWidth:1.5, borderColor:(!novoTexto.trim())?T.border:T.green,
+                    }}>
+                    {salvando
+                      ? <ActivityIndicator color="#FFF" size="small" />
+                      : <MaterialCommunityIcons name="bell-check-outline" size={22} color={(!novoTexto.trim())?T.textMuted:'#FFF'} />
+                    }
+                    <Text style={{fontSize:16*fontScale,fontWeight:'900',color:(!novoTexto.trim())?T.textMuted:'#FFF'}}>
+                      {salvando?'Criando...':'Criar Lembrete'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Card informativo */}
+                <View style={{backgroundColor:T.blueGlow,borderRadius:18,padding:16,borderWidth:1.5,borderColor:T.blue+'25',marginBottom:24}}>
+                  <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:8}}>
+                    <MaterialCommunityIcons name="shield-check-outline" size={18} color={T.blue} />
+                    <Text style={{fontSize:12*fontScale,fontWeight:'900',color:T.blue}}>Notificações em segundo plano</Text>
+                  </View>
+                  <Text style={{fontSize:11*fontScale,color:T.textSub,fontWeight:'600',lineHeight:17}}>
+                    O GEI.AI usa o sistema nativo de notificações do Android/iOS. Os lembretes disparam mesmo com o app fechado, em modo silencioso ou em segundo plano — sem nenhuma ação sua.
+                  </Text>
+                </View>
+              </>)}
+
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
 // ── Wake words e comandos ────────────────────────────────────────────────────
 const WAKE_WORDS_LIST = [
   'abrir painel','abre painel','abrir o painel','entrar painel',
   'abrir assistente','ativar assistente','oi gei','ola gei','ei gei',
   'hey gei','cadastrar produto','novo produto','gei cadastrar',
   'gei assistente','chamar assistente','registrar produto',
+  'qual a boa','qual e a boa','qual e a novidade','me conta as novidades',
+  'criar lembrete','novo lembrete','adicionar lembrete','lembrete novo',
 ];
 const stripAccents = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const detectWakeWord = (text) => {
@@ -3111,7 +4379,12 @@ const VS = {
   IDLE:'idle', PROD:'product', QTY:'qty',
   DATE:'date', GIRO:'giro', CONFIRM:'confirm', SAVING:'saving',
   FIFO_MATCH:'fifo_match', EDIT_WHAT:'edit_what', EDIT_VALUE:'edit_value',
-  CORRECT_FIELD:'correct_field', CORRECT_VALUE:'correct_value', // ✅ correção inteligente mid-flow
+  CORRECT_FIELD:'correct_field', CORRECT_VALUE:'correct_value',
+  // ── Fluxo lembrete step-by-step ──────────────────────────────────────────
+  LEM_TEXTO:'lem_texto',   // aguardando o texto do lembrete
+  LEM_DATA:'lem_data',     // aguardando a data
+  LEM_HORA:'lem_hora',     // aguardando o horário
+  LEM_CONFIRM:'lem_confirm', // confirmação final
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3135,6 +4408,10 @@ const VoiceAssistant = ({
   // Dados coletados
   const dataRef = useRef({ nome:'', qty:'', date:'', giro:'Médio giro' });
   const [collected, setCollected] = useState({ nome:'', qty:'', date:'', giro:'' });
+
+  // ── Dados do lembrete step-by-step ───────────────────────────────────────
+  const lemRef = useRef({ texto:'', data:'', hora:'10:00' });
+  const [lemCollected, setLemCollected] = useState({ texto:'', data:'', hora:'' });
 
   // ✅ Correção inteligente: guarda qual etapa retomar e qual campo está sendo corrigido
   const lastCompletedStepRef = useRef(VS.IDLE); // última etapa concluída antes do "corrigir"
@@ -3453,23 +4730,176 @@ const VoiceAssistant = ({
     }
 
     // Corrigir durante confirmação
+    
+    // Corrigir durante confirmação - Agora pergunta o que corrigir
     if (cur === VS.CONFIRM && isCorrectCmd(text)) {
-      setVsStateBoth(VS.PROD);
-      dataRef.current = { nome:'', qty:'', date:'', giro:'Médio giro' };
-      setCollected({ nome:'', qty:'', date:'', giro:'' });
-      speak('Ok, vamos recomeçar. Qual o nome do produto?', () => listenAfterSpeak());
+      setVsStateBoth(VS.EDIT_WHAT);
+      speak('O que você deseja corrigir? Nome, quantidade, vencimento ou giro?', () => listenAfterSpeak());
       return;
     }
 
+
     switch (cur) {
       case VS.IDLE: {
+        // ── Lembrete step-by-step: "me lembre de passar data amanhã" ─────────
+        if (detectLembreteCmd(text)) {
+          const textoExtraido = extractLembreteTexto(text);
+          lemRef.current = { texto:'', data:'', hora:'10:00' };
+          setLemCollected({ texto:'', data:'', hora:'' });
+          if (textoExtraido && textoExtraido.length > 3 && !detectLembreteCmd(textoExtraido)) {
+            // Já tem o texto na frase → pula direto para data
+            lemRef.current.texto = textoExtraido;
+            setLemCollected(p => ({ ...p, texto: textoExtraido }));
+            setVsStateBoth(VS.LEM_DATA);
+            speak(`Anotei: "${textoExtraido}". Para qual data é esse lembrete? Diga por exemplo "amanhã", "sexta-feira" ou "15 de julho".`, () => listenAfterSpeak(1200));
+          } else {
+            setVsStateBoth(VS.LEM_TEXTO);
+            speak('Claro! O que devo te lembrar? Descreva o lembrete.', () => listenAfterSpeak());
+          }
+          return;
+        }
         if (detectWakeWord(text)) {
           setVsStateBoth(VS.PROD);
           retryRef.current = 0;
           speak('Pronto! Qual o nome do produto que deseja cadastrar?', () => listenAfterSpeak());
         } else {
-          speak('Diga "cadastrar produto" ou "abrir painel" para começar.', () => listenAfterSpeak(600));
+          speak('Diga "cadastrar produto" ou "me lembre de algo" para começar.', () => listenAfterSpeak(600));
         }
+        break;
+      }
+
+      // ── Etapa 1: texto do lembrete ────────────────────────────────────────
+      case VS.LEM_TEXTO: {
+        if (!text || text.trim().length < 2) {
+          speak('Não entendi. O que devo te lembrar?', () => listenAfterSpeak());
+          return;
+        }
+        lemRef.current.texto = text.trim();
+        setLemCollected(p => ({ ...p, texto: text.trim() }));
+        setVsStateBoth(VS.LEM_DATA);
+        speak(`Anotei: "${text.trim()}". Para qual data? Diga por exemplo "amanhã", "sexta-feira" ou "15 de julho".`, () => listenAfterSpeak(1200));
+        break;
+      }
+
+      // ── Etapa 2: data do lembrete ─────────────────────────────────────────
+      case VS.LEM_DATA: {
+        const n = stripAccents(text.toLowerCase());
+        let dataStr = null;
+        // Atalhos relativos
+        const hoje = new Date();
+        // "data de cadastro", "data de registro", "data de entrada do produto"
+        // → usa hoje como data, é a data de quando o produto foi registrado
+        if (/\b(data\s+(de\s+)?(cadastro|cadastramento|registro|entrada|envio|compra|aquisicao|recebimento))\b/.test(n)
+          || /\bcadastro\s+do\s+produto\b/.test(n)) {
+          dataStr = hoje.toLocaleDateString('pt-BR');
+        } else if (/\bamanha\b/.test(n)) {
+          const d = new Date(hoje); d.setDate(d.getDate() + 1);
+          dataStr = d.toLocaleDateString('pt-BR');
+        } else if (/\bhoje\b|\bagora\b/.test(n)) {
+          dataStr = hoje.toLocaleDateString('pt-BR');
+        } else if (/\bsemana que vem\b|\bproxima semana\b/.test(n)) {
+          const d = new Date(hoje); d.setDate(d.getDate() + 7);
+          dataStr = d.toLocaleDateString('pt-BR');
+        } else if (/\bdepois\s+de\s+amanha\b/.test(n)) {
+          const d = new Date(hoje); d.setDate(d.getDate() + 2);
+          dataStr = d.toLocaleDateString('pt-BR');
+        } else if (/\bem\s+(\d+)\s+dias?\b/.test(n)) {
+          const match = n.match(/em\s+(\d+)\s+dias?/);
+          if (match) {
+            const d = new Date(hoje); d.setDate(d.getDate() + parseInt(match[1]));
+            dataStr = d.toLocaleDateString('pt-BR');
+          }
+        } else {
+          // Dias da semana
+          const diasSemana = { 'segunda feira':1, segunda:1, terca:2, quarta:3, quinta:4, sexta:5, sabado:6, domingo:0 };
+          for (const [nome, diaNum] of Object.entries(diasSemana)) {
+            if (n.includes(nome)) {
+              const d = new Date(hoje);
+              const diff = (diaNum - d.getDay() + 7) % 7 || 7;
+              d.setDate(d.getDate() + diff);
+              dataStr = d.toLocaleDateString('pt-BR');
+              break;
+            }
+          }
+          // Data por extenso
+          if (!dataStr) dataStr = parsePortugueseDate(text);
+        }
+        if (!dataStr) {
+          speak('Não entendi a data. Diga por exemplo "amanhã", "sexta-feira", "15 de julho" ou "em 3 dias".', () => listenAfterSpeak(2000));
+          return;
+        }
+        lemRef.current.data = dataStr;
+        setLemCollected(p => ({ ...p, data: dataStr }));
+        setVsStateBoth(VS.LEM_HORA);
+        speak(`Data anotada: ${dataStr}. Que horas devo te avisar? Diga por exemplo "às oito da manhã" ou "às duas da tarde".`, () => listenAfterSpeak(1400));
+        break;
+      }
+
+      // ── Etapa 3: horário do lembrete ──────────────────────────────────────
+      case VS.LEM_HORA: {
+        const horaStr = parseHorarioVoz(text) || '10:00';
+        lemRef.current.hora = horaStr;
+        setLemCollected(p => ({ ...p, hora: horaStr }));
+        setVsStateBoth(VS.LEM_CONFIRM);
+        const [hh, mm] = horaStr.split(':');
+        const horaFalada = mm === '00' ? `${parseInt(hh)} horas` : `${parseInt(hh)} e ${mm} minutos`;
+        speak(`Tudo certo! Vou te lembrar: "${lemRef.current.texto}", no dia ${lemRef.current.data} às ${horaFalada}. Confirma?`, () => listenAfterSpeak(1200));
+        break;
+      }
+
+      // ── Etapa 4: confirmar e salvar lembrete ──────────────────────────────
+      case VS.LEM_CONFIRM: {
+        const n2 = stripAccents(text.toLowerCase());
+        const confirmou = /(sim|confirma|confirmo|pode|ok|isso|certo|correto|salva|salvar|perfeito|exato|ótimo|otimo|com certeza)/.test(n2);
+        const cancelou  = /(nao|não|cancela|cancelo|errado|errada|muda|mudar|corrige|corrigir|volta|voltar)/.test(n2);
+        if (cancelou) {
+          lemRef.current = { texto:'', data:'', hora:'10:00' };
+          setLemCollected({ texto:'', data:'', hora:'' });
+          setVsStateBoth(VS.IDLE);
+          speak('Lembrete cancelado. Diga o que quiser fazer.', () => listenAfterSpeak());
+          return;
+        }
+        if (!confirmou) {
+          speak('Não entendi. Diga "sim" para confirmar ou "cancelar" para desistir.', () => listenAfterSpeak());
+          return;
+        }
+        // Salva lembrete
+        (async () => {
+          try {
+            const granted = await requestNotifPermission();
+            if (!granted) {
+              // requestNotifPermission já mostrou Alert com opção de abrir configurações
+              // Encerra o fluxo de voz e fecha o assistente
+              speak('Para eu te avisar, você precisa autorizar as notificações. Verifique as configurações do seu aparelho.', () => {
+                setTimeout(() => onClose(), 2200);
+              });
+              setVsStateBoth(VS.IDLE);
+              return;
+            }
+            await initNotifChannel();
+            const notifId = await scheduleCustomLembrete(lemRef.current.texto, lemRef.current.hora, lemRef.current.data || null);
+            if (!notifId) {
+              speak('Não consegui agendar. O horário já passou. Tente um horário futuro.', () => listenAfterSpeak());
+              setVsStateBoth(VS.IDLE);
+              return;
+            }
+            const lista = await getLembretes();
+            const novo = { id:`voice-${Date.now()}`, produto: lemRef.current.texto, validade: lemRef.current.data || '', notifId, horario: lemRef.current.hora, tipo:'personalizado', criadoEm: new Date().toISOString() };
+            await saveLembretes([novo, ...lista]);
+            setVsStateBoth(VS.IDLE);
+            const [hh2, mm2] = lemRef.current.hora.split(':');
+            const horaF = mm2 === '00' ? `${parseInt(hh2)} horas` : `${parseInt(hh2)} e ${mm2}`;
+            speak(`Lembrete salvo com sucesso! Vou te avisar no dia ${lemRef.current.data} às ${horaF}.`, () => {
+              // Fecha o assistente de voz após confirmar o salvamento
+              setTimeout(() => onClose(), 400);
+            });
+            lemRef.current = { texto:'', data:'', hora:'10:00' };
+            setLemCollected({ texto:'', data:'', hora:'' });
+          } catch (e) {
+            speak('Erro ao salvar o lembrete. Tente novamente.', () => listenAfterSpeak());
+            setVsStateBoth(VS.IDLE);
+          }
+        })();
         break;
       }
       case VS.PROD: {
@@ -3514,11 +4944,11 @@ const VoiceAssistant = ({
         const ln = stripAccents(text);
         let giro = 'Médio giro';
         // ── Grande giro ────────────────────────────────────────────────────
-        if (/(grande|alto|alta|muito|bastante|rapido|rapida|veloz|acelerado|acelerada|agil|ageis|frequente|forte|forte|vende muito|vende bastante|saida rapida|muito rapido|giro alto|alto giro|gira muito|giro grande|numero um|top|popular|campeao|campeao de vendas|mais vendido)/.test(ln)) giro = 'Grande giro';
+        if (/\b(grande|alto|alta|muito|bastante|rapido|rapida|veloz|acelerado|acelerada|agil|ageis|frequente|forte|forte|vende muito|vende bastante|saida rapida|muito rapido|giro alto|alto giro|gira muito|giro grande|numero um|top|popular|campeao|campeao de vendas|mais vendido)\b/.test(ln)) giro = 'Grande giro';
         // ── Pouco giro ─────────────────────────────────────────────────────
-        else if (/(pouco|baixo|baixa|lento|lenta|devagar|fraco|fraca|poucas|poucos|raramente|quase nao|nao vende|parado|parada|encalhado|encalhada|dificil|dificil de vender|pouca saida|giro baixo|baixo giro|giro lento|giro fraco|giro pouco|pouco giro|quase nada|nao sai|nao saiu)/.test(ln)) giro = 'Pouco giro';
+        else if (/\b(pouco|baixo|baixa|lento|lenta|devagar|fraco|fraca|poucas|poucos|raramente|quase nao|nao vende|parado|parada|encalhado|encalhada|dificil|dificil de vender|pouca saida|giro baixo|baixo giro|giro lento|giro fraco|giro pouco|pouco giro|quase nada|nao sai|nao saiu)\b/.test(ln)) giro = 'Pouco giro';
         // ── Médio giro ─────────────────────────────────────────────────────
-        else if (/(medio|media|normal|regular|regulare|moderado|moderada|razoavel|razoaveis|mediano|mediana|intermediario|equilibrado|padrao|mais ou menos|nem tanto|nao muito|mediano|giro medio|medio giro|giro normal|giro regular|ok|tanto faz|qualquer)/.test(ln)) giro = 'Médio giro';
+        else if (/\b(medio|media|normal|regular|regulare|moderado|moderada|razoavel|razoaveis|mediano|mediana|intermediario|equilibrado|padrao|mais ou menos|nem tanto|nao muito|mediano|giro medio|medio giro|giro normal|giro regular|ok|tanto faz|qualquer)\b/.test(ln)) giro = 'Médio giro';
         dataRef.current.giro = giro;
         setCollected(p => ({ ...p, giro }));
         setVsStateBoth(VS.CONFIRM);
@@ -3578,7 +5008,7 @@ const VoiceAssistant = ({
           const df = dataRef.current;
           setVsStateBoth(VS.SAVING); triggerSaveAnimation();
           speak('Cadastrando novo lote!', () => {
-            try { setProdName(df.nome); setQtd(df.qty); setValidade(df.date); setGiro(df.giro); setWStep(4); onComplete({ nome:df.nome, qty:df.qty, date:df.date, giro:df.giro }); } catch {}
+            try { setProdName(df.nome); setQtd(df.qty); setValidade(df.date); setGiro(df.giro); setWStep(4); onComplete({ nome:df.nome, qty:df.qty, date:df.date, giro:df.giro }); } catch (_e) { /* noop */ }
             setTimeout(() => onClose(), 1200);
           });
         } else if (/(alterar|mudar|editar|corrigir|trocar|modificar|atualizar)/.test(lf)) {
@@ -3598,7 +5028,7 @@ const VoiceAssistant = ({
             try {
               if (ex && doUpdateExisting) { await doUpdateExisting(ex.id, dw); }
               else { setProdName(dw.nome); setQtd(dw.qty); setValidade(dw.date); setGiro(dw.giro); setWStep(4); onComplete({ nome:dw.nome, qty:dw.qty, date:dw.date, giro:dw.giro }); }
-            } catch {}
+            } catch (_e) { /* noop */ }
             setTimeout(() => onClose(), 1200);
           });
         } else if (/(nome|produto|descri|chamado)/.test(lw)) {
@@ -3702,15 +5132,21 @@ const VoiceAssistant = ({
   if (!visible) return null;
 
   const isActive = isRecording || listening;
-  const STEP_LABELS = ['Ativação','Produto','Qtd.','Data','Giro','Confirmar'];
+  const isLembreteFlow = [VS.LEM_TEXTO, VS.LEM_DATA, VS.LEM_HORA, VS.LEM_CONFIRM].includes(vsState);
+
+  const STEP_LABELS     = isLembreteFlow
+    ? ['Ativação','Texto','Data','Horário','Confirmar']
+    : ['Ativação','Produto','Qtd.','Data','Giro','Confirmar'];
   const STATE_IDX = {
     [VS.IDLE]:0, [VS.PROD]:1, [VS.QTY]:2,
     [VS.DATE]:3, [VS.GIRO]:4, [VS.CONFIRM]:5, [VS.SAVING]:5,
     [VS.FIFO_MATCH]:5, [VS.EDIT_WHAT]:5, [VS.EDIT_VALUE]:5,
+    // ── Lembrete ──
+    [VS.LEM_TEXTO]:1, [VS.LEM_DATA]:2, [VS.LEM_HORA]:3, [VS.LEM_CONFIRM]:4,
   };
   const stepIdx = STATE_IDX[vsState] ?? 0;
   const STATE_LABEL = {
-    [VS.IDLE]:'Diga "cadastrar produto"...',
+    [VS.IDLE]:'Diga "cadastrar produto" ou "me lembre de..."',
     [VS.PROD]:'Diga o nome do produto',
     [VS.QTY]:'Diga a quantidade',
     [VS.DATE]:'Diga a data de vencimento',
@@ -3720,6 +5156,11 @@ const VoiceAssistant = ({
     [VS.FIFO_MATCH]:'Produto existente — novo lote ou alterar?',
     [VS.EDIT_WHAT]:'O que quer alterar?',
     [VS.EDIT_VALUE]:'Diga o novo valor',
+    // ── Lembrete ──
+    [VS.LEM_TEXTO]:'Descreva o lembrete',
+    [VS.LEM_DATA]:'Para qual data?',
+    [VS.LEM_HORA]:'Que horas devo avisar?',
+    [VS.LEM_CONFIRM]:'Confirme o lembrete',
   };
 
   return (
@@ -3796,24 +5237,51 @@ const VoiceAssistant = ({
             </View>
 
             {/* Dados coletados */}
-            <View style={{ backgroundColor:T.bgElevated, borderRadius:20, padding:14, marginBottom:14, gap:8, borderWidth:1, borderColor:T.border }}>
-              {[
-                { key:'nome',  label:'Produto',    icon:'package',    empty:'Aguardando...' },
-                { key:'qty',   label:'Quantidade', icon:'layers',     empty:'Aguardando...' },
-                { key:'date',  label:'Vencimento', icon:'calendar',   empty:'Aguardando...' },
-                { key:'giro',  label:'Giro',       icon:'trending-up',empty:'Aguardando...' },
-              ].map(f => (
-                <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
-                  <View style={{ width:32, height:32, borderRadius:10, backgroundColor:collected[f.key]?T.blue+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
-                    <Feather name={f.icon} size={15} color={collected[f.key]?T.blue:T.textMuted} />
+            <View style={{ backgroundColor:T.bgElevated, borderRadius:20, padding:14, marginBottom:14, gap:8, borderWidth:1, borderColor: isLembreteFlow ? T.amber+'40' : T.border }}>
+              {isLembreteFlow ? (
+                // ── Painel lembrete ──────────────────────────────────────────
+                <>
+                  <View style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:4 }}>
+                    <MaterialCommunityIcons name="bell-ring-outline" size={16} color={T.amber} />
+                    <Text style={{ fontSize:11*fontScale, fontWeight:'900', color:T.amber, textTransform:'uppercase', letterSpacing:1 }}>Criando Lembrete</Text>
                   </View>
-                  <Text style={{ fontSize:11*fontScale, fontWeight:'700', color:T.textMuted, width:76 }}>{f.label}</Text>
-                  <Text style={{ fontSize:13*fontScale, fontWeight:collected[f.key]?'900':'500', color:collected[f.key]?T.text:T.textMuted, flex:1 }} numberOfLines={1}>
-                    {collected[f.key] || f.empty}
-                  </Text>
-                  {collected[f.key] && <Feather name="check-circle" size={14} color={T.green} />}
-                </View>
-              ))}
+                  {[
+                    { key:'texto', label:'Lembrete', icon:'message-square', empty:'Aguardando descrição...' },
+                    { key:'data',  label:'Data',     icon:'calendar',       empty:'Aguardando data...' },
+                    { key:'hora',  label:'Horário',  icon:'clock',          empty:'Aguardando horário...' },
+                  ].map(f => (
+                    <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
+                      <View style={{ width:32, height:32, borderRadius:10, backgroundColor:lemCollected[f.key]?T.amber+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
+                        <Feather name={f.icon} size={15} color={lemCollected[f.key]?T.amber:T.textMuted} />
+                      </View>
+                      <Text style={{ fontSize:11*fontScale, fontWeight:'700', color:T.textMuted, width:66 }}>{f.label}</Text>
+                      <Text style={{ fontSize:13*fontScale, fontWeight:lemCollected[f.key]?'900':'500', color:lemCollected[f.key]?T.text:T.textMuted, flex:1 }} numberOfLines={2}>
+                        {lemCollected[f.key] || f.empty}
+                      </Text>
+                      {lemCollected[f.key] && <Feather name="check-circle" size={14} color={T.green} />}
+                    </View>
+                  ))}
+                </>
+              ) : (
+                // ── Painel cadastro produto ───────────────────────────────────
+                [
+                  { key:'nome',  label:'Produto',    icon:'package',    empty:'Aguardando...' },
+                  { key:'qty',   label:'Quantidade', icon:'layers',     empty:'Aguardando...' },
+                  { key:'date',  label:'Vencimento', icon:'calendar',   empty:'Aguardando...' },
+                  { key:'giro',  label:'Giro',       icon:'trending-up',empty:'Aguardando...' },
+                ].map(f => (
+                  <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
+                    <View style={{ width:32, height:32, borderRadius:10, backgroundColor:collected[f.key]?T.blue+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
+                      <Feather name={f.icon} size={15} color={collected[f.key]?T.blue:T.textMuted} />
+                    </View>
+                    <Text style={{ fontSize:11*fontScale, fontWeight:'700', color:T.textMuted, width:76 }}>{f.label}</Text>
+                    <Text style={{ fontSize:13*fontScale, fontWeight:collected[f.key]?'900':'500', color:collected[f.key]?T.text:T.textMuted, flex:1 }} numberOfLines={1}>
+                      {collected[f.key] || f.empty}
+                    </Text>
+                    {collected[f.key] && <Feather name="check-circle" size={14} color={T.green} />}
+                  </View>
+                ))
+              )}
             </View>
 
             {/* Transcrição / erro */}
@@ -3880,15 +5348,15 @@ const VoiceAssistant = ({
                 <Text style={{ color:T.red, fontWeight:'800', fontSize:13*fontScale }}>✕ Cancelar</Text>
               </TouchableOpacity>
 
-              {vsState === VS.CONFIRM && (
+              {(vsState === VS.CONFIRM || vsState === VS.LEM_CONFIRM) && (
                 <TouchableOpacity
                   onPress={() => handleVoiceInput('sim')}
-                  style={{ flex:2, height:46, borderRadius:14, backgroundColor:T.green, justifyContent:'center', alignItems:'center', shadowColor:T.green, shadowOpacity:0.4, shadowRadius:8, elevation:4 }}>
+                  style={{ flex:2, height:46, borderRadius:14, backgroundColor: vsState === VS.LEM_CONFIRM ? T.amber : T.green, justifyContent:'center', alignItems:'center', shadowColor: vsState === VS.LEM_CONFIRM ? T.amber : T.green, shadowOpacity:0.4, shadowRadius:8, elevation:4 }}>
                   <Text style={{ color:'#FFF', fontWeight:'900', fontSize:14*fontScale }}>✓ Confirmar</Text>
                 </TouchableOpacity>
               )}
 
-              {vsState === VS.CONFIRM && (
+              {(vsState === VS.CONFIRM || vsState === VS.LEM_CONFIRM) && (
                 <TouchableOpacity
                   onPress={() => handleVoiceInput('corrigir')}
                   style={{ flex:1, height:46, borderRadius:14, backgroundColor:T.blueGlow, justifyContent:'center', alignItems:'center', borderWidth:1, borderColor:T.blue+'30' }}>
@@ -3979,35 +5447,312 @@ const styles = StyleSheet.create({
 // ─── DEEPGRAM CONFIG ─────────────────────────────────────────────────────────
 const DEEPGRAM_API_KEY = '99ddf828d4529173c6396612133bc671247a3966';
 
-// ─── ELEVEN LABS CONFIG ──────────────────────────────────────────────────────
-const ELEVEN_LABS_API_KEY = 'sk_5eeaa17369322e234f74a50aff06a52d6e6a2c5edb3878b9';
-const ELEVEN_LABS_VOICE_ID = 'iP95p4xoKVk53GoZ742B'; // Premium voice — alta qualidade
+// ─── ELEVEN LABS CONFIG — POOL DE 3 CHAVES COM PRIORIDADE E CACHE ──────────
+// A chave que funcionou por último é salva no SafeStore e tentada PRIMEIRO
+// Ordem padrão: KEY1 (original) → KEY2 (nova1) → KEY3 (nova2) → KEY_SECONDARY (Baserow)
+// SEM fallback para Speech até esgotar TODAS as chaves ElevenLabs
+const ELEVEN_LABS_API_KEY   = 'sk_5eeaa17369322e234f74a50aff06a52d6e6a2c5edb3878b9';
+const ELEVEN_LABS_API_KEY2  = 'sk_e089d35e697bce9cfa17c90126ac8896660d541111309e23';
+const ELEVEN_LABS_API_KEY3  = 'sk_893c09253973be0f43d5718c72d29e708acc890ee0a6f16e';
+const ELEVEN_LABS_VOICE_ID  = 'pqHfZKP75CvOlQylNhV4'; // Bill — pt-BR nativo ElevenLabs
+const EL_LAST_KEY_STORE     = 'GEI_EL_LastWorkingKey'; // chave da última chamada ok
 
-// ─── FUNÇÃO PARA BUSCAR COTAS DO ELEVEN LABS ──────────────────────────────────
-const fetchElevenLabsQuota = async () => {
+// Pool de chaves em ordem de prioridade (chave do Baserow é adicionada em runtime)
+const _getElevenLabsKeyPool = () => {
+  const pool = [];
+  if (ELEVEN_LABS_API_KEY  ) pool.push({ key: ELEVEN_LABS_API_KEY,   label: 'KEY1' });
+  if (ELEVEN_LABS_API_KEY2 ) pool.push({ key: ELEVEN_LABS_API_KEY2,  label: 'KEY2' });
+  if (ELEVEN_LABS_API_KEY3 ) pool.push({ key: ELEVEN_LABS_API_KEY3,  label: 'KEY3' });
+  if (ELEVEN_LABS_API_KEY_SECONDARY?.trim()) pool.push({ key: ELEVEN_LABS_API_KEY_SECONDARY, label: 'Baserow' });
+  return pool;
+};
+
+// Reordena o pool colocando a última chave que funcionou na frente (economia de tentativas)
+const _sortPoolByLastWorking = async (pool) => {
   try {
-    const response = await fetch('https://api.elevenlabs.io/v1/user/subscription', {
-      method: 'GET',
-      headers: {
-        'xi-api-key': ELEVEN_LABS_API_KEY,
-      },
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      return {
-        characterCount: data.character_count || 0,
-        characterLimit: data.character_limit || 0,
-        remaining: (data.character_limit || 0) - (data.character_count || 0),
-        percentUsed: data.character_limit ? ((data.character_count / data.character_limit) * 100).toFixed(1) : 0,
-      };
+    const last = await SafeStore.getItemAsync(EL_LAST_KEY_STORE);
+    if (!last) return pool;
+    const idx = pool.findIndex(p => p.key === last);
+    if (idx <= 0) return pool; // já está na frente ou não encontrada
+    const reordered = [pool[idx], ...pool.slice(0, idx), ...pool.slice(idx + 1)];
+    return reordered;
+  } catch { return pool; }
+};
+
+// ─── FUNÇÃO PARA BUSCAR COTAS DO ELEVEN LABS (verifica TODAS as chaves) ──────
+const fetchElevenLabsQuota = async () => {
+  const pool = _getElevenLabsKeyPool();
+  for (const { key, label } of pool) {
+    try {
+      const r = await fetch('https://api.elevenlabs.io/v1/user/subscription', {
+        method: 'GET', headers: { 'xi-api-key': key },
+      });
+      if (r.ok) {
+        const d = await r.json();
+        const remaining = (d.character_limit||0) - (d.character_count||0);
+        return {
+          key: label,
+          characterCount: d.character_count || 0,
+          characterLimit: d.character_limit || 0,
+          remaining,
+          percentUsed: d.character_limit ? ((d.character_count/d.character_limit)*100).toFixed(1) : 0,
+        };
+      }
+    } catch { /* tenta próxima */ }
+  }
+  return null;
+};
+
+// ─── ECONOMIA DE TOKENS: trunca texto para não desperdiçar cota ──────────────
+// Textos de lembrete/notificação costumam ser curtos — textos longos de IA são
+// truncados inteligentemente (não no meio de uma palavra).
+const _truncateForTTS = (text, maxChars = 280) => {
+  if (!text || text.length <= maxChars) return text;
+  // Tenta cortar em ponto final próximo do limite
+  const cut = text.lastIndexOf('.', maxChars);
+  if (cut > maxChars * 0.6) return text.slice(0, cut + 1);
+  // Fallback: corta na última palavra antes do limite
+  const cutSpace = text.lastIndexOf(' ', maxChars);
+  return text.slice(0, cutSpace > 0 ? cutSpace : maxChars) + '…';
+};
+
+// ─── ELEVENLABS TTS — PRIORIDADE TOTAL, 3 CHAVES, ECONOMIA DE TOKENS ─────────
+//
+// ESTRATÉGIA:
+//   1. Usa a chave que funcionou por último (cache no SafeStore) → 0 delay
+//   2. Se falhar: tenta as demais em ordem, sem delay entre tentativas de quota
+//   3. Erros de REDE (timeout/abort): 1 retry na mesma chave com 800ms de espera
+//   4. Quota esgotada (402/429): pula imediatamente para próxima chave
+//   5. Só vai para Speech nativo se TODAS as chaves ElevenLabs falharem
+//
+// ECONOMIA DE TOKENS:
+//   - Textos > 280 chars são truncados antes de enviar
+//   - Usa modelo "eleven_turbo_v2_5" (mais leve que multilingual v2, mesma voz)
+//   - voice_settings mínimas necessárias para boa qualidade
+//
+// Web    → AudioContext.decodeAudioData (sem bloqueio de autoplay)
+// Nativo → FileReader → data URI → expo-av
+//
+let _elCurrentSound = null;
+let _elLastStatus   = { key:'none', attempts:0, lastError:'', ts:0 };
+// Mutex simples: evita chamadas sobrepostas (ex: lembrete + resposta IA ao mesmo tempo)
+let _elBusy         = false;
+let _elQueue        = []; // fila de textos pendentes
+
+const _elPlayNext = async () => {
+  if (_elBusy || _elQueue.length === 0) return;
+  _elBusy = true;
+  const { text, onDone } = _elQueue.shift();
+  await _doSpeak(text, onDone);
+  _elBusy = false;
+  _elPlayNext(); // processa próximo da fila
+};
+
+const speakWithElevenLabs = (text, onDone) => {
+  if (!text?.trim()) { if (onDone) setTimeout(onDone, 30); return; }
+  // Cancela qualquer fala nativa em curso
+  try { Speech.stop(); } catch { /* noop */ }
+  // Adiciona à fila (evita sobreposição)
+  _elQueue.push({ text: _truncateForTTS(text), onDone });
+  // Se limite da fila ultrapassar 3, descarta os mais antigos (exceto o primeiro)
+  if (_elQueue.length > 3) _elQueue.splice(1, _elQueue.length - 2);
+  _elPlayNext();
+};
+
+const _doSpeak = async (text, onDone) => {
+  // Para som anterior
+  if (_elCurrentSound) {
+    try { await _elCurrentSound.stopAsync(); await _elCurrentSound.unloadAsync(); } catch { /* noop */ }
+    _elCurrentSound = null;
+  }
+
+  // ── Fallback final: voz nativa do sistema ────────────────────────────────
+  const _fallback = (motivo) => {
+    console.warn(`[EL] Fallback voz do sistema. ${motivo}`);
+    _elLastStatus = { key:'fallback', attempts:_elLastStatus.attempts, lastError:motivo, ts:Date.now() };
+    try { Speech.speak(text, { language:'pt-BR', rate:1.0, pitch:1.0, onDone: onDone||undefined }); } catch { if(onDone) setTimeout(onDone,80); }
+  };
+
+  // ── Chamada HTTP à API ElevenLabs ────────────────────────────────────────
+  const _call = async (apiKey, timeoutMs = 11000) => {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}?output_format=mp3_22050_32`,
+        {
+          method: 'POST',
+          headers: { 'Accept':'audio/mpeg', 'Content-Type':'application/json', 'xi-api-key': apiKey },
+          body: JSON.stringify({
+            text,
+            // eleven_multilingual_v2 suporta pt-BR nativo (turbo_v2_5 não aceita language_code)
+            model_id: 'eleven_multilingual_v2',
+            voice_settings: { stability:0.5, similarity_boost:0.82, use_speaker_boost:true },
+          }),
+          signal: ctrl.signal,
+        }
+      );
+      clearTimeout(tid);
+      return res;
+    } catch (e) { clearTimeout(tid); throw e; }
+  };
+
+  // ── Monta pool reordenado pela última chave que funcionou ────────────────
+  const rawPool = _getElevenLabsKeyPool();
+  const pool    = await _sortPoolByLastWorking(rawPool);
+  let response  = null;
+  let attempts  = 0;
+
+  for (const { key, label } of pool) {
+    attempts++;
+    _elLastStatus.attempts = attempts;
+    try {
+      console.log(`[EL] Tentativa ${attempts}/${pool.length}: ${label} (${key.slice(0,10)}…)`);
+      response = await _call(key);
+
+      if (response.ok) {
+        // ✅ Sucesso — salva esta chave como a "última que funcionou"
+        console.log(`[EL] ✅ ${label} OK (tentativa ${attempts})`);
+        _elLastStatus = { key:label, attempts, lastError:'', ts:Date.now() };
+        try { await SafeStore.setItemAsync(EL_LAST_KEY_STORE, key); } catch { /* noop */ }
+        break; // para de tentar
+      }
+
+      // Lê corpo do erro para diagnóstico
+      let errMsg = `HTTP ${response.status}`;
+      try {
+        const j = await response.clone().json();
+        errMsg = j?.detail?.message || j?.detail?.status || j?.detail || errMsg;
+      } catch { /* noop */ }
+      console.warn(`[EL] ${label} FALHOU: ${errMsg}`);
+      _elLastStatus.lastError = `${label}: ${errMsg}`;
+
+      // Quota esgotada (402) ou rate limit (429) → pula imediatamente, sem delay
+      if (response.status === 402 || response.status === 429) {
+        console.warn(`[EL] ${label} sem quota/rate-limit — próxima chave imediatamente`);
+        response = null;
+        continue;
+      }
+      // Erro de auth (401/403) → chave inválida, pula
+      if (response.status === 401 || response.status === 403) {
+        console.warn(`[EL] ${label} autenticação falhou — próxima chave`);
+        response = null;
+        continue;
+      }
+      // Outros erros do servidor (5xx) → pequena espera antes da próxima
+      if (response.status >= 500) {
+        await new Promise(r => setTimeout(r, 400));
+      }
+      response = null;
+
+    } catch (netErr) {
+      // Erro de rede/timeout → 1 retry na mesma chave após 800ms (pode ser instabilidade)
+      console.warn(`[EL] ${label} erro de rede: ${netErr?.message} — retry em 800ms`);
+      await new Promise(r => setTimeout(r, 800));
+      try {
+        response = await _call(key, 14000); // timeout maior no retry
+        if (response.ok) {
+          console.log(`[EL] ✅ ${label} OK no retry (tentativa ${attempts})`);
+          _elLastStatus = { key:`${label}(retry)`, attempts, lastError:'', ts:Date.now() };
+          try { await SafeStore.setItemAsync(EL_LAST_KEY_STORE, key); } catch { /* noop */ }
+          break;
+        }
+        console.warn(`[EL] ${label} retry também falhou: HTTP ${response.status}`);
+        response = null;
+      } catch (retryErr) {
+        console.warn(`[EL] ${label} retry de rede falhou: ${retryErr?.message}`);
+        response = null;
+      }
     }
-    return null;
-  } catch (error) {
-    console.error('Erro ao buscar cotas ElevenLabs:', error);
-    return null;
+  }
+
+  // ── Todas as chaves falharam → fallback para voz nativa ──────────────────
+  if (!response?.ok) {
+    _fallback(`Todas as ${attempts} tentativas ElevenLabs falharam. Último: ${_elLastStatus.lastError}`);
+    return;
+  }
+
+  // ── Reproduz o áudio recebido ─────────────────────────────────────────────
+  try {
+    const blob = await response.blob();
+
+    // WEB: AudioContext (desbloqueado pelo microfone)
+    if (Platform.OS === 'web') {
+      try {
+        const ctx = _getWebAudioCtx();
+        if (!ctx) throw new Error('AudioContext indisponível');
+        if (ctx.state === 'suspended') await ctx.resume();
+        const arrayBuf    = await blob.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuf);
+        const source      = ctx.createBufferSource();
+        source.buffer     = audioBuffer;
+        source.connect(ctx.destination);
+        source.onended    = () => { if (onDone) onDone(); };
+        source.start(0);
+      } catch (webErr) {
+        console.error(`[EL][Web] AudioContext erro: ${webErr?.message}`);
+        _fallback(`AudioContext: ${webErr?.message}`);
+      }
+      return;
+    }
+
+    // NATIVO: salva MP3 em arquivo temporário → expo-av
+    // FileReader não existe no React Native — usamos expo-file-system
+    let audioUri = null;
+    try {
+      const FileSystem = require('expo-file-system');
+      const arrayBuf = await blob.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuf);
+      // Converte para base64 sem FileReader
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < uint8.length; i += chunkSize) {
+        binary += String.fromCharCode(...uint8.subarray(i, i + chunkSize));
+      }
+      const base64 = btoa(binary);
+      const tmpPath = FileSystem.cacheDirectory + `el_tts_${Date.now()}.mp3`;
+      await FileSystem.writeAsStringAsync(tmpPath, base64, { encoding: FileSystem.EncodingType.Base64 });
+      audioUri = tmpPath;
+    } catch (fsErr) {
+      console.warn(`[EL] expo-file-system falhou: ${fsErr?.message} — tentando data URI`);
+      // Fallback: tenta FileReader (funciona em alguns ambientes)
+      audioUri = await new Promise(resolve => {
+        try {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+          reader.onerror   = () => resolve('');
+          reader.readAsDataURL(blob);
+        } catch { resolve(''); }
+      });
+    }
+
+    if (!audioUri) throw new Error('Não foi possível obter URI do áudio');
+
+    try { await Audio.setAudioModeAsync({ allowsRecordingIOS:false, playsInSilentModeIOS:true, staysActiveInBackground:false }); } catch { /* noop */ }
+    const { sound } = await Audio.Sound.createAsync({ uri: audioUri }, { shouldPlay: true });
+    _elCurrentSound = sound;
+
+    sound.setOnPlaybackStatusUpdate(async status => {
+      if (status.didJustFinish || (status.isLoaded === false && _elCurrentSound === sound)) {
+        try { await sound.unloadAsync(); } catch { /* noop */ }
+        if (_elCurrentSound === sound) _elCurrentSound = null;
+        // Limpa arquivo temporário
+        try {
+          const FileSystem = require('expo-file-system');
+          if (audioUri?.startsWith(FileSystem.cacheDirectory)) await FileSystem.deleteAsync(audioUri, { idempotent: true });
+        } catch { /* noop */ }
+        if (onDone) onDone();
+      }
+    });
+
+  } catch (audioErr) {
+    console.error(`[EL] Erro ao reproduzir blob: ${audioErr?.message}`);
+    _fallback(`Áudio: ${audioErr?.message}`);
   }
 };
+
+// Alias de compatibilidade
+const speakWithAI = speakWithElevenLabs;
 
 // ─── WEB AUDIOCONTEXT — unlock automático no primeiro uso de microfone ────────
 // Chrome bloqueia audio.play() até que haja interação humana. O microfone
@@ -4026,9 +5771,6 @@ const _unlockWebAudio = () => {
     if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
   } catch { /* noop */ }
 };
-
-// Referência global para o Sound atual do ElevenLabs (evita sobreposição)
-let _elCurrentSound = null;
 
 // --- SOM audior.mp3: toca quando reconhecimento ativa (so dentro do VoiceAssistant) ---
 // Agora com controle de volume e vibração
@@ -4100,131 +5842,9 @@ const playListenBeep = () => {
   } catch { /* nunca trava o app */ }
 };
 
-// ─── ELEVENLABS TTS REAL — voz humana, sem robô ───────────────────────────────
-// Web    → HTML5 Audio nativo (sem expo-av, sem setAudioModeAsync)
-// Native → FileReader base64 → data URI → expo-av (fallback: expo-speech)
-const speakWithElevenLabs = async (text, onDone) => {
-  if (!text) { if (onDone) setTimeout(onDone, 50); return; }
-
-  // Para fala anterior
-  Speech.stop();
-  if (_elCurrentSound) {
-    try { await _elCurrentSound.stopAsync(); await _elCurrentSound.unloadAsync(); } catch { /* noop */ }
-    _elCurrentSound = null;
-  }
-
-  // ── Chamada à API ElevenLabs ──────────────────────────────────────────────
-  let response;
-  try {
-    response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}?output_format=mp3_22050_32`,
-      {
-        method: 'POST',
-        headers: {
-          'Accept': 'audio/mpeg',
-          'Content-Type': 'application/json',
-          'xi-api-key': ELEVEN_LABS_API_KEY,
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_multilingual_v2',
-          voice_settings: {
-            stability: 0.45,
-            similarity_boost: 0.85,
-            style: 0.22,
-            use_speaker_boost: true,
-          },
-        }),
-      }
-    );
-  } catch {
-    // Erro de rede — 1 retry após 1.5s antes de cair no fallback
-    try {
-      await new Promise(r => setTimeout(r, 1500));
-      response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_LABS_VOICE_ID}?output_format=mp3_22050_32`,
-        {
-          method: 'POST',
-          headers: { 'Accept': 'audio/mpeg', 'Content-Type': 'application/json', 'xi-api-key': ELEVEN_LABS_API_KEY },
-          body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2', voice_settings: { stability:0.45, similarity_boost:0.85, style:0.22, use_speaker_boost:true } }),
-        }
-      );
-    } catch {
-      try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
-      return;
-    }
-  }
-
-  if (!response.ok) {
-    try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
-    return;
-  }
-
-  try {
-    const blob = await response.blob();
-
-    // ── WEB: AudioContext.decodeAudioData — sem restrição de autoplay ───────
-    // Usa o AudioContext global (desbloqueado quando o microfone é ativado).
-    // Muito mais confiável que new Audio() que o Chrome bloqueia por política.
-    if (Platform.OS === 'web') {
-      try {
-        const ctx = _getWebAudioCtx();
-        if (!ctx) throw new Error('AudioContext indisponível');
-
-        // Garantir que o contexto está rodando (unlock após interação de mic)
-        if (ctx.state === 'suspended') await ctx.resume();
-
-        // Decodificar MP3 direto do ArrayBuffer — sem URL blob temporária
-        const arrayBuf = await blob.arrayBuffer();
-        const audioBuffer = await ctx.decodeAudioData(arrayBuf);
-
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(ctx.destination);
-        source.onended = () => { if (onDone) onDone(); };
-        source.start(0);
-      } catch {
-        // Fallback web: Speech.speak (apenas se AudioContext falhar)
-        try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
-      }
-      return;
-    }
-
-    // ── NATIVO: FileReader → data URI → expo-av ───────────────────────────────
-    const dataUri = await new Promise((resolve) => {
-      try {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-        reader.onerror   = () => resolve('');
-        reader.readAsDataURL(blob);
-      } catch { resolve(''); }
-    });
-
-    if (!dataUri) throw new Error('dataUri vazio');
-
-    // setAudioModeAsync dentro de try isolado — não bloqueia o fluxo
-    try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch { /* não crítico */ }
-
-    const { sound } = await Audio.Sound.createAsync({ uri: dataUri }, { shouldPlay: true });
-    _elCurrentSound = sound;
-
-    sound.setOnPlaybackStatusUpdate(async (status) => {
-      if (status.didJustFinish || (status.isLoaded === false && _elCurrentSound === sound)) {
-        try { await sound.unloadAsync(); } catch { /* noop */ }
-        if (_elCurrentSound === sound) _elCurrentSound = null;
-        if (onDone) onDone();
-      }
-    });
-
-  } catch {
-    // Fallback final — sempre funciona
-    try { Speech.speak(text, { language: 'pt-BR', rate: 1.0, pitch: 1.0, onDone: onDone || undefined }); } catch { if (onDone) setTimeout(onDone, 100); }
-  }
-};
-
-// Alias de compatibilidade com chamadas antigas
-const speakWithAI = speakWithElevenLabs;
-
+// ─── [BLOCO LEGADO REMOVIDO] — speakWithElevenLabs real está definida acima ───
+// Função vazia, nunca chamada, mantida apenas para não quebrar referências internas.
+const _legacyNoop = async (_text, _onDone) => { /* removido */ }; // INÍCIO BLOCO LEGADO DELETADO
 // ─── VOICE MODALS ────────────────────────────────────────────────────────────
 const VoicePermissionModal = ({ visible, onAccept, onClose, T, fontScale }) => {
   const slideA = useRef(new Animated.Value(Dimensions.get('window').height)).current;
@@ -4262,143 +5882,280 @@ const requestCameraPermission = async () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// HOOK: useAlwaysOnWakeWord
-// Escuta de segundo plano sempre ativa — sem precisar clicar em nada.
-// • Chrome/Web  → Web Speech API nativa (contínua, sem biblioteca extra)
-// • Device nativo → expo-speech-recognition em loop curto
+// HOOK: useAlwaysOnWakeWord — VERSÃO REESCRITA COM PROTEÇÃO TOTAL AO BUG DE MIC
+//
+// ██ PROBLEMA RAIZ: o bug de "desativar rapidamente" ocorre porque:
+//    1. enabled muda para false antes do stop() nativo terminar
+//    2. o evento 'end' chega DEPOIS do cleanup → _safeRestart dispara mesmo desativado
+//    3. múltiplos start() simultâneos quando há race condition de enable/disable rápido
+//    4. Eventos de outra sessão de mic (VoiceAssistant) disparam callbacks do wake-word
+//
+// ██ SOLUÇÕES IMPLEMENTADAS:
+//    • sessionIdRef  — cada sessão de escuta tem um ID único. Eventos de sessões
+//                      antigas são silenciosamente descartados (geração por token).
+//    • mountedRef    — se o componente desmontou, NUNCA recria timers.
+//    • stopInFlight  — flag que bloqueia restart enquanto stop() ainda não retornou.
+//    • MIN_STOP_GAP  — cooldown mínimo de 800ms entre stop e próximo start.
+//    • disableSeq    — número de sequência de disable: se changed novamente antes
+//                      do stop ser chamado, a versão anterior é ignorada.
+//    • Watchdog mais inteligente: só reinicia se a sessão realmente morreu
+//      (sessionId não mudou em 15s E enabled ainda é true).
+//    • enabledRef tem double-check antes de qualquer async await.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Wrapper seguro para useSpeechRecognitionEvent (pode ser null em Expo Go)
 const _useSpeechEventSafe = _useSpeechRecognitionEventReal ||
   ((eventName, handler) => { useEffect(() => {}, [eventName]); });
 
-const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
+const MIN_STOP_GAP    = 800;   // ms mínimo entre stop e próximo start
+const MAX_FAIL_DELAY  = 9000;  // ms máximo de backoff
+const WATCHDOG_MS     = 14000; // ms entre verificações do watchdog
+
+const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteWord }) => {
   const [isAlwaysListening, setIsAlwaysListening] = useState(false);
-  const enabledRef      = useRef(false);
-  const onWakeRef       = useRef(onWakeWord);
-  const webRecRef       = useRef(null);
-  const restartTimerRef = useRef(null);
-  const didFireRef      = useRef(false);   // evita disparos duplos
-  const isStartingRef   = useRef(false);   // evita start concorrente
-  const failCountRef    = useRef(0);       // backoff exponencial em falhas
-  const isMasterRef     = useRef(false);   // ✅ true só quando este hook é dono do mic
-  const lastNativeStop  = useRef(0);       // ✅ timestamp do último stop, para cooldown
 
-  onWakeRef.current = onWakeWord;
+  // ── Refs de controle ──────────────────────────────────────────────────────
+  const enabledRef       = useRef(false);
+  const onWakeRef        = useRef(onWakeWord);
+  const onNovidadesRef   = useRef(onNovidadesWord);
+  const onLembreteRef    = useRef(onLembreteWord);
+  const webRecRef        = useRef(null);
+  const restartTimerRef  = useRef(null);
+  const watchdogRef      = useRef(null);
+  const mountedRef       = useRef(true);
 
-  // ── Agendador seguro — cancela timer anterior antes de criar novo ─────────
+  // Anti-bug: controle de sessão por ID único
+  const sessionIdRef     = useRef(0);   // incrementa a cada start() nativo
+  const activeSessionRef = useRef(0);   // ID da sessão que atualmente "ouve"
+  const stopInFlight     = useRef(false); // true: stop() foi chamado mas 'end' ainda não chegou
+  const lastStopTimeRef  = useRef(0);   // timestamp do último stop
+  const isStartingRef    = useRef(false);
+  const didFireRef       = useRef(false);
+  const failCountRef     = useRef(0);
+  const disableSeqRef    = useRef(0);   // sequência de disable — descarta ops antigas
+
+  onWakeRef.current      = onWakeWord;
+  onNovidadesRef.current = onNovidadesWord;
+  onLembreteRef.current  = onLembreteWord;
+
+  // ── Limpa todos os timers ────────────────────────────────────────────────
+  const _clearTimers = useCallback(() => {
+    if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+    if (watchdogRef.current)     { clearInterval(watchdogRef.current); watchdogRef.current = null; }
+  }, []);
+
+  // ── Para o reconhecimento nativo com todas as proteções ──────────────────
+  const _stopNative = useCallback(() => {
+    if (stopInFlight.current) return; // já está parando
+    stopInFlight.current = true;
+    activeSessionRef.current = 0; // invalida sessão atual
+    try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+    // Garante que stopInFlight é resetado mesmo se 'end' não chegar
+    setTimeout(() => {
+      stopInFlight.current = false;
+      lastStopTimeRef.current = Date.now();
+    }, 600);
+  }, []);
+
+  // ── Agendador seguro com proteção completa ───────────────────────────────
   const _safeRestart = useCallback((delayMs) => {
+    if (!mountedRef.current) return;
     if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
     if (!enabledRef.current) return;
+
     restartTimerRef.current = setTimeout(async () => {
       restartTimerRef.current = null;
-      if (!enabledRef.current || isStartingRef.current || didFireRef.current) return;
-      // Cooldown extra: garante >= 500ms desde o último stop
-      const msSinceStop = Date.now() - lastNativeStop.current;
-      if (msSinceStop < 500) {
-        _safeRestart(500 - msSinceStop);
+      if (!mountedRef.current || !enabledRef.current || isStartingRef.current || didFireRef.current || stopInFlight.current) return;
+
+      // Cooldown: garante gap mínimo desde o último stop
+      const elapsed = Date.now() - lastStopTimeRef.current;
+      if (elapsed < MIN_STOP_GAP) {
+        _safeRestart(MIN_STOP_GAP - elapsed + 50);
         return;
       }
-      isMasterRef.current   = true;
+
+      const mySession = ++sessionIdRef.current;
+      activeSessionRef.current = mySession;
       isStartingRef.current = true;
+
       try {
         await ExpoSpeechRecognitionModule.start({ lang: 'pt-BR', interimResults: true, continuous: false });
+        if (!mountedRef.current || !enabledRef.current || activeSessionRef.current !== mySession) {
+          // Condição mudou enquanto aguardávamos — para imediatamente
+          isStartingRef.current = false;
+          _stopNative();
+          return;
+        }
         failCountRef.current = 0;
-        setIsAlwaysListening(true);
-      } catch {
-        isMasterRef.current   = false;
         isStartingRef.current = false;
-        failCountRef.current  = Math.min(failCountRef.current + 1, 8);
-        // Tenta novamente com backoff maior
-        _safeRestart(Math.min(1200 + failCountRef.current * 600, 8000));
+        if (mountedRef.current) setIsAlwaysListening(true);
+      } catch (e) {
+        isStartingRef.current = false;
+        activeSessionRef.current = 0;
+        if (!mountedRef.current || !enabledRef.current) return;
+        failCountRef.current = Math.min(failCountRef.current + 1, 10);
+        const backoff = Math.min(800 + failCountRef.current * 700, MAX_FAIL_DELAY);
+        console.warn(`[MIC] Falha ao iniciar (tentativa ${failCountRef.current}), retry em ${backoff}ms: ${e?.message}`);
+        _safeRestart(backoff);
       }
     }, delayMs);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [_clearTimers, _stopNative]);
+
+  // ── Dispatch de wake-word (evita código duplicado) ───────────────────────
+  const _dispatchWakeWord = useCallback((type) => {
+    didFireRef.current    = true;
+    isStartingRef.current = false;
+    activeSessionRef.current = 0;
+    _clearTimers();
+    _stopNative();
+    if (mountedRef.current) setIsAlwaysListening(false);
+    playListenBeep();
+    if (type === 'novidades') {
+      // Abre o painel de novidades diretamente sem perguntar nada
+      onNovidadesRef.current?.();
+    }
+    else if (type === 'lembrete') onLembreteRef.current?.();
+    else                      onWakeRef.current?.();
+  }, [_clearTimers, _stopNative]);
 
   // ── Resultado do reconhecimento nativo ──────────────────────────────────
   _useSpeechEventSafe('result', (event) => {
-    if (!enabledRef.current || !isMasterRef.current || didFireRef.current) return; // ✅ só age se for dono
+    if (!enabledRef.current || didFireRef.current) return;
+    // Descartar eventos de sessões antigas (proteção principal contra bug de desativação rápida)
+    const sessionNow = activeSessionRef.current;
+    if (sessionNow === 0) return;
     const text = event?.results?.[0]?.transcript || '';
-    if (detectWakeWord(text)) {
-      didFireRef.current    = true;
-      isStartingRef.current = false;
-      isMasterRef.current   = false;
-      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
-      try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
-      setIsAlwaysListening(false);
-      playListenBeep();
-      onWakeRef.current?.();
-    }
+    if (detectLembreteCmd(text))  { _dispatchWakeWord('lembrete'); return; }
+    if (detectNovidades(text))    { _dispatchWakeWord('novidades'); return; }
+    if (detectWakeWord(text))     { _dispatchWakeWord('wake'); return; }
   });
 
-  // ── Fim do reconhecimento nativo → reiniciar loop ────────────────────────
-  _useSpeechEventSafe('end', () => {
+  // ── Fim do reconhecimento nativo ────────────────────────────────────────
+  _useSpeechEventSafe('end', (event) => {
     if (Platform.OS === 'web') return;
-    lastNativeStop.current = Date.now(); // ✅ registra timestamp do stop
-    if (!isMasterRef.current) return;    // ✅ ignora eventos de outros donos do mic
-    isMasterRef.current   = false;
+    const endedSession = activeSessionRef.current;
+    stopInFlight.current  = false;
+    lastStopTimeRef.current = Date.now();
     isStartingRef.current = false;
-    setIsAlwaysListening(false);
-    if (!enabledRef.current) return;
-    // Backoff exponencial: aumenta delay conforme falhas (max 6s)
-    const delay = Math.min(700 + failCountRef.current * 500, 6000);
+    if (mountedRef.current) setIsAlwaysListening(false);
+    activeSessionRef.current = 0; // invalida sessão terminada
+
+    if (!enabledRef.current || !mountedRef.current || didFireRef.current) return;
+    if (endedSession === 0) return; // evento de sessão já inválida
+
+    // Backoff exponencial: mais rápido em sucesso, mais lento em falhas
+    const delay = Math.min(600 + failCountRef.current * 400, MAX_FAIL_DELAY);
+    _safeRestart(delay);
+  });
+
+  // ── Erro do reconhecimento nativo ────────────────────────────────────────
+  _useSpeechEventSafe('error', (event) => {
+    if (Platform.OS === 'web') return;
+    const errCode = event?.error || event?.message || 'unknown';
+    console.warn(`[MIC] Erro nativo: ${errCode}`);
+    stopInFlight.current  = false;
+    lastStopTimeRef.current = Date.now();
+    isStartingRef.current = false;
+    activeSessionRef.current = 0;
+    if (mountedRef.current) setIsAlwaysListening(false);
+    if (!enabledRef.current || !mountedRef.current || didFireRef.current) return;
+    // Erros fatais (permissão negada): não tenta novamente
+    if (errCode === 'not-allowed' || errCode === 'service-not-allowed' || errCode === 'permission') return;
+    failCountRef.current = Math.min(failCountRef.current + 1, 10);
+    const delay = Math.min(1200 + failCountRef.current * 800, MAX_FAIL_DELAY);
     _safeRestart(delay);
   });
 
   // ── Web Speech API (Chrome) ────────────────────────────────────────────
   const startWebSpeech = useCallback(() => {
     if (Platform.OS !== 'web') return;
+    if (!mountedRef.current || !enabledRef.current) return;
     try {
-      const SpeechRec = (typeof window !== 'undefined') &&
+      const SpeechRec = typeof window !== 'undefined' &&
         (window.SpeechRecognition || window.webkitSpeechRecognition);
       if (!SpeechRec) return;
-      if (webRecRef.current) { try { webRecRef.current.abort(); } catch { /* noop */ } webRecRef.current = null; }
 
+      // Mata sessão anterior
+      if (webRecRef.current) {
+        try { webRecRef.current.onend = null; webRecRef.current.onerror = null; webRecRef.current.onresult = null; webRecRef.current.abort(); } catch { /* noop */ }
+        webRecRef.current = null;
+      }
+
+      const mySession = ++sessionIdRef.current;
       const rec = new SpeechRec();
       rec.lang = 'pt-BR';
       rec.continuous = true;
       rec.interimResults = true;
       rec.maxAlternatives = 1;
 
-      rec.onstart  = () => { setIsAlwaysListening(true); _unlockWebAudio(); };
-      rec.onend    = () => {
-        setIsAlwaysListening(false);
-        webRecRef.current = null;
-        if (enabledRef.current) {
-          // ✅ cancela timer anterior antes de criar novo
-          if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
-          restartTimerRef.current = setTimeout(() => {
-            restartTimerRef.current = null;
-            if (enabledRef.current) startWebSpeech();
-          }, 700);
+      rec.onstart = () => {
+        if (!mountedRef.current || activeSessionRef.current !== mySession) {
+          // Sessão inválida — aborta imediatamente
+          try { rec.abort(); } catch { /* noop */ }
+          return;
         }
+        if (mountedRef.current) setIsAlwaysListening(true);
+        _unlockWebAudio();
       };
-      rec.onerror  = (e) => {
-        setIsAlwaysListening(false);
-        webRecRef.current = null;
-        // 'not-allowed' / 'service-not-allowed' = sem permissão, não tenta novamente
+
+      rec.onend = () => {
+        if (webRecRef.current === rec) { webRecRef.current = null; }
+        if (mountedRef.current) setIsAlwaysListening(false);
+        if (!enabledRef.current || !mountedRef.current || activeSessionRef.current !== mySession) return;
+        // Desativa sessão e reagenda
+        activeSessionRef.current = 0;
+        if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+        restartTimerRef.current = setTimeout(() => {
+          restartTimerRef.current = null;
+          if (enabledRef.current && mountedRef.current && !didFireRef.current) startWebSpeech();
+        }, 700);
+      };
+
+      rec.onerror = (e) => {
+        if (webRecRef.current === rec) { webRecRef.current = null; }
+        if (mountedRef.current) setIsAlwaysListening(false);
+        activeSessionRef.current = 0;
         const fatal = e.error === 'not-allowed' || e.error === 'service-not-allowed';
-        if (!fatal && e.error !== 'aborted' && enabledRef.current) {
-          // ✅ cancela timer anterior antes de criar novo
-          if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
-          // 'network' ou 'audio-capture' → delay maior para evitar loop rápido
-          const delay = (e.error === 'network' || e.error === 'audio-capture') ? 3000 : 1000;
-          restartTimerRef.current = setTimeout(() => {
-            restartTimerRef.current = null;
-            if (enabledRef.current) startWebSpeech();
-          }, delay);
-        }
+        if (fatal || !enabledRef.current || !mountedRef.current || didFireRef.current) return;
+        const delay = (e.error === 'network' || e.error === 'audio-capture') ? 3500 : 1000;
+        if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+        restartTimerRef.current = setTimeout(() => {
+          restartTimerRef.current = null;
+          if (enabledRef.current && mountedRef.current && !didFireRef.current) startWebSpeech();
+        }, delay);
       };
+
       rec.onresult = (event) => {
-        if (!enabledRef.current || didFireRef.current) return;
+        if (!enabledRef.current || didFireRef.current || activeSessionRef.current !== mySession) return;
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const text = event.results[i]?.[0]?.transcript || '';
-          if (detectWakeWord(text)) {
+          if (detectLembreteCmd(text)) {
+            activeSessionRef.current = 0;
             didFireRef.current = true;
-            try { rec.abort(); } catch { /* noop */ }
+            try { rec.onend = null; rec.abort(); } catch { /* noop */ }
             webRecRef.current = null;
-            setIsAlwaysListening(false);
+            if (mountedRef.current) setIsAlwaysListening(false);
+            playListenBeep();
+            onLembreteRef.current?.();
+            return;
+          }
+          if (detectNovidades(text)) {
+            activeSessionRef.current = 0;
+            didFireRef.current = true;
+            try { rec.onend = null; rec.abort(); } catch { /* noop */ }
+            webRecRef.current = null;
+            if (mountedRef.current) setIsAlwaysListening(false);
+            playListenBeep();
+            onNovidadesRef.current?.();
+            return;
+          }
+          if (detectWakeWord(text)) {
+            activeSessionRef.current = 0;
+            didFireRef.current = true;
+            try { rec.onend = null; rec.abort(); } catch { /* noop */ }
+            webRecRef.current = null;
+            if (mountedRef.current) setIsAlwaysListening(false);
             playListenBeep();
             onWakeRef.current?.();
             return;
@@ -4406,99 +6163,117 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
         }
       };
 
-      rec.start();
+      activeSessionRef.current = mySession;
       webRecRef.current = rec;
-    } catch { /* browser bloqueou */ }
+      rec.start();
+    } catch (e) {
+      console.warn('[MIC][Web] startWebSpeech falhou:', e?.message);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Watchdog: reinicia o sistema de voz se travar ou morrer ────────────
-  // Verifica a cada 12s — se enabled mas não está ouvindo, reinicia tudo.
-  const watchdogRef = useRef(null);
+  // ── Watchdog: reinicia se a sessão morreu silenciosamente ────────────────
   const _restartAll = useCallback(() => {
-    if (!enabledRef.current) return;
+    if (!enabledRef.current || !mountedRef.current || didFireRef.current) return;
     if (Platform.OS === 'web') {
-      // Abortar sessão atual e criar nova
-      if (webRecRef.current) { try { webRecRef.current.abort(); } catch { /* noop */ } webRecRef.current = null; }
-      setIsAlwaysListening(false);
-      // ✅ usa _safeRestart para garantir single-timer
-      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
-      restartTimerRef.current = setTimeout(() => { restartTimerRef.current = null; if (enabledRef.current) startWebSpeech(); }, 400);
+      if (webRecRef.current === null && !restartTimerRef.current) {
+        if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+        restartTimerRef.current = setTimeout(() => {
+          restartTimerRef.current = null;
+          if (enabledRef.current && mountedRef.current) startWebSpeech();
+        }, 400);
+      }
     } else if (SPEECH_RECOGNITION_AVAILABLE) {
-      if (isStartingRef.current) return;
-      isMasterRef.current   = false;
-      isStartingRef.current = false;
-      try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
-      setIsAlwaysListening(false);
-      _safeRestart(900);
+      const noSession  = activeSessionRef.current === 0;
+      const noStarting = !isStartingRef.current;
+      const noTimer    = !restartTimerRef.current;
+      const noStop     = !stopInFlight.current;
+      if (noSession && noStarting && noTimer && noStop) {
+        _safeRestart(800);
+      }
     }
   }, [startWebSpeech, _safeRestart]);
 
-  // ── Lifecycle: liga/desliga com base em enabled ──────────────────────────
+  // ── Lifecycle: liga/desliga ──────────────────────────────────────────────
   useEffect(() => {
+    mountedRef.current = true;
+    const myDisableSeq = ++disableSeqRef.current;
+
     enabledRef.current    = enabled;
     didFireRef.current    = false;
-    isStartingRef.current = false;
-    isMasterRef.current   = false; // ✅ reset dono ao mudar enabled
     failCountRef.current  = 0;
-    lastNativeStop.current = 0;    // ✅ reset cooldown
-    if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
-    if (watchdogRef.current) { clearInterval(watchdogRef.current); watchdogRef.current = null; }
+    _clearTimers();
 
     if (!enabled) {
-      setIsAlwaysListening(false);
+      // ── DESATIVAR ─────────────────────────────────────────────────────────
+      isStartingRef.current    = false;
+      activeSessionRef.current = 0;
+      stopInFlight.current     = false;
+      if (mountedRef.current) setIsAlwaysListening(false);
+
       if (Platform.OS === 'web' && webRecRef.current) {
-        try { webRecRef.current.abort(); } catch { /* noop */ }
+        try { webRecRef.current.onend = null; webRecRef.current.onerror = null; webRecRef.current.onresult = null; webRecRef.current.abort(); } catch { /* noop */ }
+        webRecRef.current = null;
+      }
+      if (Platform.OS !== 'web' && SPEECH_RECOGNITION_AVAILABLE) {
+        // Para com delay mínimo para evitar bug de "stop imediato após start"
+        const stopSeq = myDisableSeq;
+        setTimeout(() => {
+          if (disableSeqRef.current !== stopSeq) return; // enabled mudou de novo
+          try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+          lastStopTimeRef.current = Date.now();
+        }, 80);
+      }
+      return;
+    }
+
+    // ── ATIVAR ───────────────────────────────────────────────────────────────
+    if (Platform.OS === 'web') {
+      setTimeout(() => {
+        if (!enabledRef.current || !mountedRef.current) return;
+        startWebSpeech();
+      }, 200);
+    } else if (SPEECH_RECOGNITION_AVAILABLE) {
+      (async () => {
+        try {
+          const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+          if (!granted || !enabledRef.current || !mountedRef.current) return;
+          _safeRestart(250); // inicia via _safeRestart para garantir todas as proteções
+        } catch { /* noop */ }
+      })();
+    }
+
+    // Watchdog: verifica saúde a cada WATCHDOG_MS
+    watchdogRef.current = setInterval(() => {
+      _restartAll();
+    }, WATCHDOG_MS);
+
+    return () => {
+      enabledRef.current       = false;
+      isStartingRef.current    = false;
+      activeSessionRef.current = 0;
+      _clearTimers();
+      // NÃO seta mountedRef = false aqui (isso é feito no cleanup final abaixo)
+    };
+  }, [enabled, startWebSpeech, _restartAll, _safeRestart, _clearTimers]);
+
+  // Cleanup de desmontagem (separado para garantir ordem)
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      enabledRef.current = false;
+      _clearTimers();
+      if (Platform.OS === 'web' && webRecRef.current) {
+        try { webRecRef.current.onend = null; webRecRef.current.abort(); } catch { /* noop */ }
         webRecRef.current = null;
       }
       if (Platform.OS !== 'web' && SPEECH_RECOGNITION_AVAILABLE) {
         try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
       }
-      return;
-    }
-
-    // Iniciar
-    if (Platform.OS === 'web') {
-      startWebSpeech();
-    } else if (SPEECH_RECOGNITION_AVAILABLE) {
-      (async () => {
-        try {
-          const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-          if (!granted || !enabledRef.current || isStartingRef.current) return;
-          isMasterRef.current   = true; // ✅ marca como dono antes de iniciar
-          isStartingRef.current = true;
-          await ExpoSpeechRecognitionModule.start({
-            lang: 'pt-BR', interimResults: true, continuous: false,
-          });
-          failCountRef.current = 0;
-          setIsAlwaysListening(true);
-        } catch {
-          isMasterRef.current   = false;
-          isStartingRef.current = false;
-          failCountRef.current = Math.min(failCountRef.current + 1, 8);
-        }
-      })();
-    }
-
-    // Watchdog: verifica saude a cada 12s e reinicia se sistema morreu
-    watchdogRef.current = setInterval(() => {
-      if (!enabledRef.current || didFireRef.current) return;
-      if (Platform.OS === 'web') {
-        if (webRecRef.current === null) _restartAll();
-      } else if (SPEECH_RECOGNITION_AVAILABLE) {
-        // Nativo: se nao ouvindo, nao iniciando e sem timer pendente -> forca restart
-        if (!isStartingRef.current && !restartTimerRef.current) {
-          _restartAll();
-        }
-      }
-    }, 12000);
-
-    return () => {
-      enabledRef.current = false;
-      isMasterRef.current = false;
-      if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
-      if (watchdogRef.current) { clearInterval(watchdogRef.current); watchdogRef.current = null; }
     };
-  }, [enabled, startWebSpeech, _restartAll, _safeRestart]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return { isAlwaysListening };
 };
@@ -4507,7 +6282,6 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord }) => {
 // Aparece no canto inferior esquerdo quando o usuário está logado.
 // Toque nele para abrir o assistente de voz diretamente.
 const AlwaysOnIndicator = ({ isListening, T, TAB_SAFE, onPress, onHide, visible }) => {
-  if (visible === false) return null;
   const pulseA = useRef(new Animated.Value(1)).current;
   const dotA   = useRef(new Animated.Value(0.4)).current;
   const loopRef = useRef(null);
@@ -4532,6 +6306,8 @@ const AlwaysOnIndicator = ({ isListening, T, TAB_SAFE, onPress, onHide, visible 
     }
     return () => { if (loopRef.current) { loopRef.current.stop(); loopRef.current = null; } };
   }, [isListening, pulseA, dotA]);
+
+  if (visible === false) return null;
 
   return (
     <TouchableOpacity
@@ -4590,7 +6366,525 @@ const AlwaysOnIndicator = ({ isListening, T, TAB_SAFE, onPress, onHide, visible 
   );
 };
 
+
+// ─── COMPONENTE DE PERMISSÃO DE NOTIFICAÇÃO — REDESIGN AI ────────────────────
+const NotificationPermissionModal = ({ visible, onConfirm, onCancel, T, fontScale }) => {
+  const slideA  = useRef(new Animated.Value(60)).current;
+  const opacA   = useRef(new Animated.Value(0)).current;
+  const scaleA  = useRef(new Animated.Value(0.88)).current;
+  const ringA   = useRef(new Animated.Value(1)).current;
+  const ringLoop = useRef(null);
+
+  useEffect(() => {
+    if (visible) {
+      // Entrada do card
+      Animated.parallel([
+        Animated.spring(slideA, { toValue: 0, tension: 55, friction: 11, useNativeDriver: false }),
+        Animated.timing(opacA,  { toValue: 1, duration: 280, useNativeDriver: false }),
+        Animated.spring(scaleA, { toValue: 1, tension: 55, friction: 11, useNativeDriver: false }),
+      ]).start();
+      // Pulsação do ícone
+      ringLoop.current = Animated.loop(Animated.sequence([
+        Animated.timing(ringA, { toValue: 1.18, duration: 750, useNativeDriver: false }),
+        Animated.timing(ringA, { toValue: 1,    duration: 750, useNativeDriver: false }),
+      ]));
+      ringLoop.current.start();
+    } else {
+      ringLoop.current?.stop();
+      Animated.parallel([
+        Animated.timing(slideA, { toValue: 60,  duration: 220, useNativeDriver: false }),
+        Animated.timing(opacA,  { toValue: 0,   duration: 180, useNativeDriver: false }),
+        Animated.timing(scaleA, { toValue: 0.9, duration: 200, useNativeDriver: false }),
+      ]).start();
+    }
+    return () => ringLoop.current?.stop();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, slideA, opacA, scaleA, ringA]);
+
+  if (!visible) return null;
+
+  const features = [
+    { icon: 'package-variant-closed', label: 'Produtos vencendo' },
+    { icon: 'bell-ring-outline',      label: 'Lembretes agendados' },
+    { icon: 'robot-outline',          label: 'Alertas inteligentes IA' },
+  ];
+
+  return (
+    <Modal visible={visible} transparent animationType="none" statusBarTranslucent>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'center', padding: 22 }}>
+        {/* Toque fora cancela */}
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onCancel} />
+
+        <Animated.View style={{
+          backgroundColor: T.bgCard,
+          borderRadius: 38,
+          overflow: 'hidden',
+          borderWidth: 1.5,
+          borderColor: T.blue + '45',
+          transform: [{ translateY: slideA }, { scale: scaleA }],
+          opacity: opacA,
+          shadowColor: T.blue,
+          shadowOpacity: 0.45,
+          shadowRadius: 32,
+          elevation: 22,
+        }}>
+
+          {/* ── Faixa de gradiente decorativa no topo ── */}
+          <View style={{
+            height: 6, width: '100%',
+            backgroundColor: T.blue,
+            opacity: 0.85,
+          }} />
+
+          <View style={{ padding: 30, alignItems: 'center' }}>
+
+            {/* Ícone pulsante em anéis */}
+            <View style={{ width: 96, height: 96, justifyContent: 'center', alignItems: 'center', marginBottom: 22 }}>
+              {/* Anel externo pulsante */}
+              <Animated.View style={{
+                position: 'absolute',
+                width: 96, height: 96, borderRadius: 48,
+                borderWidth: 1.5, borderColor: T.blue + '30',
+                transform: [{ scale: ringA }],
+              }} />
+              {/* Anel médio */}
+              <View style={{
+                position: 'absolute',
+                width: 76, height: 76, borderRadius: 38,
+                borderWidth: 1, borderColor: T.blue + '45',
+              }} />
+              {/* Círculo principal */}
+              <View style={{
+                width: 60, height: 60, borderRadius: 30,
+                backgroundColor: T.blue + '18',
+                justifyContent: 'center', alignItems: 'center',
+                borderWidth: 2, borderColor: T.blue + '55',
+                shadowColor: T.blue, shadowOpacity: 0.5, shadowRadius: 16, elevation: 8,
+              }}>
+                <MaterialCommunityIcons name="bell-ring" size={28} color={T.blue} />
+              </View>
+            </View>
+
+            {/* Badge GEI.AI */}
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', gap: 5,
+              backgroundColor: T.blue + '12', borderRadius: 20,
+              paddingHorizontal: 12, paddingVertical: 4,
+              borderWidth: 1, borderColor: T.blue + '28',
+              marginBottom: 10,
+            }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: T.blue }} />
+              <Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 1.4 }}>
+                GEI.AI · ASSISTENTE
+              </Text>
+            </View>
+
+            <Text style={{ fontSize: 22 * fontScale, fontWeight: '900', color: T.text, textAlign: 'center', letterSpacing: -0.5, marginBottom: 8 }}>
+              Fique sempre avisado
+            </Text>
+
+            <Text style={{ fontSize: 13.5 * fontScale, color: T.textSub, textAlign: 'center', lineHeight: 20, marginBottom: 22 }}>
+              Ative as notificações para que o GEI.AI te avise em tempo real sobre:
+            </Text>
+
+            {/* Feature chips */}
+            <View style={{ width: '100%', gap: 8, marginBottom: 24 }}>
+              {features.map((f, i) => (
+                <View key={i} style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 10,
+                  backgroundColor: T.bgElevated, borderRadius: 14, padding: 11,
+                  borderWidth: 1, borderColor: T.border,
+                }}>
+                  <View style={{
+                    width: 32, height: 32, borderRadius: 10,
+                    backgroundColor: T.blue + '15', justifyContent: 'center', alignItems: 'center',
+                    borderWidth: 1, borderColor: T.blue + '25',
+                  }}>
+                    <MaterialCommunityIcons name={f.icon} size={16} color={T.blue} />
+                  </View>
+                  <Text style={{ fontSize: 13 * fontScale, fontWeight: '700', color: T.text }}>{f.label}</Text>
+                  <Feather name="check" size={13} color={T.blue} style={{ marginLeft: 'auto' }} />
+                </View>
+              ))}
+            </View>
+
+            {/* Botões */}
+            <View style={{ width: '100%', gap: 10 }}>
+              <TouchableOpacity
+                onPress={onConfirm}
+                activeOpacity={0.85}
+                style={{
+                  backgroundColor: T.blue,
+                  paddingVertical: 15,
+                  borderRadius: 18,
+                  alignItems: 'center',
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  gap: 8,
+                  shadowColor: T.blue, shadowOpacity: 0.5, shadowRadius: 14, elevation: 8,
+                }}>
+                <MaterialCommunityIcons name="bell-check-outline" size={20} color="#FFF" />
+                <Text style={{ color: '#FFF', fontSize: 15 * fontScale, fontWeight: '900' }}>Ativar Notificações</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={onCancel}
+                activeOpacity={0.7}
+                style={{
+                  paddingVertical: 13,
+                  borderRadius: 18,
+                  alignItems: 'center',
+                  backgroundColor: T.bgInput,
+                  borderWidth: 1, borderColor: T.border,
+                }}>
+                <Text style={{ color: T.textMuted, fontSize: 13 * fontScale, fontWeight: '700' }}>Lembrar depois</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 9.5 * fontScale, color: T.textMuted, marginTop: 16, textAlign: 'center', lineHeight: 14 }}>
+              {Platform.OS === 'web'
+                ? 'Requer Chrome, Edge ou outro navegador moderno.'
+                : 'Você pode revogar a qualquer momento nas Configurações do sistema.'}
+            </Text>
+
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPONENTE: PainelInteligenteScreen — Central de Inteligência de Estoque
+// ─────────────────────────────────────────────────────────────────────────────
+const PainelInteligenteScreen = ({ visible, onClose, stockData, fifoMode, T, fontScale, onNavigate }) => {
+  const [activeTab, setActiveTab] = useState('fifo');
+  const slideA = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+  const opacA  = useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    if (visible) {
+      Animated.parallel([
+        Animated.spring(slideA, { toValue: 0, damping: 22, stiffness: 180, useNativeDriver: true }),
+        Animated.timing(opacA, { toValue: 1, duration: 220, useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideA, { toValue: Dimensions.get('window').height, duration: 260, useNativeDriver: true }),
+        Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, slideA, opacA]);
+
+  const fifoInfo = useMemo(() => detectFifoGroups(stockData || []), [stockData]);
+  const agora = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
+  const parseD = s => { if (!s) return null; const [d,m,y]=String(s).split('/'); const dt=new Date(`${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}T00:00:00`); return isNaN(dt)?null:dt; };
+
+  // Produtos críticos (vence em ≤7 dias ou vencido)
+  const criticos = useMemo(() => (stockData||[]).filter(p => {
+    const dt = parseD(p.VENCIMENTO); if (!dt) return false;
+    return Math.floor((dt - agora) / 86400000) <= 7;
+  }).sort((a,b) => (parseD(a.VENCIMENTO)||0) - (parseD(b.VENCIMENTO)||0)), [stockData, agora]);
+
+  // Produtos com ruptura eminente (giro × dias restantes ≤ estoque)
+  const rupturaRisco = useMemo(() => (stockData||[]).filter(p => {
+    const m = buildDepletionMetrics(p, fifoMode, stockData, p.codig);
+    return m && m.remainingPct <= 15 && m.remainingQty > 0;
+  }), [stockData, fifoMode]);
+
+  // Sugestão de reposição (giro vs qtd)
+  const sugestoes = useMemo(() => {
+    const rateMap = { 'Grande giro': 8, 'Médio giro': 3, 'Pouco giro': 0.8 };
+    return (stockData||[])
+      .map(p => {
+        const rate = rateMap[p.MARGEM] || 3;
+        const qty = Math.max(0, parseInt(p.quantidade) || 0);
+        const diasRestantes = rate > 0 ? Math.ceil(qty / rate) : 999;
+        return { ...p, diasRestantes, rate };
+      })
+      .filter(p => p.diasRestantes <= 14 && p.diasRestantes >= 0)
+      .sort((a,b) => a.diasRestantes - b.diasRestantes);
+  }, [stockData]);
+
+  const TABS = [
+    { key:'fifo',    label:'FIFO',     icon:'layers'       },
+    { key:'critico', label:'Críticos', icon:'alert-circle' },
+    { key:'ruptura', label:'Ruptura',  icon:'trending-down'},
+    { key:'pedido',  label:'Pedidos',  icon:'shopping-cart'},
+  ];
+
+  const WIN2 = Dimensions.get('window');
+  if (!visible && slideA._value >= WIN2.height - 10) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <Animated.View style={{ flex:1, backgroundColor:'rgba(0,0,0,0.6)', opacity:opacA }}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <Animated.View style={{
+          position:'absolute', bottom:0, left:0, right:0,
+          height: WIN2.height * 0.88,
+          backgroundColor: T.bgCard,
+          borderTopLeftRadius: 32, borderTopRightRadius: 32,
+          borderWidth:1, borderColor: T.border,
+          shadowColor:'#000', shadowOffset:{width:0,height:-12},
+          shadowOpacity:0.55, shadowRadius:28, elevation:36,
+          transform:[{translateY: slideA}],
+        }}>
+          {/* Faixa topo teal */}
+          <View style={{height:4,backgroundColor:T.teal,borderTopLeftRadius:32,borderTopRightRadius:32,opacity:0.9}} />
+          {/* Handle */}
+          <View style={{alignItems:'center',paddingTop:10,paddingBottom:2}}>
+            <View style={{width:36,height:4,borderRadius:2,backgroundColor:T.teal+'50'}} />
+          </View>
+
+          {/* Header */}
+          <View style={{flexDirection:'row',alignItems:'center',paddingHorizontal:22,paddingVertical:10,gap:12}}>
+            <View style={{width:50,height:50,borderRadius:17,backgroundColor:T.tealGlow,justifyContent:'center',alignItems:'center',borderWidth:2,borderColor:T.teal+'60',shadowColor:T.teal,shadowOpacity:0.5,shadowRadius:12,elevation:8}}>
+              <MaterialCommunityIcons name="brain" size={26} color={T.teal} />
+            </View>
+            <View style={{flex:1}}>
+              <View style={{flexDirection:'row',alignItems:'center',gap:5}}>
+                <View style={{width:6,height:6,borderRadius:3,backgroundColor:T.teal,shadowColor:T.teal,shadowOpacity:1,shadowRadius:4}} />
+                <Text style={{fontSize:8*fontScale,fontWeight:'900',color:T.teal,textTransform:'uppercase',letterSpacing:1.5}}>GEI.AI · CENTRAL DE INTELIGÊNCIA</Text>
+              </View>
+              <Text style={{fontSize:17*fontScale,fontWeight:'900',color:T.text,letterSpacing:-0.3}}>Painel Inteligente</Text>
+              <Text style={{fontSize:10*fontScale,color:T.textSub,fontWeight:'700',marginTop:1}}>
+                {stockData?.length||0} produtos · {criticos.length} críticos · {fifoInfo.groups.length} grupos FIFO
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{width:36,height:36,borderRadius:12,backgroundColor:T.bgInput,justifyContent:'center',alignItems:'center',borderWidth:1.5,borderColor:T.border}}>
+              <Feather name="x" size={16} color={T.textSub} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Tab pills */}
+          <View style={{flexDirection:'row',paddingHorizontal:16,gap:8,marginBottom:14}}>
+            {TABS.map(tab => {
+              const on = activeTab === tab.key;
+              const badge = tab.key==='critico' ? criticos.length : tab.key==='ruptura' ? rupturaRisco.length : tab.key==='pedido' ? sugestoes.length : tab.key==='fifo' ? fifoInfo.groups.length : 0;
+              return (
+                <TouchableOpacity key={tab.key} onPress={()=>setActiveTab(tab.key)} style={[{flex:1,flexDirection:'row',alignItems:'center',justifyContent:'center',paddingVertical:8,borderRadius:12,borderWidth:1.5,gap:4,backgroundColor:T.bgInput,borderColor:T.border},on&&{backgroundColor:T.tealGlow,borderColor:T.teal+'60'}]}>
+                  <Feather name={tab.icon} size={12} color={on?T.teal:T.textSub} />
+                  <Text style={{fontSize:10*fontScale,fontWeight:'800',color:on?T.teal:T.textSub}}>{tab.label}</Text>
+                  {badge>0 && <View style={{width:16,height:16,borderRadius:8,backgroundColor:on?T.teal:T.textMuted,justifyContent:'center',alignItems:'center'}}><Text style={{fontSize:9,fontWeight:'900',color:'#FFF'}}>{badge}</Text></View>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Conteúdo */}
+          <ScrollView style={{flex:1}} contentContainerStyle={{padding:16,paddingBottom:40}} showsVerticalScrollIndicator={false}>
+
+            {/* ── Tab FIFO ── */}
+            {activeTab==='fifo' && (
+              <View>
+                <View style={{backgroundColor:T.tealGlow,borderRadius:16,padding:14,borderWidth:1,borderColor:T.teal+'30',marginBottom:16}}>
+                  <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:6}}>
+                    <MaterialCommunityIcons name="layers-triple" size={16} color={T.teal} />
+                    <Text style={{fontSize:11*fontScale,fontWeight:'900',color:T.teal,textTransform:'uppercase',letterSpacing:0.8}}>O que é FIFO?</Text>
+                  </View>
+                  <Text style={{fontSize:12*fontScale,color:T.textSub,fontWeight:'600',lineHeight:18}}>Quando há múltiplos lotes do mesmo produto, o FIFO garante que o lote com validade mais próxima seja consumido primeiro, evitando perdas.</Text>
+                </View>
+                {fifoInfo.groups.length === 0 ? (
+                  <View style={{alignItems:'center',paddingVertical:40}}>
+                    <MaterialCommunityIcons name="check-circle-outline" size={48} color={T.green} />
+                    <Text style={{fontSize:15*fontScale,fontWeight:'800',color:T.text,marginTop:12}}>Nenhum grupo FIFO detectado</Text>
+                    <Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:4,textAlign:'center'}}>Todos os produtos têm apenas 1 lote ativo.</Text>
+                  </View>
+                ) : fifoInfo.groups.map((g, i) => {
+                  const lotesProduto = (stockData||[]).filter(p => {
+                    if (g.type==='ean') return (p.codig||'').trim()===g.key;
+                    return stripAccents((p.produto||'').toLowerCase().trim()).startsWith(g.key);
+                  }).sort((a,b)=>(parseD(a.VENCIMENTO)||0)-(parseD(b.VENCIMENTO)||0));
+                  const primeiro = lotesProduto[0];
+                  const nomeProduto = primeiro?.produto || g.key;
+                  const diasAtePrimeiro = primeiro?.VENCIMENTO ? Math.floor(((parseD(primeiro.VENCIMENTO)||agora) - agora)/86400000) : null;
+                  return (
+                    <View key={i} style={{backgroundColor:T.bgElevated,borderRadius:16,padding:14,borderWidth:1,borderColor:T.border,marginBottom:10}}>
+                      <View style={{flexDirection:'row',alignItems:'center',gap:8,marginBottom:8}}>
+                        <View style={{width:8,height:8,borderRadius:4,backgroundColor:diasAtePrimeiro!==null&&diasAtePrimeiro<=7?T.red:T.teal}} />
+                        <Text style={{fontSize:13*fontScale,fontWeight:'800',color:T.text,flex:1}} numberOfLines={1}>{nomeProduto}</Text>
+                        <View style={{backgroundColor:T.tealGlow,borderRadius:8,paddingHorizontal:8,paddingVertical:3,borderWidth:1,borderColor:T.teal+'30'}}>
+                          <Text style={{fontSize:10*fontScale,fontWeight:'800',color:T.teal}}>{lotesProduto.length} lotes</Text>
+                        </View>
+                      </View>
+                      {lotesProduto.map((lote, li) => {
+                        const dt = parseD(lote.VENCIMENTO);
+                        const dias = dt ? Math.floor((dt-agora)/86400000) : null;
+                        const cor = dias===null?T.textSub:dias<=0?T.red:dias<=7?T.amber:T.green;
+                        return (
+                          <View key={li} style={{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:5,borderTopWidth:li>0?1:0,borderColor:T.border}}>
+                            <View style={{width:20,height:20,borderRadius:6,backgroundColor:li===0?T.teal:T.bgInput,justifyContent:'center',alignItems:'center',borderWidth:li===0?0:1,borderColor:T.border}}>
+                              <Text style={{fontSize:9,fontWeight:'900',color:li===0?'#FFF':T.textMuted}}>{li+1}</Text>
+                            </View>
+                            <Text style={{fontSize:11*fontScale,color:T.textSub,flex:1}} numberOfLines={1}>{lote.VENCIMENTO||'?'} · {lote.quantidade||'?'} un</Text>
+                            <View style={{backgroundColor:cor+'18',borderRadius:6,paddingHorizontal:6,paddingVertical:2,borderWidth:1,borderColor:cor+'35'}}>
+                              <Text style={{fontSize:9*fontScale,fontWeight:'800',color:cor}}>{dias===null?'?':dias<=0?'VENCIDO':`${dias}d`}</Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                      <Text style={{fontSize:9.5*fontScale,color:T.textMuted,marginTop:6,fontStyle:'italic'}}>
+                        {g.type==='ean'?`EAN: ${g.key}`:`Nome: "${g.key}..." · tipo nome`}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* ── Tab Críticos ── */}
+            {activeTab==='critico' && (
+              <View>
+                {criticos.length===0 ? (
+                  <View style={{alignItems:'center',paddingVertical:40}}>
+                    <Feather name="check-circle" size={48} color={T.green} />
+                    <Text style={{fontSize:15*fontScale,fontWeight:'800',color:T.text,marginTop:12}}>Nenhum produto crítico</Text>
+                    <Text style={{fontSize:12*fontScale,color:T.textSub,marginTop:4}}>Todos os produtos estão com prazo seguro.</Text>
+                  </View>
+                ) : criticos.map((p,i) => {
+                  const dt = parseD(p.VENCIMENTO);
+                  const dias = dt ? Math.floor((dt-agora)/86400000) : null;
+                  const cor = dias===null?T.textSub:dias<=0?T.red:dias<=3?T.red:T.amber;
+                  return (
+                    <View key={i} style={{flexDirection:'row',alignItems:'center',gap:12,padding:12,backgroundColor:cor+'0E',borderRadius:14,borderWidth:1,borderColor:cor+'30',marginBottom:8}}>
+                      <View style={{width:40,height:40,borderRadius:12,backgroundColor:cor+'18',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:cor+'40'}}>
+                        <Feather name={dias!==null&&dias<=0?'x-circle':'alert-triangle'} size={18} color={cor} />
+                      </View>
+                      <View style={{flex:1}}>
+                        <Text style={{fontSize:13*fontScale,fontWeight:'800',color:T.text}} numberOfLines={1}>{p.produto||'Produto'}</Text>
+                        <Text style={{fontSize:11*fontScale,color:T.textSub,marginTop:2}}>{p.quantidade||'?'} un · vence {p.VENCIMENTO||'?'}</Text>
+                      </View>
+                      <View style={{backgroundColor:cor+'18',borderRadius:10,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:cor+'35'}}>
+                        <Text style={{fontSize:11*fontScale,fontWeight:'900',color:cor}}>{dias===null?'?':dias<=0?'VENCIDO':`${dias}d`}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* ── Tab Ruptura ── */}
+            {activeTab==='ruptura' && (
+              <View>
+                <View style={{backgroundColor:T.amberGlow,borderRadius:14,padding:12,borderWidth:1,borderColor:T.amber+'30',marginBottom:14}}>
+                  <Text style={{fontSize:11*fontScale,fontWeight:'800',color:T.amber}}>⚠️ Produtos com menos de 15% de estoque restante estimado (baseado no giro).</Text>
+                </View>
+                {rupturaRisco.length===0 ? (
+                  <View style={{alignItems:'center',paddingVertical:40}}>
+                    <Feather name="check-circle" size={48} color={T.green} />
+                    <Text style={{fontSize:15*fontScale,fontWeight:'800',color:T.text,marginTop:12}}>Sem risco de ruptura iminente</Text>
+                  </View>
+                ) : rupturaRisco.map((p,i) => {
+                  const m = buildDepletionMetrics(p, fifoMode, stockData, p.codig);
+                  const pct = m?.remainingPct || 0;
+                  const cor = pct<=5?T.red:T.amber;
+                  return (
+                    <View key={i} style={{padding:12,backgroundColor:T.bgElevated,borderRadius:14,borderWidth:1,borderColor:T.border,marginBottom:8}}>
+                      <View style={{flexDirection:'row',alignItems:'center',gap:10,marginBottom:8}}>
+                        <Feather name="trending-down" size={16} color={cor} />
+                        <Text style={{fontSize:13*fontScale,fontWeight:'800',color:T.text,flex:1}} numberOfLines={1}>{p.produto||'Produto'}</Text>
+                        <Text style={{fontSize:10*fontScale,fontWeight:'900',color:cor}}>{pct}% restante</Text>
+                      </View>
+                      <View style={{height:6,backgroundColor:T.bgInput,borderRadius:3,overflow:'hidden'}}>
+                        <View style={{height:'100%',width:`${pct}%`,backgroundColor:cor,borderRadius:3}} />
+                      </View>
+                      <Text style={{fontSize:10*fontScale,color:T.textSub,marginTop:6}}>{m?.remainingQty||0} un restantes · ruptura em ~{m?.remainingDays||0} dias · {p.MARGEM||'Médio giro'}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* ── Tab Pedidos ── */}
+            {activeTab==='pedido' && (
+              <View>
+                <View style={{backgroundColor:T.purpleGlow,borderRadius:14,padding:12,borderWidth:1,borderColor:T.purple+'30',marginBottom:14}}>
+                  <Text style={{fontSize:11*fontScale,fontWeight:'800',color:T.purple}}>🛒 Produtos que precisam de reposição nos próximos 14 dias com base no giro.</Text>
+                </View>
+                {sugestoes.length===0 ? (
+                  <View style={{alignItems:'center',paddingVertical:40}}>
+                    <Feather name="check-circle" size={48} color={T.green} />
+                    <Text style={{fontSize:15*fontScale,fontWeight:'800',color:T.text,marginTop:12}}>Estoque OK nos próximos 14 dias</Text>
+                  </View>
+                ) : sugestoes.map((p,i) => {
+                  const gCfg = { 'Grande giro':{c:T.green,icon:'trending-up'}, 'Médio giro':{c:T.amber,icon:'minus'}, 'Pouco giro':{c:T.red,icon:'trending-down'} }[p.MARGEM||'Médio giro'] || {c:T.amber,icon:'minus'};
+                  return (
+                    <View key={i} style={{flexDirection:'row',alignItems:'center',gap:12,padding:12,backgroundColor:T.bgElevated,borderRadius:14,borderWidth:1,borderColor:T.border,marginBottom:8}}>
+                      <View style={{width:40,height:40,borderRadius:12,backgroundColor:gCfg.c+'18',justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:gCfg.c+'40'}}>
+                        <Feather name={gCfg.icon} size={18} color={gCfg.c} />
+                      </View>
+                      <View style={{flex:1}}>
+                        <Text style={{fontSize:13*fontScale,fontWeight:'800',color:T.text}} numberOfLines={1}>{p.produto||'Produto'}</Text>
+                        <Text style={{fontSize:11*fontScale,color:T.textSub,marginTop:2}}>{p.quantidade||'?'} un · ~{p.rate} un/dia · {p.MARGEM||'Médio giro'}</Text>
+                      </View>
+                      <View style={{backgroundColor:p.diasRestantes<=7?T.redGlow:T.amberGlow,borderRadius:10,paddingHorizontal:8,paddingVertical:4,borderWidth:1,borderColor:p.diasRestantes<=7?T.red+'35':T.amber+'35'}}>
+                        <Text style={{fontSize:11*fontScale,fontWeight:'900',color:p.diasRestantes<=7?T.red:T.amber}}>em {p.diasRestantes}d</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+          </ScrollView>
+        </Animated.View>
+      </Animated.View>
+    </Modal>
+  );
+};
+
 export default function App() {
+  const [showNotifPermission, setShowNotifPermission] = useState(false);
+  
+  // Lógica para solicitar permissão de forma inteligente
+  const checkAndRequestNotif = useCallback(async () => {
+    // Se for Web, verifica a Notification API do Chrome
+    if (Platform.OS === 'web') {
+      if ('Notification' in window) {
+        if (Notification.permission === 'default') {
+          setShowNotifPermission(true);
+        }
+      }
+      return;
+    }
+    
+    // Se for Mobile (Expo), verifica o status atual
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    if (existingStatus !== 'granted') {
+      setShowNotifPermission(true);
+    }
+  }, []);
+
+  const handleConfirmNotif = async () => {
+    setShowNotifPermission(false);
+    if (Platform.OS === 'web') {
+      if ('Notification' in window) {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          Alert.alert('Sucesso', 'Notificações ativadas no navegador!');
+        }
+      }
+    } else {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status === 'granted') {
+        Alert.alert('Sucesso', 'Notificações ativadas no dispositivo!');
+      }
+    }
+    await SafeStore.setItemAsync('notif_permission_asked', 'true');
+  };
+
+  useEffect(() => {
+    if (isLogged) {
+      const timer = setTimeout(async () => {
+        const asked = await SafeStore.getItemAsync('notif_permission_asked');
+        if (!asked) checkAndRequestNotif();
+      }, 3000); // Espera 3 segundos após o login para não ser invasivo
+      return () => clearTimeout(timer);
+    }
+  }, [isLogged, checkAndRequestNotif]);
+
   const [currentTheme, setCurrentTheme] = useState('light');
   const [fontScale, setFontScale] = useState(1);
   const [notifOn, setNotifOn] = useState(true);
@@ -4620,6 +6914,7 @@ export default function App() {
   const [roboMsg, setRoboMsg] = useState('');
   const gifTimeoutRef = useRef(null);
   const [fifoMode, setFifoMode] = useState(true);
+  const [showPainelInteligente, setShowPainelInteligente] = useState(false);
   const [activeShelf, setActiveShelf] = useState('');
   const [stockData, setStockData] = useState([]);
   const [shelfModal, setShelfModal] = useState(false);
@@ -4652,6 +6947,7 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState({ logs: [], loginHistory: [] });
   const [showExpiryModal, setShowExpiryModal] = useState(false);
   const [voiceAssistantVisible, setVoiceAssistantVisible] = useState(false);
+  const [novidadesVisible, setNovidadesVisible]           = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceIndicatorVisible, setVoiceIndicatorVisible] = useState(true);
   
@@ -4660,6 +6956,28 @@ export default function App() {
   const [micVibrationEnabled, setMicVibrationEnabled] = useState(true);
   const [micSoundVolume, setMicSoundVolume] = useState(1.0); // 0.0 a 1.0
   const [elevenLabsQuota, setElevenLabsQuota] = useState(null);
+  const [voiceRecognitionEnabled, setVoiceRecognitionEnabled] = useState(true);
+
+  // Persistência de configurações de microfone
+  useEffect(() => {
+    const loadMicSettings = async () => {
+      const s = await SafeStore.getItemAsync('micSoundEnabled');
+      if (s !== null) setMicSoundEnabled(s === 'true');
+      const v = await SafeStore.getItemAsync('micVibrationEnabled');
+      if (v !== null) setMicVibrationEnabled(v === 'true');
+      const vol = await SafeStore.getItemAsync('micSoundVolume');
+      if (vol !== null) setMicSoundVolume(parseFloat(vol));
+      const vr = await SafeStore.getItemAsync('voiceRecognitionEnabled');
+      if (vr !== null) setVoiceRecognitionEnabled(vr === 'true');
+    };
+    loadMicSettings();
+  }, []);
+
+  const updateMicSound = async (val) => { setMicSoundEnabled(val); await SafeStore.setItemAsync('micSoundEnabled', String(val)); };
+  const updateMicVibration = async (val) => { setMicVibrationEnabled(val); await SafeStore.setItemAsync('micVibrationEnabled', String(val)); };
+  const updateMicVolume = async (val) => { setMicSoundVolume(val); await SafeStore.setItemAsync('micSoundVolume', String(val)); };
+  const updateVoiceRecognition = async (val) => { setVoiceRecognitionEnabled(val); await SafeStore.setItemAsync('voiceRecognitionEnabled', String(val)); };
+
 
   const hideVoiceIndicator = useCallback(async () => {
     setVoiceIndicatorVisible(false);
@@ -4668,13 +6986,26 @@ export default function App() {
 
   // ── Escuta sempre ativa — wake word de qualquer tela ──────────────────────
   const [openedByWakeWord, setOpenedByWakeWord] = useState(false);
+  const [openedByLembrete, setOpenedByLembrete] = useState(false);
   const openVoiceAssistant = useCallback(() => {
     setOpenedByWakeWord(true);
+    setOpenedByLembrete(false);
+    setVoiceAssistantVisible(true);
+  }, []);
+  const openNovidadesAssistant = useCallback(() => {
+    setNovidadesVisible(true);
+  }, []);
+  // Abre o VoiceAssistant JÁ no fluxo de lembrete (pula wake word, vai direto pra LEM_TEXTO)
+  const openLembreteAssistant = useCallback(() => {
+    setOpenedByWakeWord(false);
+    setOpenedByLembrete(true);
     setVoiceAssistantVisible(true);
   }, []);
   const { isAlwaysListening } = useAlwaysOnWakeWord({
-    enabled: isLogged && !voiceAssistantVisible,
+    enabled: isLogged && !voiceAssistantVisible && !novidadesVisible && voiceRecognitionEnabled,
     onWakeWord: openVoiceAssistant,
+    onNovidadesWord: openNovidadesAssistant,
+    onLembreteWord: openLembreteAssistant,
   });
 
   const handleStartScanning = async (mode = 'barcode') => {
@@ -4836,7 +7167,14 @@ export default function App() {
   }, [stockData, activeFilter, searchQuery]);
   const counts = useMemo(() => { const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN')); return { all: base.length, ok: base.filter(i => vencStatus(i.VENCIMENTO).status === 'ok').length, warning30: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning30').length, warning: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').length, expired: base.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').length }; }, [stockData]);
   const triggerAutoClean = useCallback(async () => { setCleanToast({ cleaning: true }); try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); } catch (_) { setCleanToast({ cleaning: false, deleted: [] }); } }, [activeShelf, userData, loadStock]);
-  const loadStock = useCallback(async shelf => { const tid = SHELVES[shelf]; if (!tid) return; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true&size=200`); const products = res.data.results || []; setStockData(sortProductsByDate(products)); } catch (ex) { showErr('Erro ao carregar dados da prateleira.'); } }, [showErr]);
+  const loadStock = useCallback(async shelf => { const tid = SHELVES[shelf]; if (!tid) return; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true&size=200`); const products = res.data.results || []; setStockData(sortProductsByDate(products)); agendarTercaSemanal(products).catch(()=>{}); verificarTercaHoje(products).catch(()=>{}); } catch (ex) { showErr('Erro ao carregar dados da prateleira.'); } }, [showErr]);
+
+  // ── Auto-ativa FIFO quando detecta ≥4 produtos com mesmo nome OU ≥2 com mesmo EAN ──
+  React.useEffect(() => {
+    if (!stockData || stockData.length === 0) return;
+    const { hasFifo } = detectFifoGroups(stockData);
+    if (hasFifo) setFifoMode(true);
+  }, [stockData]);
   const deleteProduct = useCallback(async (product) => { if (!product?.id) return; const tableId = SHELVES[activeShelf]; if (!tableId) { showErr('Nenhuma prateleira ativa para apagar o produto.'); return; } setBusy(true); setBusyMsg('Apagando produto...'); try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${product.id}/`); await addAuditLog('PRODUCT_DELETED', `Produto "${product.produto}" apagado da prateleira ${activeShelf}`, userData?.id); setStockData(prev => sortProductsByDate(prev.filter(p => p.id !== product.id))); } catch (ex) { showErr('Não foi possível apagar o produto. Verifique a conexão.'); } finally { setBusy(false); } }, [activeShelf, showErr, userData]);
 
   const updateLastLogin = async (userId) => { try { const now = new Date(); const novoLogin = { data: now.toLocaleDateString('pt-BR'), hora: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), iso: now.toISOString() }; let historicoAtual = []; try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { historicoAtual = JSON.parse(utimologin); } else if (utimologin) { historicoAtual = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { historicoAtual = []; } const historicoAtualizado = [novoLogin, ...historicoAtual].slice(0, 3); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`, { UTIMOLOGIN: JSON.stringify(historicoAtualizado) }); } catch (error) { console.warn('Nao foi possivel atualizar ultimo login', error); } };
@@ -4929,7 +7267,10 @@ Pergunta do usuário: "${txt}"`;
     } catch (ex) { const isAbort = ex?.name === 'AbortError'; setMsgs(p => [...p, { id: Date.now() + 1, text: isAbort ? '⏱️ A IA demorou demais para responder. Verifique sua conexão e tente novamente.' : '⚠️ Erro de conexão com a IA. Verifique sua internet e tente novamente.', isAi: true }]); } finally { setChatBusy(false); } };
   const getTargetShelf = () => (isCoord(perf) || isDeposito(perf)) && cadastroShelf ? cadastroShelf : activeShelf;
   const calculatePrevisao = (qtd, giro, dataEnvio) => { const rateMap = { 'Grande giro': 5.2, 'Médio giro': 2.5, 'Pouco giro': 0.8 }; const dailyRate = rateMap[giro] || 2.5; const sendDate = parseDate(dataEnvio) || today(); const remainingDays = dailyRate > 0 ? Math.ceil(qtd / dailyRate) : 999; const depletionDate = addDays(sendDate, remainingDays); return fmtFull(depletionDate); };
-  const doSaveProductConfirmed = async (overrides = {}) => { const nome = overrides.nome || prodName; const qtdUse = overrides.qty || qtd; const valUse = overrides.date || validade; const giroUse = overrides.giro || giro; const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf]; if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; } setBusy(true); setBusyMsg('Salvando produto...'); try { const dataEnvio = new Date().toLocaleDateString('pt-BR'); const previsao = calculatePrevisao(Number(qtdUse), giroUse, dataEnvio); await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, { produto: nome.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: valUse, quantidade: String(qtdUse), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: dataEnvio, ALERTAMENSAGEM: '', MARGEM: giroUse, PREVISAO: previsao }); await addAuditLog('PRODUCT_ADDED', `Produto "${nome}" adicionado à prateleira ${targetShelf}`, userData?.id); setBusy(false); setShowSuccess(true); setScannedEAN(''); if (targetShelf === activeShelf) loadStock(activeShelf); } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const doSaveProductConfirmed = useCallback(async (overrides = {}) => { const nome = overrides.nome || prodName; const qtdUse = overrides.qty || qtd; const valUse = overrides.date || validade; const giroUse = overrides.giro || giro; const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf]; if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; } setBusy(true); setBusyMsg('Salvando produto...'); try { const dataEnvio = new Date().toLocaleDateString('pt-BR'); const previsao = calculatePrevisao(Number(qtdUse), giroUse, dataEnvio); await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, { produto: nome.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: valUse, quantidade: String(qtdUse), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: dataEnvio, ALERTAMENSAGEM: '', MARGEM: giroUse, PREVISAO: previsao }); await addAuditLog('PRODUCT_ADDED', `Produto "${nome}" adicionado à prateleira ${targetShelf}`, userData?.id); setBusy(false); setShowSuccess(true); setScannedEAN(''); if (targetShelf === activeShelf) loadStock(activeShelf); } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeShelf, loadStock, userData, showErr, prodName, qtd, validade, giro, scannedEAN]);
   const doUpdateExisting = useCallback(async (rowId, overrides) => {
     const tid = SHELVES[getTargetShelf()]; if (!tid || !rowId) return;
     setBusy(true); setBusyMsg('Atualizando produto...');
@@ -5110,6 +7451,31 @@ Pergunta do usuário: "${txt}"`;
               <Feather name="mic" size={24} color={T.blue} />
               <Text style={{ marginLeft: 8, fontSize: 14 * fontScale, fontWeight: '700', color: T.blue }}>Assistente de Voz</Text>
             </TouchableOpacity>
+            {/* Botão Novidades IA */}
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                backgroundColor: T.purpleGlow, borderRadius: 50, padding: 12, marginTop: 10,
+                borderWidth: 1, borderColor: T.purple }}
+              onPress={() => setNovidadesVisible(true)}>
+              <MaterialCommunityIcons name="robot-excited-outline" size={24} color={T.purple} />
+              <Text style={{ marginLeft: 8, fontSize: 14 * fontScale, fontWeight: '700', color: T.purple }}>
+                🤖 Novidades do Estoque
+              </Text>
+            </TouchableOpacity>
+            {/* Botão Painel Inteligente IA */}
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                backgroundColor: T.tealGlow || '#0D2E2E', borderRadius: 50, padding: 12, marginTop: 10,
+                borderWidth: 1.5, borderColor: T.teal }}
+              onPress={() => setShowPainelInteligente(true)}>
+              <MaterialCommunityIcons name="brain" size={24} color={T.teal} />
+              <Text style={{ marginLeft: 8, fontSize: 14 * fontScale, fontWeight: '800', color: T.teal }}>
+                🧠 Painel Inteligente
+              </Text>
+              {detectFifoGroups(stockData).hasFifo && (
+                <View style={{ marginLeft: 6, width: 8, height: 8, borderRadius: 4, backgroundColor: T.teal }} />
+              )}
+            </TouchableOpacity>
           </ScrollView>
         )}
         {currentTab === 'chat' && <ChatScreen T={T} fontScale={fontScale} msgs={msgs} chatTxt={chatTxt} setChatTxt={setChatTxt} sendChat={sendChat} busy={chatBusy} scrollRef={scrollRef} TAB_H={TAB_H} NAV_BAR_H={NAV_BAR_H} />}
@@ -5131,7 +7497,7 @@ Pergunta do usuário: "${txt}"`;
             <FlatList key={viewMode} data={filteredStock} keyExtractor={(item, index) => `${item.id}-${index}`} numColumns={viewMode === 'grid' ? 2 : 1} columnWrapperStyle={viewMode === 'grid' ? { gap: 12 } : undefined} renderItem={({ item }) => viewMode === 'list' ? <CardList item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} fifoMode={fifoMode} allProducts={stockData} /> : <CardGrid item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} fifoMode={fifoMode} allProducts={stockData} />} contentContainerStyle={{ padding: 16, paddingBottom: TAB_SAFE + 24 }} showsVerticalScrollIndicator={false} ListEmptyComponent={() => (<View style={{ alignItems: 'center', paddingVertical: 80 }}><Feather name={searchQuery ? 'search' : 'inbox'} size={60} color={T.textMuted} /><Text style={{ color: T.textSub, marginTop: 20, fontSize: 17 * fontScale, fontWeight: '800', textAlign: 'center' }}>{searchQuery ? 'Nenhum resultado' : 'Nada aqui...'}</Text><Text style={{ color: T.textMuted, marginTop: 8, fontSize: 14 * fontScale, fontWeight: '600', textAlign: 'center' }}>{searchQuery ? `Nenhum produto encontrado para "${searchQuery}".` : activeFilter === 'all' ? 'Nenhum produto cadastrado nesta prateleira.' : 'Nenhum produto atende a este filtro.'}</Text></View>)} />
           </View>
         )}
-        {currentTab === 'config' && <ConfigScreen T={T} currentTheme={currentTheme} onThemeChange={setCurrentTheme} fontScale={fontScale} setFontScale={setFontScale} notifOn={notifOn} setNotifOn={setNotifOn} TAB_SAFE={TAB_SAFE} onGenerateQR={() => setShowQrGenerator(true)} onViewAuditLogs={viewAuditLogs} onEnableBiometrics={enableBiometrics} biometricEnabled={biometricEnabled} onChangePassword={handleChangePassword} userData={userData} fifoMode={fifoMode} setFifoMode={setFifoMode} />}
+        {currentTab === 'config' && <ConfigScreen T={T} currentTheme={currentTheme} onThemeChange={setCurrentTheme} fontScale={fontScale} setFontScale={setFontScale} notifOn={notifOn} setNotifOn={setNotifOn} TAB_SAFE={TAB_SAFE} onGenerateQR={() => setShowQrGenerator(true)} onViewAuditLogs={viewAuditLogs} onEnableBiometrics={enableBiometrics} biometricEnabled={biometricEnabled} onChangePassword={handleChangePassword} userData={userData} fifoMode={fifoMode} setFifoMode={setFifoMode} micSoundEnabled={micSoundEnabled} setMicSoundEnabled={updateMicSound} micVibrationEnabled={micVibrationEnabled} setMicVibrationEnabled={updateMicVibration} micSoundVolume={micSoundVolume} setMicSoundVolume={updateMicVolume} voiceRecognitionEnabled={voiceRecognitionEnabled} setVoiceRecognitionEnabled={updateVoiceRecognition} elevenLabsQuota={elevenLabsQuota} onFetchQuota={async () => { const quota = await fetchElevenLabsQuota(); setElevenLabsQuota(quota); if (!quota) Alert.alert('Erro', 'Não foi possível buscar as cotas do ElevenLabs.'); }} />}
       </Animated.View>
       <Modal visible={scanning} animationType='fade' transparent={false} onRequestClose={() => setScanning(false)}><View style={StyleSheet.absoluteFill}>          <CameraView ref={camRef} style={StyleSheet.absoluteFill} enableTorch={torchOn} onBarcodeScanned={scanMode === 'barcode' ? onBarcode : undefined} barcodeScannerSettings={{ barcodeTypes: ['ean13', 'upc_a', 'ean8', 'qr', 'code128'] }} onCameraReady={scanMode === 'aiVision' ? onAIVisionCameraReady : undefined} />
           <DarkTorchPrompt isDarkEnv={isDarkEnv} lightLevel={lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(p => !p)} T={T} fontScale={fontScale} /><View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.32)' }}><View style={{ position: 'absolute', top: 40, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24 }}><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => { setScanning(false); setCountdown(null); setTorchOn(false); setShowAchandoGif(false); aiVisionTriggeredRef.current = false; if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); }}><Feather name="x" size={22} color="#FFF" /></TouchableOpacity><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: torchOn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setTorchOn(!torchOn)}><Feather name="zap" size={20} color={torchOn ? '#000' : '#FFF'} /></TouchableOpacity></View>{scanMode === 'barcode' && !showAchandoGif && (<View style={{ alignItems: 'center' }}><View style={{ width: 280, height: 180, borderWidth: 2, borderColor: T.blue, borderRadius: 24, backgroundColor: 'rgba(59,91,255,0.05)' }}><Animated.View style={{ height: 2, backgroundColor: T.blue, width: '100%', position: 'absolute', top: scanAnim.interpolate({ inputRange: [0, 1], outputRange: ['10%', '90%'] }), shadowColor: T.blue, shadowOpacity: 1, shadowRadius: 10, elevation: 10 }} /></View><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 }}>Posicione o código de barras</Text><Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Nome preenchido automaticamente pela IA</Text></View>)}{scanMode === 'aiVision' && (<View style={{ alignItems: 'center' }}><Animated.View style={{ width: 260, height: 260, borderWidth: 3, borderColor: T.purple, borderRadius: 130, backgroundColor: 'rgba(124,58,237,0.1)', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulseAnim }] }}><MaterialCommunityIcons name="robot-outline" size={80} color={T.purple} /></Animated.View><Text style={{ color: '#FFF', marginTop: 32, fontWeight: '800', fontSize: 18, textAlign: 'center', paddingHorizontal: 40 }}>IA Vision · Aponte para o produto</Text><Text style={{ color: 'rgba(255,255,255,0.65)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Captura automática em tempo real pelo Gemini</Text></View>)}</View></View></Modal>
@@ -5177,6 +7543,22 @@ Pergunta do usuário: "${txt}"`;
         setWStep={setWStep}
         setCadastroShelf={setCadastroShelf}
         setIsVoiceActive={setIsVoiceActive}
+      />
+      <NovidadesModal
+        visible={novidadesVisible}
+        onClose={() => setNovidadesVisible(false)}
+        stockData={stockData}
+        T={T}
+        fontScale={fontScale}
+        userData={userData}
+      />
+      <PainelInteligenteScreen
+        visible={showPainelInteligente}
+        onClose={() => setShowPainelInteligente(false)}
+        stockData={stockData}
+        fifoMode={fifoMode}
+        T={T}
+        fontScale={fontScale}
       />
     </View>
   );
