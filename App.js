@@ -52,6 +52,112 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+
+// ─── ONESIGNAL — PUSH NOTIFICATIONS ────────────────────────────────────────
+// Integração com OneSignal para receber notificações push do script Python.
+// O script Python busca os vencimentos no Baserow e envia via API REST do OneSignal.
+// O app só precisa: 1) inicializar, 2) registrar o externalUserId (usuário logado),
+// 3) ouvir notificações recebidas e exibir no AppAlert.
+
+let _oneSignalReady = false;
+let _oneSignalUserId = null; // externalId do usuário logado (ex: ID do Baserow)
+
+// Inicialização do OneSignal (chamada uma vez no App mount)
+// Requer: react-native-onesignal instalado e ONESIGNAL_APP_ID configurado
+const ONESIGNAL_APP_ID = 'SEU_APP_ID_AQUI'; // ← substitua pelo seu App ID do OneSignal
+
+const initOneSignal = async () => {
+  try {
+    const { OneSignal } = await import('react-native-onesignal');
+
+    // Inicializa
+    OneSignal.initialize(ONESIGNAL_APP_ID);
+
+    // Solicita permissão de push (iOS precisa, Android 13+ também)
+    OneSignal.Notifications.requestPermission(true);
+
+    // Listener: notificação recebida com app em primeiro plano
+    OneSignal.Notifications.addEventListener('foregroundWillDisplay', (event) => {
+      const notif  = event.notification;
+      const title  = notif.title  || 'Notificação';
+      const body   = notif.body   || '';
+      const data   = notif.additionalData || {};
+
+      // Previne exibição nativa duplicada — mostramos no AppAlert customizado
+      event.preventDefault();
+
+      // Detecta tipo pela data adicional (enviada pelo script Python)
+      let type = 'warning';
+      if (data.tipo === 'vencimento_critico') type = 'error';
+      else if (data.tipo === 'vencimento_ok')  type = 'success';
+      else if (data.tipo === 'previsao')        type = 'info';
+
+      AppAlert.alert(title, body, [{ text: 'OK' }], { type });
+
+      // Fala a notificação pelo ElevenLabs se app estiver ativo
+      speakWithElevenLabs(`${title}. ${body}`, () => {});
+    });
+
+    // Listener: usuário tocou na notificação (app em background/fechado)
+    OneSignal.Notifications.addEventListener('click', (event) => {
+      const data = event?.notification?.additionalData || {};
+      // Pode navegar para a prateleira correta, se tiver dado adicional
+      if (data.shelf && typeof _oneSignalNavCallback === 'function') {
+        _oneSignalNavCallback(data.shelf);
+      }
+    });
+
+    _oneSignalReady = true;
+    console.log('[OneSignal] Inicializado com sucesso.');
+  } catch (e) {
+    // react-native-onesignal não instalado ou Expo Go — silencia
+    console.warn('[OneSignal] Não disponível:', e?.message);
+  }
+};
+
+// Callback de navegação: preenchido pelo App ao montar
+let _oneSignalNavCallback = null;
+const setOneSignalNavCallback = (cb) => { _oneSignalNavCallback = cb; };
+
+// Registra o usuário logado no OneSignal como External User ID
+// O script Python usa esse mesmo ID para filtrar a quem enviar a notificação
+const oneSignalLogin = async (externalUserId) => {
+  if (!externalUserId) return;
+  _oneSignalUserId = String(externalUserId);
+  try {
+    const { OneSignal } = await import('react-native-onesignal');
+    // External ID = ID da linha do usuário no Baserow (userData.id)
+    OneSignal.login(_oneSignalUserId);
+    console.log('[OneSignal] Usuário registrado:', _oneSignalUserId);
+  } catch { /* OneSignal não disponível */ }
+};
+
+// Remove o usuário ao fazer logout
+const oneSignalLogout = async () => {
+  _oneSignalUserId = null;
+  try {
+    const { OneSignal } = await import('react-native-onesignal');
+    OneSignal.logout();
+  } catch { /* noop */ }
+};
+
+// Tags úteis para segmentar notificações no script Python
+// Ex: notificar só usuários de um perfil específico, ou de uma prateleira
+const oneSignalSetTags = async (tags = {}) => {
+  try {
+    const { OneSignal } = await import('react-native-onesignal');
+    OneSignal.User.addTags(tags);
+    // Ex: { perfil: 'Gerente', area: 'Frios', loja: 'SP01' }
+  } catch { /* noop */ }
+};
+
+// ─── CANAIS ANDROID PARA ONESIGNAL ──────────────────────────────────────────
+// Esses IDs devem corresponder ao que o script Python envia no campo "android_channel_id"
+const OS_CHANNEL_CRITICO    = 'vencimento_critico';   // vermelho, prioridade MAX
+const OS_CHANNEL_ATENCAO    = 'vencimento_atencao';   // amarelo, prioridade HIGH
+const OS_CHANNEL_PREVISAO   = 'vencimento_previsao';  // azul, prioridade DEFAULT
+const OS_CHANNEL_SISTEMA    = 'sistema_geral';        // cinza, prioridade DEFAULT
+
 // ─── EXPO-SPEECH-RECOGNITION: FALLBACK SEGURO PARA EXPO GO ────────────────────
 let ExpoSpeechRecognitionModule = null;
 let _useSpeechRecognitionEventReal = null;
@@ -2714,11 +2820,29 @@ const PinhasCalculatorModal = ({ visible, onClose, T, fontScale }) => {
     stopMicPulse(); stopWaveAnim();
   }, []);
 
-  const handleClose = useCallback(() => { stopListening(); reset(); onClose(); }, [reset, onClose]);
+  const handleClose = useCallback(() => {
+    cancelledRef.current = true;
+    setIsListening(false);
+    stopMicPulse();
+    stopWaveAnim();
+    if (listenTimeRef.current) { clearTimeout(listenTimeRef.current); listenTimeRef.current = null; }
+    // Pequeno delay: dá tempo ao módulo de voz de fechar a sessão antes
+    // do always-on tentar reabrir (evita colisão de sessões)
+    setTimeout(() => {
+      reset();
+      onClose();
+    }, 350);
+  }, [reset, onClose, stopMicPulse, stopWaveAnim]);
 
   // ── Parar reconhecimento de voz ───────────────────────────────────────────
+  // IMPORTANTE: não chamamos ExpoSpeechRecognitionModule.stop() diretamente aqui
+  // para não interferir com o sistema always-on. Usamos um ref de cancelamento
+  // e aguardamos o evento 'end' natural do módulo.
+  const cancelledRef = useRef(false);
   const stopListening = useCallback(() => {
     if (listenTimeRef.current) { clearTimeout(listenTimeRef.current); listenTimeRef.current = null; }
+    cancelledRef.current = true;
+    // Tenta parar suavemente — se falhar, o evento 'end' virá de qualquer forma
     try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
     setIsListening(false);
     stopMicPulse();
@@ -2727,6 +2851,7 @@ const PinhasCalculatorModal = ({ visible, onClose, T, fontScale }) => {
 
   // ── Iniciar reconhecimento de voz ─────────────────────────────────────────
   const startListening = useCallback(async () => {
+    cancelledRef.current = false;
     if (!SPEECH_RECOGNITION_AVAILABLE) {
       setStatusMsg('Reconhecimento de voz indisponível. Use o modo manual.');
       setVoiceMode(false);
@@ -2773,7 +2898,7 @@ const PinhasCalculatorModal = ({ visible, onClose, T, fontScale }) => {
   }, [visible, calcState]);
 
   const handleSpeechEnd = useCallback(() => {
-    if (!visible) return;
+    if (!visible || cancelledRef.current) return;
     if (listenTimeRef.current) { clearTimeout(listenTimeRef.current); listenTimeRef.current = null; }
     setIsListening(false);
     stopMicPulse();
@@ -6404,7 +6529,19 @@ let _elCurrentSound = null;
 let _elLastStatus   = { key:'none', attempts:0, lastError:'', ts:0 };
 // Mutex simples: evita chamadas sobrepostas (ex: lembrete + resposta IA ao mesmo tempo)
 let _elBusy         = false;
-let _elQueue        = []; // fila de textos pendentes
+let _elQueue        = [];
+// Getter: verdadeiro enquanto ElevenLabs está gerando/reproduzindo áudio
+const isElevenLabsSpeaking = () => _elBusy;
+
+// Fila de callbacks chamados quando ElevenLabs termina de falar
+// O always-on se registra aqui em vez de fazer polling
+let _elDoneCallbacks = [];
+const onElevenLabsDone = (cb) => { _elDoneCallbacks.push(cb); };
+const _fireElevenLabsDone = () => {
+  const cbs = _elDoneCallbacks;
+  _elDoneCallbacks = [];
+  cbs.forEach(cb => { try { cb(); } catch { /* noop */ } });
+}; // fila de textos pendentes
 
 const _elPlayNext = async () => {
   if (_elBusy || _elQueue.length === 0) return;
@@ -6412,13 +6549,27 @@ const _elPlayNext = async () => {
   const { text, onDone } = _elQueue.shift();
   await _doSpeak(text, onDone);
   _elBusy = false;
-  _elPlayNext(); // processa próximo da fila
+  if (_elQueue.length > 0) {
+    _elPlayNext(); // processa próximo da fila
+  } else {
+    // Fila vazia → avisa todos os ouvintes que o EL terminou
+    _fireElevenLabsDone();
+  }
 };
+
+// Callback registrado pelo always-on para parar o mic quando EL for falar
+let _elMicStopCallback = null;
+const registerMicStopForEL = (cb) => { _elMicStopCallback = cb; };
 
 const speakWithElevenLabs = (text, onDone) => {
   if (!text?.trim()) { if (onDone) setTimeout(onDone, 30); return; }
   // Cancela qualquer fala nativa em curso
   try { Speech.stop(); } catch { /* noop */ }
+  // PARA O MICROFONE ALWAYS-ON ANTES DE FALAR
+  // Evita que o mic capture a voz do ElevenLabs e crie loop
+  if (_elMicStopCallback) {
+    try { _elMicStopCallback(); } catch { /* noop */ }
+  }
   // Adiciona à fila (evita sobreposição)
   _elQueue.push({ text: _truncateForTTS(text), onDone });
   // Se limite da fila ultrapassar 3, descarta os mais antigos (exceto o primeiro)
@@ -6434,11 +6585,15 @@ const _doSpeak = async (text, onDone) => {
   }
 
   // ── Fallback final: voz nativa do sistema ────────────────────────────────
-  const _fallback = (motivo) => {
+  // Retorna Promise que resolve quando a fala terminar (necessário para _elBusy)
+  const _fallback = (motivo) => new Promise(resolve => {
     console.warn(`[EL] Fallback voz do sistema. ${motivo}`);
     _elLastStatus = { key:'fallback', attempts:_elLastStatus.attempts, lastError:motivo, ts:Date.now() };
-    try { Speech.speak(text, { language:'pt-BR', rate:1.0, pitch:1.0, onDone: onDone||undefined }); } catch { if(onDone) setTimeout(onDone,80); }
-  };
+    const wrapped = () => { if (onDone) onDone(); resolve(); };
+    try {
+      Speech.speak(text, { language:'pt-BR', rate:1.0, pitch:1.0, onDone: wrapped, onError: wrapped });
+    } catch { wrapped(); }
+  });
 
   // ── Chamada HTTP à API ElevenLabs ────────────────────────────────────────
   const _call = async (apiKey, timeoutMs = 6000) => {
@@ -6535,7 +6690,7 @@ const _doSpeak = async (text, onDone) => {
 
   // ── Todas as chaves falharam → fallback para voz nativa ──────────────────
   if (!response?.ok) {
-    _fallback(`Todas as ${attempts} tentativas ElevenLabs falharam. Último: ${_elLastStatus.lastError}`);
+    await _fallback(`Todas as ${attempts} tentativas ElevenLabs falharam. Último: ${_elLastStatus.lastError}`);
     return;
   }
 
@@ -6558,7 +6713,7 @@ const _doSpeak = async (text, onDone) => {
         source.start(0);
       } catch (webErr) {
         console.error(`[EL][Web] AudioContext erro: ${webErr?.message}`);
-        _fallback(`AudioContext: ${webErr?.message}`);
+        await _fallback(`AudioContext: ${webErr?.message}`);
       }
       return;
     }
@@ -6595,26 +6750,49 @@ const _doSpeak = async (text, onDone) => {
 
     if (!audioUri) throw new Error('Não foi possível obter URI do áudio');
 
-    try { await Audio.setAudioModeAsync({ allowsRecordingIOS:false, playsInSilentModeIOS:true, staysActiveInBackground:false }); } catch { /* noop */ }
-    const { sound } = await Audio.Sound.createAsync({ uri: audioUri }, { shouldPlay: true });
-    _elCurrentSound = sound;
-
-    sound.setOnPlaybackStatusUpdate(async status => {
-      if (status.didJustFinish || (status.isLoaded === false && _elCurrentSound === sound)) {
-        try { await sound.unloadAsync(); } catch { /* noop */ }
+    // Garante modo de reprodução (desativa gravação no iOS para não conflitar com mic)
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS:      false,
+        playsInSilentModeIOS:    true,
+        staysActiveInBackground: false,
+        interruptionModeIOS:     1, // DO_NOT_MIX — interrompe outras sessões de áudio
+        interruptionModeAndroid: 1,
+        shouldDuckAndroid:       false,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch { /* noop */ }
+    // _doSpeak retorna APENAS quando o áudio termina de tocar
+    // garantindo que _elBusy=true durante toda a reprodução
+    await new Promise(async (resolveAudio) => {
+      let finished = false;
+      const finish = async () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(safetyTimer);
         if (_elCurrentSound === sound) _elCurrentSound = null;
-        // Limpa arquivo temporário
+        try { await sound.unloadAsync(); } catch { /* noop */ }
         try {
           const FileSystem = require('expo-file-system');
           if (audioUri?.startsWith(FileSystem.cacheDirectory)) await FileSystem.deleteAsync(audioUri, { idempotent: true });
         } catch { /* noop */ }
         if (onDone) onDone();
-      }
+        resolveAudio();
+      };
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUri }, { shouldPlay: true });
+      _elCurrentSound = sound;
+      // Segurança: resolve após 90s mesmo sem evento (áudio muito longo ou bug)
+      const safetyTimer = setTimeout(() => finish(), 90000);
+      sound.setOnPlaybackStatusUpdate(async status => {
+        if (status.didJustFinish || (status.isLoaded === false && _elCurrentSound === sound)) {
+          await finish();
+        }
+      });
     });
 
   } catch (audioErr) {
     console.error(`[EL] Erro ao reproduzir blob: ${audioErr?.message}`);
-    _fallback(`Áudio: ${audioErr?.message}`);
+    await _fallback(`Áudio: ${audioErr?.message}`);
   }
 };
 
@@ -6856,6 +7034,37 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
   }, []);
 
   // ── Agendador seguro com proteção completa ───────────────────────────────
+  // Registra callback de parada imediata do mic para o ElevenLabs
+  // Isso para o mic ANTES do EL falar, evitando loop
+  useEffect(() => {
+    const stopFn = () => {
+      if (!mountedRef.current) return;
+      // Para o mic imediatamente e agenda restart após EL terminar
+      _clearTimers();
+      isStartingRef.current    = false;
+      activeSessionRef.current = 0;
+      stopInFlight.current     = true;
+      if (Platform.OS !== 'web' && SPEECH_RECOGNITION_AVAILABLE) {
+        try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+        lastStopTimeRef.current = Date.now();
+      } else if (Platform.OS === 'web' && webRecRef.current) {
+        try { webRecRef.current.abort(); } catch { /* noop */ }
+        webRecRef.current = null;
+      }
+      stopInFlight.current = false;
+      if (mountedRef.current) setIsAlwaysListening(false);
+      // Registra callback para religar mic quando EL terminar
+      onElevenLabsDone(() => {
+        if (mountedRef.current && enabledRef.current && !didFireRef.current) {
+          _safeRestart(350);
+        }
+      });
+    };
+    registerMicStopForEL(stopFn);
+    return () => { registerMicStopForEL(null); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled]);
+
   const _safeRestart = useCallback((delayMs) => {
     if (!mountedRef.current) return;
     if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
@@ -6876,7 +7085,31 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
       activeSessionRef.current = mySession;
       isStartingRef.current = true;
 
+      // Aguarda ElevenLabs terminar antes de ligar o microfone
+      // USA CALLBACK — não polling — para não criar loop de timeouts
+      if (isElevenLabsSpeaking()) {
+        isStartingRef.current = false;
+        activeSessionRef.current = 0;
+        // Registra callback único: quando EL terminar, tenta iniciar o mic
+        onElevenLabsDone(() => {
+          if (mountedRef.current && enabledRef.current && !didFireRef.current) {
+            _safeRestart(300); // 300ms após EL terminar → liga mic
+          }
+        });
+        return;
+      }
+
       try {
+        // Seta modo de gravação antes de iniciar o mic (necessário no iOS)
+        try {
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS:      true,
+            playsInSilentModeIOS:    true,
+            staysActiveInBackground: false,
+            interruptionModeIOS:     1,
+            interruptionModeAndroid: 1,
+          });
+        } catch { /* noop */ }
         await ExpoSpeechRecognitionModule.start({ lang: 'pt-BR', interimResults: true, continuous: false });
         if (!mountedRef.current || !enabledRef.current || activeSessionRef.current !== mySession) {
           // Condição mudou enquanto aguardávamos — para imediatamente
@@ -7090,7 +7323,16 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
       const noTimer    = !restartTimerRef.current;
       const noStop     = !stopInFlight.current;
       if (noSession && noStarting && noTimer && noStop) {
-        _safeRestart(800);
+        if (isElevenLabsSpeaking()) {
+          // Watchdog aguarda via callback em vez de re-verificar no próximo tick
+          onElevenLabsDone(() => {
+            if (mountedRef.current && enabledRef.current && !didFireRef.current) {
+              _safeRestart(300);
+            }
+          });
+        } else {
+          _safeRestart(800);
+        }
       }
     }
   }, [startWebSpeech, _safeRestart]);
@@ -8238,7 +8480,7 @@ export default function App() {
     setShowPinhasModal(true);
   }, []);
   const { isAlwaysListening } = useAlwaysOnWakeWord({
-    enabled: isLogged && !voiceAssistantVisible && !novidadesVisible && voiceRecognitionEnabled,
+    enabled: isLogged && !voiceAssistantVisible && !novidadesVisible && !showPinhasModal && voiceRecognitionEnabled,
     onWakeWord: openVoiceAssistant,
     onNovidadesWord: openNovidadesAssistant,
     onLembreteWord: openLembreteAssistant,
@@ -8276,6 +8518,16 @@ export default function App() {
 
   useEffect(() => { const hide = () => { StatusBar.setHidden(true, 'none'); StatusBar.setTranslucent(true); StatusBar.setBackgroundColor('transparent', false); }; hide(); const sub = AppState.addEventListener('change', s => { if (s === 'active') hide(); }); return () => sub.remove(); }, []);
   useEffect(() => { if (Platform.OS === 'android') { NavigationBar.setVisibilityAsync('hidden').catch(() => {}); NavigationBar.setBackgroundColorAsync('transparent').catch(() => {}); } }, []);
+  // OneSignal: inicializa ao montar e configura callback de navegação
+  useEffect(() => {
+    initOneSignal();
+    setOneSignalNavCallback((shelf) => {
+      if (shelf && SHELVES[shelf]) {
+        setActiveShelf(shelf);
+        setCurrentTab('estoque');
+      }
+    });
+  }, []);
   useEffect(() => { if (scanning && scanMode === 'barcode') { Animated.loop(Animated.sequence([Animated.timing(scanAnim, { toValue: 1, duration: 2000, useNativeDriver: false }), Animated.timing(scanAnim, { toValue: 0, duration: 2000, useNativeDriver: false })])).start(); } else scanAnim.setValue(0); }, [scanning, scanMode, scanAnim]);
   useEffect(() => { if (scanning && scanMode === 'aiVision') { Animated.loop(Animated.sequence([Animated.timing(pulseAnim, { toValue: 1.07, duration: 800, useNativeDriver: false }), Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: false })])).start(); } else pulseAnim.setValue(1); }, [scanning, scanMode, pulseAnim]);
 
@@ -8462,7 +8714,10 @@ export default function App() {
   const onSourceSelected = ({ nome, giro }) => { setProdName(nome); setGiro(giro); setSourceModalVisible(false); setCurrentSources([]); navTo('cadastro'); };
   const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SafeStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass); if (!user) { const newAttempts = failedAttempts + 1; setFailedAttempts(newAttempts); const remaining = MAX_LOGIN_ATTEMPTS - newAttempts; await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} para ${sanitizedEmail}`, null); if (newAttempts >= MAX_LOGIN_ATTEMPTS) { startLockout(); showErr(`Acesso bloqueado por ${LOCKOUT_SECS} segundos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`); } else { showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`); } return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
   const onQR = async ({ data }) => { if (!data) return; try { const payload = JSON.parse(data); if (!payload.usuario || !payload.loginRapido || !payload.timestamp || !payload.expiraEm) { showErr('QR Code inválido ou corrompido.'); await addAuditLog('QR_INVALID', 'QR Code inválido', null); return; } if (Date.now() > payload.expiraEm) { showErr('QR Code expirado. Gere um novo.'); await addAuditLog('QR_EXPIRED', 'QR Code expirado', null); return; } const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === payload.usuario); if (!user) { showErr('Usuário não encontrado.'); await addAuditLog('QR_USER_NOT_FOUND', `Usuário ${payload.usuario} não encontrado`, null); return; } if (user.LOGINRAPIDO !== payload.loginRapido) { showErr('QR Code inválido - código de acesso não corresponde.'); await addAuditLog('QR_MISMATCH', `LOGINRAPIDO não confere para ${payload.usuario}`, user.id); return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('QR_ACCESS_DENIED', `Acesso negado para ${payload.usuario} via QR`, user.id); return; } user.PERFIL = qrRole; await addAuditLog('QR_LOGIN_SUCCESS', `Login via QR bem-sucedido para ${payload.usuario}`, user.id); await updateLastLogin(user.id); onOk(user); } catch (e) { showErr('QR Code inválido.'); await addAuditLog('QR_ERROR', `Erro ao processar QR: ${e.message}`, null); } };
-  const onOk = useCallback(user => { setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role'); const area = extractShelf(user.AREA); const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.()); const prat = !ehPerfil && SHELVES[area] ? area : ''; let def = ''; if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); } else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); } setActiveShelf(def); if (def) loadStock(def); setTimeout(() => triggerAutoClean(), 1500); }, [loadStock, triggerAutoClean]);
+  const onOk = useCallback(user => { setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role'); const area = extractShelf(user.AREA); const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.()); const prat = !ehPerfil && SHELVES[area] ? area : ''; let def = ''; if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); } else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); } setActiveShelf(def); if (def) loadStock(def); setTimeout(() => triggerAutoClean(), 1500);
+    // OneSignal: registra usuário e envia tags para segmentação
+    oneSignalLogin(user.id);
+    oneSignalSetTags({ perfil: user.PERFIL || '', area: user.AREA || '', nome: user.NOME || '', usuario: user.USUARIO || '' }); }, [loadStock, triggerAutoClean]);
   const switchShelf = async shelf => { setActiveShelf(shelf); setCadastroShelf(shelf); await loadStock(shelf); setShelfModal(false); };
   const startScan = async mode => {
     try {
@@ -8547,7 +8802,7 @@ Pergunta do usuário: "${txt}"`;
     if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
     sessionTimerRef.current = setTimeout(() => {
       if (isLogged) {
-        AppAlert.alert('Sessão expirada', 'Sua sessão expirou por inatividade. Faça login novamente.', [{ text: 'OK', onPress: () => { addAuditLog('SESSION_TIMEOUT', 'Sessão expirada por inatividade', userData?.id); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); } }]);
+        AppAlert.alert('Sessão expirada', 'Sua sessão expirou por inatividade. Faça login novamente.', [{ text: 'OK', onPress: () => { addAuditLog('SESSION_TIMEOUT', 'Sessão expirada por inatividade', userData?.id); oneSignalLogout(); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); } }]);
       }
     }, SESSION_TIMEOUT_MS);
   }, [isLogged, userData]);
@@ -8662,7 +8917,7 @@ Pergunta do usuário: "${txt}"`;
       <DarkTorchPrompt isDarkEnv={isDarkEnv} lightLevel={lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(!torchOn)} T={T} fontScale={fontScale} />
       <Modal visible={showQrGenerator} transparent animationType="fade" onRequestClose={() => setShowQrGenerator(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center' }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowQrGenerator(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 20, maxHeight: '85%', borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text }}>QR Code de Acesso</Text><TouchableOpacity onPress={() => setShowQrGenerator(false)} style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}><Feather name="x" size={20} color={T.textSub} /></TouchableOpacity></View><QrCodeGenerator T={T} fontScale={fontScale} userData={userData} onClose={() => setShowQrGenerator(false)} /></View></View></Modal>
       <Modal visible={showAuditLogs} transparent animationType="fade" onRequestClose={() => setShowAuditLogs(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-start', paddingTop: 52 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAuditLogs(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 32, margin: 16, maxHeight: WIN.height * 0.99, borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="shield" size={18} color={T.blue} /></View><View><Text style={{ fontSize: 16 * fontScale, fontWeight: '900', color: T.text }}>Auditoria & Logins</Text><Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600' }}>Últimos 3 dias</Text></View></View><TouchableOpacity onPress={() => setShowAuditLogs(false)} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.border }}><Feather name="x" size={18} color={T.textSub} /></TouchableOpacity></View><ScrollView contentContainerStyle={{ padding: 16, gap: 8 }} showsVerticalScrollIndicator={false}>{auditLogs.loginHistory && auditLogs.loginHistory.length > 0 && (<View style={{ backgroundColor: T.bgElevated, borderRadius: 18, padding: 16, marginBottom: 4, borderWidth: 1.5, borderColor: T.blue + '35' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}><View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue + '40' }}><Feather name="log-in" size={14} color={T.blue} /></View><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Histórico de Logins</Text><View style={{ marginLeft: 'auto', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: T.blue + '18', borderWidth: 1, borderColor: T.blue + '30' }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.blue }}>{auditLogs.loginHistory.length} registro{auditLogs.loginHistory.length !== 1 ? 's' : ''}</Text></View></View>{auditLogs.loginHistory.map((login, idx) => (<View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderTopWidth: idx > 0 ? 1 : 0, borderColor: T.border }}><View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: idx === 0 ? T.green + '20' : T.bgInput, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: idx === 0 ? T.green + '50' : T.border }}><Text style={{ fontSize: 11, fontWeight: '900', color: idx === 0 ? T.green : T.textMuted }}>#{idx + 1}</Text></View><View style={{ flex: 1 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>{idx === 0 && (<View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: T.green + '18', borderWidth: 1, borderColor: T.green + '40' }}><Text style={{ fontSize: 9 * fontScale, fontWeight: '900', color: T.green }}>MAIS RECENTE</Text></View>)}<Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: idx === 0 ? T.text : T.textSub }}>{login.data || '—'}{login.hora ? `  ·  ${login.hora}` : ''}</Text></View>{login.iso ? (<Text style={{ fontSize: 10 * fontScale, color: T.textMuted, marginTop: 2, fontWeight: '600' }}>{new Date(login.iso).toLocaleString('pt-BR', { weekday: 'long' })}</Text>) : null}</View><Feather name={idx === 0 ? 'check-circle' : 'clock'} size={15} color={idx === 0 ? T.green : T.textMuted} /></View>))}</View>)}<View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 }}><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /><Text style={{ fontSize: 10 * fontScale, fontWeight: '800', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 1 }}>Eventos do Sistema</Text><View style={{ flex: 1, height: 1, backgroundColor: T.border }} /></View>{(!auditLogs.logs || auditLogs.logs.length === 0) ? (<View style={{ alignItems: 'center', paddingVertical: 32 }}><Feather name="check-circle" size={36} color={T.green} /><Text style={{ textAlign: 'center', color: T.textSub, marginTop: 12, fontSize: 14 * fontScale, fontWeight: '700' }}>Nenhum evento nos últimos 3 dias.</Text></View>) : (auditLogs.logs.map((log, index) => { const isLogin = log.action?.includes('LOGIN') || log.action?.includes('QR'); const isWarning = log.action?.includes('FAILED') || log.action?.includes('DENIED') || log.action?.includes('ERROR') || log.action?.includes('INVALID'); const iconName = isWarning ? 'alert-triangle' : isLogin ? 'log-in' : 'activity'; const iconColor = isWarning ? T.amber : isLogin ? T.blue : T.teal; const bgColor = isWarning ? T.amberGlow : isLogin ? T.blueGlow : T.tealGlow; const borderColor = isWarning ? T.amber + '40' : isLogin ? T.blue + '30' : T.teal + '30'; return (<View key={index} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: T.bgElevated, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: borderColor }}><View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: bgColor, justifyContent: 'center', alignItems: 'center', marginTop: 1, borderWidth: 1, borderColor: borderColor }}><Feather name={iconName} size={13} color={iconColor} /></View><View style={{ flex: 1 }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: iconColor, flex: 1, paddingRight: 8 }}>{log.action}</Text><Text style={{ fontSize: 9 * fontScale, color: T.textMuted, fontWeight: '700', flexShrink: 0 }}>{new Date(log.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</Text></View><Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 3, lineHeight: 16 }}>{log.details}</Text><Text style={{ fontSize: 9 * fontScale, color: T.textMuted, marginTop: 4, fontWeight: '600' }}>{new Date(log.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}{log.userId ? `  ·  ID ${log.userId}` : ''}</Text></View></View>); }))}</ScrollView></View></View></Modal>
-      {!scanning && (<View style={{ paddingTop: 50, paddingHorizontal: 20, paddingBottom: 16, backgroundColor: T.bg, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>{userData?.PERFILFOTOURL ? <Image source={{ uri: userData.PERFILFOTOURL }} style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: T.blue }} /> : <View style={{ width: 52, height: 52, borderRadius: 18, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 10 }}><Text style={{ color: '#FFF', fontSize: 18, fontWeight: '900' }}>{initials}</Text></View>}<View style={{ flex: 1, paddingRight: 12 }}><Text style={{ fontWeight: '900', color: T.text, fontSize: 20 * fontScale, letterSpacing: -0.5 }} numberOfLines={1}>{userData?.NOME || 'Usuário'}</Text><Text style={{ color: T.textSub, fontSize: 12.5 * fontScale, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>Painel de estoque inteligente</Text></View><View style={{ flexDirection: 'row', gap: 10 }}>{(canSw || isDeposito(perf)) && (<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => setShelfModal(true)}><Feather name="layers" size={18} color={T.blue} /></TouchableOpacity>)}<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => { addAuditLog('LOGOUT', 'Usuário fez logout', userData?.id); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); setCleanToast(null); setFailedAttempts(0); setLockedOut(false); if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }}><Feather name="log-out" size={18} color={T.red} /></TouchableOpacity></View></View></View>)}
+      {!scanning && (<View style={{ paddingTop: 50, paddingHorizontal: 20, paddingBottom: 16, backgroundColor: T.bg, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>{userData?.PERFILFOTOURL ? <Image source={{ uri: userData.PERFILFOTOURL }} style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: T.blue }} /> : <View style={{ width: 52, height: 52, borderRadius: 18, backgroundColor: T.blue, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 10 }}><Text style={{ color: '#FFF', fontSize: 18, fontWeight: '900' }}>{initials}</Text></View>}<View style={{ flex: 1, paddingRight: 12 }}><Text style={{ fontWeight: '900', color: T.text, fontSize: 20 * fontScale, letterSpacing: -0.5 }} numberOfLines={1}>{userData?.NOME || 'Usuário'}</Text><Text style={{ color: T.textSub, fontSize: 12.5 * fontScale, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>Painel de estoque inteligente</Text></View><View style={{ flexDirection: 'row', gap: 10 }}>{(canSw || isDeposito(perf)) && (<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => setShelfModal(true)}><Feather name="layers" size={18} color={T.blue} /></TouchableOpacity>)}<TouchableOpacity style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => { addAuditLog('LOGOUT', 'Usuário fez logout', userData?.id); oneSignalLogout(); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); setCleanToast(null); setFailedAttempts(0); setLockedOut(false); if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }}><Feather name="log-out" size={18} color={T.red} /></TouchableOpacity></View></View></View>)}
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         {currentTab === 'home' && !scanning && (
           <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: TAB_SAFE + 20 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
