@@ -64,7 +64,7 @@ let _oneSignalUserId = null; // externalId do usuário logado (ex: ID do Baserow
 
 // Inicialização do OneSignal (chamada uma vez no App mount)
 // Requer: react-native-onesignal instalado e ONESIGNAL_APP_ID configurado
-const ONESIGNAL_APP_ID = 'SEU_APP_ID_AQUI'; // ← substitua pelo seu App ID do OneSignal
+const ONESIGNAL_APP_ID = 'ddbe0bb6-09cb-49f7-b408-59dedd8731ed'; // ← substitua pelo seu App ID do OneSignal
 
 const initOneSignal = async () => {
   try {
