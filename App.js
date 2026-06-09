@@ -584,7 +584,7 @@ const initializeSecureTokens = async () => {
 };
 
 // ─── AXIOS ─────────────────────────────────────────────────────────────────
-const secureAxiosInstance = axios.create({ timeout: 15000, headers: { 'Content-Type': 'application/json' } });
+const secureAxiosInstance = axios.create({ timeout: 8000, headers: { 'Content-Type': 'application/json' } });
 secureAxiosInstance.interceptors.request.use(async (config) => {
   if (!BASEROW_TOKEN) await initializeSecureTokens();
   config.headers.Authorization = `Token ${BASEROW_TOKEN}`;
@@ -755,7 +755,7 @@ const isValidDate = (dateStr) => {
 
 // ─── HELPERS DE API ────────────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const fetchWithTimeout = async (url, options = {}, timeoutMs = 22000) => {
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 10000) => {
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -823,7 +823,7 @@ const callGeminiOptimized = async (prompt, useCache = true, cacheKey = null) => 
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: { temperature: 0.05, maxOutputTokens: 512 },
           }),
-        }, 15000);
+        }, 6000);
         if (!res.ok) {
           const err = await parseApiError(res);
           if (res.status === 429 || err.includes('quota')) continue;
@@ -867,7 +867,7 @@ const callGroqOptimized = async (prompt, systemPrompt = null, useCache = true) =
           method: 'POST',
           headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model, messages, temperature: 0.05, max_tokens: 512 }),
-        }, 15000);
+        }, 6000);
         if (!res.ok) {
           const err = await parseApiError(res);
           if (res.status === 429 || err.includes('rate limit')) continue;
@@ -927,7 +927,7 @@ const fetchProductSourcesOptimized = async (ean) => {
     try {
       const res = await fetchWithTimeout(`https://api.cosmos.bluesoft.com.br/gtins/${ean}.json`, {
         headers: { 'X-Cosmos-Token': RT_BLUESOFT_TOKEN, 'Content-Type': 'application/json' }
-      }, 8000);
+      }, 5000);
       if (!res.ok) throw new Error('Bluesoft error');
       const d = await res.json();
       const nome = ([d.description, d.brand?.name].filter(Boolean).join(' · ') + (d.net_weight ? ` (${d.net_weight}${d.net_weight_unit || 'g'})` : '')).toUpperCase();
@@ -936,41 +936,50 @@ const fetchProductSourcesOptimized = async (ean) => {
       newCache[cacheKey] = { data, expiresAt: Date.now() + CACHE_TTL_MS };
       await setAICache(newCache);
       return data;
-    } catch { return { status: 'error', source: 'bluesoft', sourceLabel: 'Bluesoft Cosmos', error: 'Falha na consulta' }; }
+    } catch (e) { return { status: 'error', source: 'bluesoft', sourceLabel: 'Bluesoft Cosmos', error: e.message || 'Falha na consulta' }; }
   };
   const fetchOFFCached = async () => {
     const cacheKey = `off_${ean}`;
     const cache = await getAICache();
     if (cache[cacheKey] && cache[cacheKey].expiresAt > Date.now()) return cache[cacheKey].data;
-    try {
-      const res = await fetchWithTimeout(`https://world.openfoodfacts.org/api/v0/product/${ean}.json`, {}, 8000);
-      if (!res.ok) throw new Error('OFF error');
+    const tryOFF = async (baseUrl) => {
+      const res = await fetchWithTimeout(`${baseUrl}/api/v0/product/${ean}.json`, {}, 5000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
-      if (d.status !== 1) throw new Error('Not found');
-      const p = d.product;
+      if (d.status !== 1 || !d.product) throw new Error('Not found');
+      return d.product;
+    };
+    try {
+      let p = null;
+      try { p = await tryOFF('https://br.openfoodfacts.org'); } catch { p = await tryOFF('https://world.openfoodfacts.org'); }
       const nomePt = (p.product_name_pt || p.product_name_pt_BR || p.product_name || '').toUpperCase().trim();
       const nomeCompleto = ([nomePt, p.brands].filter(Boolean).join(' · ') + (p.quantity ? ` (${p.quantity})` : '')).toUpperCase();
-      const data = { status: 'success', source: 'openfoodfacts', sourceLabel: 'Open Food Facts', sourceIcon: 'globe', nome: nomeCompleto, giro: 'Médio giro', categoria: p.categories_tags?.[0]?.replace('en:', '') || p.categories || '', confianca: 92 };
+      if (!nomeCompleto.trim()) throw new Error('Nome vazio');
+      const data = { status: 'success', source: 'openfoodfacts', sourceLabel: 'Open Food Facts', sourceIcon: 'globe', nome: nomeCompleto.trim(), giro: 'Médio giro', categoria: p.categories_tags?.[0]?.replace('en:', '') || p.categories || '', confianca: 92 };
       const newCache = await getAICache();
       newCache[cacheKey] = { data, expiresAt: Date.now() + CACHE_TTL_MS };
       await setAICache(newCache);
       return data;
-    } catch { return { status: 'error', source: 'openfoodfacts', sourceLabel: 'Open Food Facts', error: 'Não encontrado' }; }
+    } catch (e) { return { status: 'error', source: 'openfoodfacts', sourceLabel: 'Open Food Facts', error: e.message || 'Não encontrado' }; }
   };
   const [bluesoft, off] = await Promise.all([fetchBluesoftCached(), fetchOFFCached()]);
   const melhorBase = off.status === 'success' ? off : (bluesoft.status === 'success' ? bluesoft : null);
   let iaResult = { status: 'error', source: 'ia', sourceLabel: 'GEI.IA (Gemini)', error: 'Sem dados base' };
-  if (melhorBase) {
-    const iaParsed = await fetchIAWithConsensusOptimized(ean, melhorBase.nome, melhorBase.categoria);
-    if (iaParsed) {
+  try {
+    const baseNome = melhorBase?.nome || '';
+    const baseCat = melhorBase?.categoria || '';
+    const iaParsed = await fetchIAWithConsensusOptimized(ean, baseNome, baseCat);
+    if (iaParsed && iaParsed.nome) {
       iaResult = {
         status: 'success', source: 'ia', sourceLabel: 'GEI.IA (Gemini)', sourceIcon: 'cpu',
         nome: ([iaParsed.nome, iaParsed.marca].filter(Boolean).join(' · ') + (iaParsed.gramatura ? ` (${iaParsed.gramatura})` : '')).toUpperCase(),
-        giro: iaParsed.rotatividade || 'Médio giro', categoria: iaParsed.categoria || '', confianca: 99
+        giro: iaParsed.rotatividade || 'Médio giro', categoria: iaParsed.categoria || '', confianca: melhorBase ? 99 : 80
       };
     }
-  }
-  return [iaResult, bluesoft, off].map(r => r.status === 'success' ? r : { ...r, nome: 'Falha: ' + (r.error || 'Erro'), confianca: 0 });
+  } catch (e) { iaResult.error = e.message || 'Gemini falhou'; }
+  const successSources = [iaResult, bluesoft, off].filter(r => r.status === 'success');
+  if (successSources.length === 0) return [];
+  return [iaResult, bluesoft, off].map(r => r.status === 'success' ? r : { ...r, nome: 'Falha: ' + (r.error || 'Erro'), confianca: 0 }).filter(r => r.status === 'success');
 };
 const fetchProductSources = fetchProductSourcesOptimized;
 const callGEI = callGEIOptimized;
@@ -1379,8 +1388,8 @@ const AutoCleanToast = ({ data, onClose, T, fontScale }) => {
   useEffect(() => {
     if (deletedCount === 0) {
       progressA.setValue(1);
-      Animated.timing(progressA, { toValue: 0, duration: 3000, useNativeDriver: false }).start();
-      const t = setTimeout(() => dismiss(), 3000);
+      Animated.timing(progressA, { toValue: 0, duration: 1200, useNativeDriver: false }).start();
+      const t = setTimeout(() => dismiss(), 1200);
       return () => clearTimeout(t);
     }
   }, [deletedCount, progressA, dismiss]);
@@ -8749,7 +8758,7 @@ export default function App() {
                   generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
                 })
               },
-              32000
+              10000
             );
             if (r.ok) {
               const d = await r.json();
@@ -8848,38 +8857,36 @@ export default function App() {
 
   const updateLastLogin = async (userId) => { try { const now = new Date(); const novoLogin = { data: now.toLocaleDateString('pt-BR'), hora: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), iso: now.toISOString() }; let historicoAtual = []; try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { historicoAtual = JSON.parse(utimologin); } else if (utimologin) { historicoAtual = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { historicoAtual = []; } const historicoAtualizado = [novoLogin, ...historicoAtual].slice(0, 3); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userId}/?user_field_names=true`, { UTIMOLOGIN: JSON.stringify(historicoAtualizado) }); } catch (error) { console.warn('Nao foi possivel atualizar ultimo login', error); } };
   const handleChangePassword = async (currentPass, newPass) => { if (!userData) return false; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.id === userData.id); if (!user || user.SENHA !== currentPass) { AppAlert.alert('Erro', 'Senha atual incorreta.'); return false; } await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { SENHA: newPass }); await addAuditLog('PASSWORD_CHANGED', 'Senha alterada com sucesso', userData.id); AppAlert.alert('Sucesso', 'Sua senha foi alterada.'); return true; } catch (error) { AppAlert.alert('Erro', 'Não foi possível alterar a senha. Tente novamente.'); return false; } };
-  const onBarcode = async ({ data }) => { if (Date.now() - lastScan.current < 2000) return; lastScan.current = Date.now(); if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); setScanning(false); setShowAchandoGif(true);     setScannedEAN(data);
+  const onBarcode = async ({ data }) => { if (Date.now() - lastScan.current < 500) return; lastScan.current = Date.now(); if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); setScanning(false); setShowAchandoGif(true);     setScannedEAN(data);
     try {
       const sources = await fetchProductSources(data);
       setShowAchandoGif(false);
 
-      if (!sources || sources.length === 0) {
+      const successSources = (sources || []).filter(s => s.status === 'success' && s.nome && !s.nome.startsWith('Falha'));
+      if (!successSources || successSources.length === 0) {
         setNotFoundModal({ visible: true, ean: data });
         setCurrentSources([]);
         setSourceModalVisible(false);
-      } else if (sources.length === 1) {
-        // Se apenas uma fonte, seleciona automaticamente
-        onSourceSelected(sources[0]);
+      } else if (successSources.length === 1) {
+        // Só uma fonte com sucesso — seleciona automaticamente
+        onSourceSelected(successSources[0]);
       } else {
-        // Tenta encontrar o produto mais similar
-        const mainSource = sources[0]; // Assume a primeira fonte como a mais confiável para comparação
+        // Várias fontes com sucesso — verifica similaridade entre elas
+        const iaSource = successSources.find(s => s.source === 'ia');
+        const mainSource = iaSource || successSources[0];
         let bestMatch = mainSource;
-        let maxSimilarity = 0.7; // Limiar de similaridade para seleção automática
-
-        for (let i = 1; i < sources.length; i++) {
-          const currentSource = sources[i];
-          const similarity = stringSimilarity(mainSource.nome, currentSource.nome);
-          if (similarity > maxSimilarity) {
-            maxSimilarity = similarity;
-            bestMatch = currentSource;
-          }
+        let maxSimilarity = 0;
+        for (const src of successSources) {
+          if (src === mainSource) continue;
+          const sim = stringSimilarity(mainSource.nome, src.nome);
+          if (sim > maxSimilarity) { maxSimilarity = sim; bestMatch = src; }
         }
-
-        if (maxSimilarity > 0.7) { // Se encontrou um produto com similaridade alta
-          onSourceSelected(bestMatch);
+        if (maxSimilarity >= 0.75) {
+          // Nomes muito parecidos — usa a da IA (mais refinada) automaticamente
+          onSourceSelected(iaSource || mainSource);
         } else {
-          // Caso contrário, mostra o modal para seleção manual
-          setCurrentSources(sources);
+          // Nomes divergem — mostra modal para usuário escolher
+          setCurrentSources(successSources);
           setSourceModalVisible(true);
         }
       }
