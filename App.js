@@ -253,11 +253,10 @@ class AppAlertManager extends React.Component {
   constructor(props) {
     super(props);
     this.state = { visible: false, queue: [], current: null };
-    this.scaleAnim = new Animated.Value(0.9);
+    this.scaleAnim = new Animated.Value(0.85);
     this.opacAnim = new Animated.Value(0);
     this.backdropAnim = new Animated.Value(0);
     this.iconBounce = new Animated.Value(0);
-    this.contentTranslateY = new Animated.Value(20);
   }
   componentDidMount() { AppAlertService._flush(this); }
   show(entry) {
@@ -272,28 +271,25 @@ class AppAlertManager extends React.Component {
     });
   }
   _animateIn() {
-    this.scaleAnim.setValue(0.92);
+    this.scaleAnim.setValue(0.82);
     this.opacAnim.setValue(0);
     this.backdropAnim.setValue(0);
     this.iconBounce.setValue(0);
-    this.contentTranslateY.setValue(25);
     Animated.parallel([
-      Animated.timing(this.backdropAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
-      Animated.spring(this.scaleAnim, { toValue: 1, damping: 12, stiffness: 100, useNativeDriver: true }),
-      Animated.timing(this.opacAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
-      Animated.timing(this.contentTranslateY, { toValue: 0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(this.backdropAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.spring(this.scaleAnim, { toValue: 1, tension: 180, friction: 10, useNativeDriver: true }),
+      Animated.timing(this.opacAnim, { toValue: 1, duration: 180, useNativeDriver: true }),
     ]).start(() => {
       Animated.sequence([
-        Animated.timing(this.iconBounce, { toValue: 1, duration: 350, easing: Easing.out(Easing.back(1.8)), useNativeDriver: true }),
+        Animated.timing(this.iconBounce, { toValue: 1, duration: 260, easing: Easing.out(Easing.back(2.5)), useNativeDriver: true }),
       ]).start();
     });
   }
   _dismiss(cb) {
     Animated.parallel([
-      Animated.timing(this.backdropAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      Animated.timing(this.scaleAnim, { toValue: 0.95, duration: 180, useNativeDriver: true }),
-      Animated.timing(this.opacAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
-      Animated.timing(this.contentTranslateY, { toValue: 15, duration: 200, useNativeDriver: true }),
+      Animated.timing(this.backdropAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
+      Animated.timing(this.scaleAnim, { toValue: 0.88, duration: 160, useNativeDriver: true }),
+      Animated.timing(this.opacAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
     ]).start(() => {
       if (cb) cb();
       this.setState(prev => {
@@ -337,26 +333,25 @@ class AppAlertManager extends React.Component {
           />
           <Animated.View style={{
             width: '100%', backgroundColor: T.bgCard,
-            borderRadius: 32, overflow: 'hidden',
-            borderWidth: 1.5, borderColor: iconColor + '40',
-            shadowColor: iconColor, shadowOpacity: 0.3, shadowRadius: 35, elevation: 24,
-            transform: [{ scale: this.scaleAnim }, { translateY: this.contentTranslateY }],
+            borderRadius: 28, overflow: 'hidden',
+            borderWidth: 1.5, borderColor: iconColor + '30',
+            shadowColor: iconColor, shadowOpacity: 0.22, shadowRadius: 28, elevation: 24,
+            transform: [{ scale: this.scaleAnim }],
             opacity: this.opacAnim,
           }}>
-            {/* Topo colorido com gradiente simulado */}
-            <View style={{ height: 6, backgroundColor: iconColor, width: '100%', opacity: 0.9 }} />
-            <View style={{ padding: 32, alignItems: 'center' }}>
+            {/* Topo colorido */}
+            <View style={{ height: 5, backgroundColor: iconColor, width: '100%' }} />
+            <View style={{ padding: 28, alignItems: 'center' }}>
               {/* Ícone animado */}
               <Animated.View style={{
-                width: 76, height: 76, borderRadius: 38,
+                width: 68, height: 68, borderRadius: 34,
                 backgroundColor: iconBg, justifyContent: 'center', alignItems: 'center',
-                marginBottom: 20,
-                borderWidth: 2.5, borderColor: iconColor + '50',
-                shadowColor: iconColor, shadowOpacity: 0.2, shadowRadius: 10,
+                marginBottom: 18,
+                borderWidth: 2, borderColor: iconColor + '40',
                 transform: [{ scale: iconScale }],
                 opacity: iconOpac,
               }}>
-                <Feather name={iconName} size={38} color={iconColor} />
+                <Feather name={iconName} size={34} color={iconColor} />
               </Animated.View>
               {/* Título */}
               {!!current.title && (
@@ -403,15 +398,15 @@ class AppAlertManager extends React.Component {
                       borderRightWidth: buttons.length > 1 && !isLast ? 1 : 0,
                       borderColor: T.border,
                       backgroundColor: isDestr ? T.red + '10' : isCancel ? 'transparent' : iconColor + '08',
-                      borderBottomLeftRadius: buttons.length === 1 ? 26 : idx === 0 ? 30 : 0,
-                      borderBottomRightRadius: buttons.length === 1 ? 26 : isLast ? 30 : 0,
+                      borderBottomLeftRadius: buttons.length === 1 ? 0 : idx === 0 ? 26 : 0,
+                      borderBottomRightRadius: buttons.length === 1 ? 0 : isLast ? 26 : 0,
                       marginBottom: buttons.length === 1 ? 0 : 0,
                     }}
                   >
                     <Text style={{
-                      fontSize: 15.5, fontWeight: isDestr || (!isCancel) ? '900' : '700',
+                      fontSize: 15, fontWeight: isDestr || (!isCancel) ? '800' : '600',
                       color: btnColor,
-                      letterSpacing: 0.3,
+                      letterSpacing: 0.2,
                     }}>
                       {btn.text}
                     </Text>
@@ -455,8 +450,8 @@ const W = WIN.width;
 
 // ─── SEGURANÇA ──────────────────────────────────────────────────────────────
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const MAX_LOGIN_ATTEMPTS = 3;
-const INITIAL_LOCKOUT_SECS = 30;
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_SECS = 60;
 const INPUT_SANITIZE_REGEX = /[<>'"]/g;
 const SQL_INJECTION_PATTERN = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|UNION|--|\bOR\b|\bAND\b)\b)/i;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -3583,73 +3578,213 @@ const AdminPanel = ({ T, fontScale, onBack }) => {
   const [deleting, setDeleting] = useState(false);
   const [adminAuthenticated, setAdminAuthenticated] = useState(false);
   const [adminPass, setAdminPass] = useState('');
-  const [showAdminLogin, setShowAdminLogin] = useState(true);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
-  const [adminFailedAttempts, setAdminFailedAttempts] = useState(0);
-  const [adminTotalFailures, setAdminTotalFailures] = useState(0);
-  const [adminLockedOut, setAdminLockedOut] = useState(false);
-  const [adminLockoutRemaining, setAdminLockoutRemaining] = useState(0);
-  const [adminMaxLockout, setAdminMaxLockout] = useState(INITIAL_LOCKOUT_SECS);
-  const adminLockoutTimer = useRef(null);
+  const [loginError, setLoginError] = useState('');
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  const startAdminLockout = useCallback((seconds) => {
-    setAdminLockedOut(true);
-    setAdminLockoutRemaining(seconds);
-    setAdminMaxLockout(seconds);
-    let rem = seconds;
-    if (adminLockoutTimer.current) clearInterval(adminLockoutTimer.current);
-    adminLockoutTimer.current = setInterval(() => {
-      rem -= 1;
-      setAdminLockoutRemaining(rem);
-      if (rem <= 0) {
-        clearInterval(adminLockoutTimer.current);
-        setAdminLockedOut(false);
-        setAdminFailedAttempts(0);
-        setAdminLockoutRemaining(0);
-      }
-    }, 1000);
-  }, []);
+  // ── Modal de alerta/feedback interno ────────────────────────────────────────
+  const [adminModal, setAdminModal] = useState({ visible: false, type: 'info', title: '', message: '', onConfirm: null, confirmLabel: 'OK', confirmColor: null, cancelLabel: null });
+  const showModal = (type, title, message, opts = {}) => setAdminModal({ visible: true, type, title, message, onConfirm: opts.onConfirm || null, confirmLabel: opts.confirmLabel || 'OK', confirmColor: opts.confirmColor || null, cancelLabel: opts.cancelLabel || null });
+  const closeModal = () => setAdminModal(p => ({ ...p, visible: false, onConfirm: null }));
+
+  // ── Modal de confirmação de apagar prateleira ────────────────────────────────
+  const [deleteShelfModal, setDeleteShelfModal] = useState(false);
+  // ── Modal de confirmação de deletar usuário ──────────────────────────────────
+  const [deleteUserModal, setDeleteUserModal] = useState({ visible: false, user: null });
+
+  const iconForType = (type) => type === 'success' ? 'check-circle' : type === 'error' ? 'alert-circle' : type === 'warning' ? 'alert-triangle' : type === 'confirm' ? 'trash-2' : 'info';
+  const colorForType = (type) => type === 'success' ? T.green : type === 'error' ? T.red : type === 'warning' ? T.amber : type === 'confirm' ? T.red : T.blue;
+  const bgForType = (type) => type === 'success' ? T.greenGlow : type === 'error' ? T.redGlow : type === 'warning' ? T.amberGlow : type === 'confirm' ? T.redGlow : T.blueGlow;
 
   useEffect(() => { if (adminAuthenticated) { loadUsers(); Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: false }).start(); } }, [adminAuthenticated, fadeAnim, loadUsers]);
-  const loadUsers = useCallback(async () => { setLoading(true); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); setUsers(res.data.results); } catch (error) { AppAlert.alert('Erro', 'Não foi possível carregar os usuários.'); } finally { setLoading(false); } }, []);
-  const toggleAccess = async (user) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { ACESSO: !user.ACESSO }); await addAuditLog('ADMIN_TOGGLE_ACCESS', `Acesso do usuário ${user.USUARIO} alterado para ${!user.ACESSO}`); loadUsers(); } catch (error) { AppAlert.alert('Erro', 'Falha ao alterar acesso.'); } };
-  const changeArea = async (user, newArea) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { AREA: newArea }); await addAuditLog('ADMIN_CHANGE_AREA', `Área do usuário ${user.USUARIO} alterada para ${newArea}`); loadUsers(); } catch (error) { AppAlert.alert('Erro', 'Falha ao alterar área.'); } };
-  const deleteUser = async (user) => { AppAlert.alert('Deletar colaborador', `Tem certeza que deseja deletar permanentemente ${user.NOME}? Essa ação é irreversível.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Deletar', style: 'destructive', onPress: async () => { try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/`); await addAuditLog('ADMIN_DELETE_USER', `Usuário ${user.USUARIO} deletado`); loadUsers(); AppAlert.alert('Sucesso', 'Colaborador removido.'); } catch (error) { AppAlert.alert('Erro', 'Não foi possível deletar o colaborador.'); } } }]); };
-  const deleteAllProductsFromShelf = async () => { if (!selectedShelfForDelete) { AppAlert.alert('Atenção', 'Selecione uma prateleira antes de apagar.'); return; } const tableId = SHELVES[selectedShelfForDelete]; if (!tableId) { AppAlert.alert('Erro', 'Prateleira inválida.'); return; } AppAlert.alert('Apagar todos os produtos', `Tem certeza que deseja apagar TODOS os produtos da prateleira ${shlabel(selectedShelfForDelete)}? Essa ação é IRREVERSÍVEL.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Apagar tudo', style: 'destructive', onPress: async () => { setDeleting(true); try { let page = 1; let totalDeleted = 0; while (true) { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true&size=100&page=${page}`); const rows = res.data?.results || []; if (rows.length === 0) break; for (const row of rows) { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${row.id}/`); totalDeleted++; } if (!res.data?.next) break; page++; } await addAuditLog('ADMIN_DELETE_ALL_PRODUCTS', `${totalDeleted} produtos da prateleira ${selectedShelfForDelete} foram apagados`); AppAlert.alert('Sucesso', `${totalDeleted} produto(s) da prateleira ${selectedShelfForDelete} foram removidos com sucesso.`); setSelectedShelfForDelete(''); } catch (error) { AppAlert.alert('Erro', `Falha ao apagar produtos: ${error?.message || 'Erro desconhecido'}`); } finally { setDeleting(false); } } }]); };
-  const [loginError, setLoginError] = useState('');
-  const handleAdminLogin = () => {
-    if (adminLockedOut) return;
-    if (adminPass.trim() === 'cordeiroadmin') {
-      setLoginError('');
-      setAdminAuthenticated(true);
-      setShowAdminLogin(false);
-      setAdminFailedAttempts(0);
-      setAdminTotalFailures(0);
-    } else {
-      const newAttempts = adminFailedAttempts + 1;
-      const newTotal = adminTotalFailures + 1;
-      setAdminFailedAttempts(newAttempts);
-      setAdminTotalFailures(newTotal);
-      if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
-        const mult = Math.pow(3, Math.floor((newTotal - 1) / 3));
-        const wait = INITIAL_LOCKOUT_SECS * mult;
-        startAdminLockout(wait);
-        setLoginError(`Bloqueado por ${wait}s após ${newAttempts} erros.`);
-        AppAlert.alert('Acesso bloqueado', `Muitas tentativas incorretas. Aguarde ${wait} segundos.`);
-      } else {
-        const rem = MAX_LOGIN_ATTEMPTS - newAttempts;
-        setLoginError(`Senha incorreta. ${rem} tentativa(s) restante(s).`);
-        AppAlert.alert('Acesso negado', 'Senha de administrador incorreta.');
-      }
-    }
-  };
-  const renderUserItem = ({ item }) => (<View style={{ backgroundColor: T.bgCard, borderRadius: 20, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}><View style={{ flex: 1, marginRight: 8 }}><Text style={{ fontSize: 16, fontWeight: '900', color: T.text }} numberOfLines={1}>{item.NOME}</Text><Text style={{ fontSize: 13, color: T.textSub }} numberOfLines={1}>{item.USUARIO}</Text></View><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Acesso:</Text><Switch value={item.ACESSO} onValueChange={() => toggleAccess(item)} trackColor={{ false: T.border, true: T.green }} thumbColor={item.ACESSO ? T.green : T.textMuted} /><TouchableOpacity onPress={() => deleteUser(item)} style={{ padding: 8, backgroundColor: T.redGlow, borderRadius: 12 }}><Feather name="trash-2" size={18} color={T.red} /></TouchableOpacity></View></View><View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 12, flexWrap: 'wrap' }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Função: {roleLabel(item.PERFIL)}</Text><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Área: {shlabel(item.AREA)}</Text></View>{item.PERFIL === 'Repositor' && (<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} onPress={() => changeArea(item, k)} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: item.AREA === k ? T.blueGlow : T.bgInput, borderWidth: 1, borderColor: item.AREA === k ? T.blue : T.border }}><Text style={{ fontSize: 10, fontWeight: '700', color: item.AREA === k ? T.blue : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View>)}{item.RASTREIO && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 8 }}>Código Rastreio: {item.RASTREIO}</Text>)}{item.UTIMOLOGIN && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Último login: {item.UTIMOLOGIN}</Text>)}</View>);
+  const loadUsers = useCallback(async () => { setLoading(true); try { const res = await secureAxiosInstance.get('https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true'); setUsers(res.data.results); } catch { showModal('error', 'Erro', 'Não foi possível carregar os colaboradores.'); } finally { setLoading(false); } }, []);
+  const toggleAccess = async (user) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { ACESSO: !user.ACESSO }); await addAuditLog('ADMIN_TOGGLE_ACCESS', `Acesso de ${user.USUARIO} alterado para ${!user.ACESSO}`); loadUsers(); } catch { showModal('error', 'Erro', 'Falha ao alterar acesso do colaborador.'); } };
+  const changeArea = async (user, newArea) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { AREA: newArea }); await addAuditLog('ADMIN_CHANGE_AREA', `Área de ${user.USUARIO} alterada para ${newArea}`); loadUsers(); } catch { showModal('error', 'Erro', 'Falha ao alterar área.'); } };
+  const confirmDeleteUser = (user) => setDeleteUserModal({ visible: true, user });
+  const doDeleteUser = async () => { const user = deleteUserModal.user; setDeleteUserModal({ visible: false, user: null }); try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/`); await addAuditLog('ADMIN_DELETE_USER', `Usuário ${user.USUARIO} deletado`); loadUsers(); showModal('success', 'Removido!', `${user.NOME} foi removido com sucesso.`); } catch { showModal('error', 'Erro', 'Não foi possível deletar o colaborador.'); } };
+  const confirmDeleteAllProducts = () => { if (!selectedShelfForDelete) { showModal('warning', 'Selecione uma prateleira', 'Toque em uma das prateleiras acima antes de apagar.'); return; } setDeleteShelfModal(true); };
+  const doDeleteAllProducts = async () => { setDeleteShelfModal(false); const tableId = SHELVES[selectedShelfForDelete]; if (!tableId) { showModal('error', 'Erro', 'Prateleira inválida.'); return; } setDeleting(true); try { let page = 1; let totalDeleted = 0; while (true) { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true&size=100&page=${page}`); const rows = res.data?.results || []; if (rows.length === 0) break; for (const row of rows) { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${row.id}/`); totalDeleted++; } if (!res.data?.next) break; page++; } await addAuditLog('ADMIN_DELETE_ALL_PRODUCTS', `${totalDeleted} produtos da prateleira ${selectedShelfForDelete} foram apagados`); setSelectedShelfForDelete(''); showModal('success', 'Prateleira limpa!', `${totalDeleted} produto(s) da prateleira ${shlabel(selectedShelfForDelete || '')} foram removidos com sucesso.`); } catch (error) { showModal('error', 'Erro ao apagar', `Falha ao apagar produtos: ${error?.message || 'Erro desconhecido'}`); } finally { setDeleting(false); } };
+  const handleAdminLogin = () => { if (adminPass.trim() === 'cordeiroadmin') { setLoginError(''); setAdminAuthenticated(true); } else { setLoginError('Senha incorreta. Tente novamente.'); } };
+
+  const renderUserItem = ({ item }) => (<View style={{ backgroundColor: T.bgCard, borderRadius: 20, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}><View style={{ flex: 1, marginRight: 8 }}><Text style={{ fontSize: 16, fontWeight: '900', color: T.text }} numberOfLines={1}>{item.NOME}</Text><Text style={{ fontSize: 13, color: T.textSub }} numberOfLines={1}>{item.USUARIO}</Text></View><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Acesso:</Text><Switch value={item.ACESSO} onValueChange={() => toggleAccess(item)} trackColor={{ false: T.border, true: T.green }} thumbColor={item.ACESSO ? T.green : T.textMuted} /><TouchableOpacity onPress={() => confirmDeleteUser(item)} style={{ padding: 8, backgroundColor: T.redGlow, borderRadius: 12 }}><Feather name="trash-2" size={18} color={T.red} /></TouchableOpacity></View></View><View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 12, flexWrap: 'wrap' }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Função: {roleLabel(item.PERFIL)}</Text><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Área: {shlabel(item.AREA)}</Text></View>{item.PERFIL === 'Repositor' && (<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} onPress={() => changeArea(item, k)} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: item.AREA === k ? T.blueGlow : T.bgInput, borderWidth: 1, borderColor: item.AREA === k ? T.blue : T.border }}><Text style={{ fontSize: 10, fontWeight: '700', color: item.AREA === k ? T.blue : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View>)}{item.RASTREIO && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 8 }}>Rastreio: {item.RASTREIO}</Text>)}{item.UTIMOLOGIN && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Último login: {item.UTIMOLOGIN}</Text>)}</View>);
 
   if (!adminAuthenticated) {
-    return (<View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', padding: 24 }}><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 24, fontWeight: '900', color: T.text, marginBottom: 8 }}>Admin GEI.AI</Text><Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24 }}>Digite a senha de administrador para acessar o painel.</Text><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 20, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 16, color: T.text, fontSize: 15 }} placeholder="Senha" secureTextEntry={!showAdminPassword} value={adminPass} onChangeText={setAdminPass} /><TouchableOpacity onPress={() => setShowAdminPassword(!showAdminPassword)}><Feather name={showAdminPassword ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View>{adminLockedOut && (<View style={{ backgroundColor: T.redGlow, borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1.5, borderColor: T.red + '40', alignItems: 'center', gap: 10 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Feather name="lock" size={18} color={T.red} /><Text style={{ fontSize: 14, fontWeight: '900', color: T.red }}>Acesso Bloqueado</Text></View><Text style={{ fontSize: 24, fontWeight: '900', color: T.red }}>{adminLockoutRemaining}s</Text><View style={{ width: '100%', height: 4, backgroundColor: T.border, borderRadius: 2, overflow: 'hidden' }}><View style={{ height: '100%', backgroundColor: T.red, width: `${(adminLockoutRemaining / adminMaxLockout) * 100}%` }} /></View></View>)}{loginError ? (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: T.redGlow, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: T.red + '30' }}><Feather name="alert-circle" size={16} color={T.red} /><Text style={{ color: T.red, fontWeight: '800', fontSize: 13, flex: 1 }}>{loginError}</Text></View>) : null}<PrimaryBtn label={adminLockedOut ? `Aguarde ${adminLockoutRemaining}s` : "Acessar Painel"} onPress={handleAdminLogin} color={adminLockedOut ? T.textMuted : T.blue} disabled={adminLockedOut} /><TouchableOpacity onPress={onBack} style={{ marginTop: 20, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>← Voltar ao login</Text></TouchableOpacity></View></View>);
+    return (
+      <View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', padding: 24 }}>
+        <View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 28, borderWidth: 1.5, borderColor: T.border, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 20, elevation: 8 }}>
+          <View style={{ alignItems: 'center', marginBottom: 24 }}>
+            <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 1.5, borderColor: T.blue + '40' }}>
+              <Feather name="shield" size={30} color={T.blue} />
+            </View>
+            <Text style={{ fontSize: 22, fontWeight: '900', color: T.text, marginBottom: 6 }}>Admin GEI.AI</Text>
+            <Text style={{ fontSize: 13, color: T.textSub, textAlign: 'center' }}>Digite a senha de administrador para acessar o painel.</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: loginError ? T.red + '80' : T.border, borderRadius: 16, marginBottom: loginError ? 10 : 20, paddingRight: 14 }}>
+            <TextInput style={{ flex: 1, padding: 18, color: T.text, fontSize: 16, fontWeight: '700' }} placeholder="Senha de administrador" placeholderTextColor={T.textSub} secureTextEntry={!showAdminPassword} value={adminPass} onChangeText={v => { setAdminPass(v); if (loginError) setLoginError(''); }} onSubmitEditing={handleAdminLogin} returnKeyType="done" />
+            <TouchableOpacity onPress={() => setShowAdminPassword(p => !p)} style={{ padding: 6 }}><Feather name={showAdminPassword ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity>
+          </View>
+          {loginError ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: T.redGlow, borderRadius: 14, marginBottom: 16, borderWidth: 1.5, borderColor: T.red + '50' }}>
+              <Feather name="alert-circle" size={17} color={T.red} />
+              <Text style={{ color: T.red, fontWeight: '800', fontSize: 13, flex: 1 }}>{loginError}</Text>
+            </View>
+          ) : null}
+          <PrimaryBtn label="Acessar Painel" onPress={handleAdminLogin} color={T.blue} fontScale={fontScale || 1} />
+          <TouchableOpacity onPress={onBack} style={{ marginTop: 18, alignSelf: 'center', padding: 8 }}>
+            <Text style={{ color: T.textSub, fontWeight: '700' }}>← Voltar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
   }
-  return (<View style={{ flex: 1, backgroundColor: T.bg }}><View style={{ paddingHorizontal: 20, paddingTop: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}><TouchableOpacity onPress={onBack} style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity><Text style={{ fontSize: 20, fontWeight: '900', color: T.text }}>Painel Admin</Text><View style={{ width: 44 }} /></View><Animated.ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false} style={{ opacity: fadeAnim }}><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 16, fontWeight: '900', color: T.text, marginBottom: 12 }}>Apagar todos os produtos de uma prateleira</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: selectedShelfForDelete === k ? T.redGlow : T.bgInput, borderWidth: 1, borderColor: selectedShelfForDelete === k ? T.red : T.border }} onPress={() => setSelectedShelfForDelete(k)}><Text style={{ fontWeight: '700', color: selectedShelfForDelete === k ? T.red : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View><PrimaryBtn label={deleting ? 'Apagando...' : 'Apagar todos os produtos'} onPress={deleteAllProductsFromShelf} color={T.red} disabled={deleting} /></View><Text style={{ fontSize: 18, fontWeight: '900', color: T.text, marginBottom: 12 }}>Colaboradores</Text>{loading ? <ActivityIndicator /> : (<FlatList data={users} keyExtractor={(item) => item.id.toString()} renderItem={({ item }) => renderUserItem({ item })} scrollEnabled={false} />)}</Animated.ScrollView></View>);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: T.bg }}>
+      {/* Header */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <TouchableOpacity onPress={onBack} style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}>
+          <Feather name="arrow-left" size={20} color={T.textSub} />
+        </TouchableOpacity>
+        <Text style={{ fontSize: 20, fontWeight: '900', color: T.text }}>Painel Admin</Text>
+        <View style={{ width: 44 }} />
+      </View>
+
+      <Animated.ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false} style={{ opacity: fadeAnim }}>
+        {/* Seção apagar prateleira */}
+        <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 18, marginBottom: 20, borderWidth: 1.5, borderColor: T.red + '30' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center' }}>
+              <Feather name="trash-2" size={18} color={T.red} />
+            </View>
+            <View>
+              <Text style={{ fontSize: 15, fontWeight: '900', color: T.text }}>Apagar Prateleira</Text>
+              <Text style={{ fontSize: 12, color: T.textSub, fontWeight: '600' }}>Remove TODOS os produtos da prateleira</Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+            {SHELF_KEYS.map(k => (
+              <TouchableOpacity key={k} style={{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, backgroundColor: selectedShelfForDelete === k ? T.redGlow : T.bgInput, borderWidth: 1.5, borderColor: selectedShelfForDelete === k ? T.red : T.border }} onPress={() => setSelectedShelfForDelete(k)}>
+                <Text style={{ fontWeight: '800', fontSize: 13, color: selectedShelfForDelete === k ? T.red : T.textSub }}>{shlabel(k)}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {selectedShelfForDelete ? (
+            <View style={{ padding: 12, backgroundColor: T.redGlow, borderRadius: 14, borderWidth: 1, borderColor: T.red + '40', marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Feather name="alert-triangle" size={15} color={T.red} />
+              <Text style={{ color: T.red, fontWeight: '800', fontSize: 12, flex: 1 }}>Selecionado: {shlabel(selectedShelfForDelete)} — todos os produtos serão apagados permanentemente.</Text>
+            </View>
+          ) : null}
+          <TouchableOpacity
+            onPress={confirmDeleteAllProducts}
+            disabled={deleting}
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16, borderRadius: 16, backgroundColor: deleting ? T.bgInput : T.red, opacity: deleting ? 0.6 : 1 }}>
+            {deleting ? <ActivityIndicator size="small" color="#fff" /> : <Feather name="trash-2" size={18} color="#fff" />}
+            <Text style={{ color: '#fff', fontWeight: '900', fontSize: 15 }}>{deleting ? 'Apagando...' : 'Apagar todos os produtos'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Colaboradores */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center' }}>
+            <Feather name="users" size={18} color={T.blue} />
+          </View>
+          <View>
+            <Text style={{ fontSize: 15, fontWeight: '900', color: T.text }}>Colaboradores</Text>
+            <Text style={{ fontSize: 12, color: T.textSub, fontWeight: '600' }}>{users.length} cadastrado(s)</Text>
+          </View>
+          <TouchableOpacity onPress={loadUsers} style={{ marginLeft: 'auto', width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}>
+            <Feather name="refresh-cw" size={15} color={T.blue} />
+          </TouchableOpacity>
+        </View>
+        {loading ? <ActivityIndicator color={T.blue} style={{ marginTop: 20 }} /> : (
+          <FlatList data={users} keyExtractor={item => item.id.toString()} renderItem={renderUserItem} scrollEnabled={false} />
+        )}
+      </Animated.ScrollView>
+
+      {/* ── Modal genérico de alerta/feedback ───────────────────────────────── */}
+      <Modal visible={adminModal.visible} transparent animationType="fade" onRequestClose={closeModal}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 28 }}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeModal} />
+          <View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 28, borderWidth: 1.5, borderColor: T.border, elevation: 20 }}>
+            <View style={{ alignItems: 'center', marginBottom: 20 }}>
+              <View style={{ width: 62, height: 62, borderRadius: 20, backgroundColor: bgForType(adminModal.type), justifyContent: 'center', alignItems: 'center', marginBottom: 14 }}>
+                <Feather name={iconForType(adminModal.type)} size={28} color={colorForType(adminModal.type)} />
+              </View>
+              <Text style={{ fontSize: 18, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 8 }}>{adminModal.title}</Text>
+              <Text style={{ fontSize: 14, color: T.textSub, textAlign: 'center', lineHeight: 21, fontWeight: '600' }}>{adminModal.message}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {adminModal.cancelLabel ? (
+                <TouchableOpacity onPress={closeModal} style={{ flex: 1, paddingVertical: 15, borderRadius: 16, backgroundColor: T.bgInput, alignItems: 'center', borderWidth: 1, borderColor: T.border }}>
+                  <Text style={{ color: T.textSub, fontWeight: '800', fontSize: 15 }}>{adminModal.cancelLabel}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity onPress={() => { if (adminModal.onConfirm) adminModal.onConfirm(); else closeModal(); }} style={{ flex: adminModal.cancelLabel ? 1 : 0, minWidth: 120, alignSelf: 'center', paddingVertical: 15, paddingHorizontal: 28, borderRadius: 16, backgroundColor: adminModal.confirmColor || colorForType(adminModal.type), alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 15 }}>{adminModal.confirmLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Modal confirmação apagar prateleira ─────────────────────────────── */}
+      <Modal visible={deleteShelfModal} transparent animationType="fade" onRequestClose={() => setDeleteShelfModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 28 }}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setDeleteShelfModal(false)} />
+          <View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 28, borderWidth: 2, borderColor: T.red + '50', elevation: 20 }}>
+            <View style={{ alignItems: 'center', marginBottom: 22 }}>
+              <View style={{ width: 70, height: 70, borderRadius: 22, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 2, borderColor: T.red + '40' }}>
+                <Feather name="alert-triangle" size={32} color={T.red} />
+              </View>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 10 }}>Apagar todos os produtos?</Text>
+              <View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: T.redGlow, borderRadius: 14, borderWidth: 1, borderColor: T.red + '40', marginBottom: 10 }}>
+                <Text style={{ fontSize: 16, fontWeight: '900', color: T.red, textAlign: 'center' }}>{shlabel(selectedShelfForDelete)}</Text>
+              </View>
+              <Text style={{ fontSize: 14, color: T.textSub, textAlign: 'center', lineHeight: 22, fontWeight: '600' }}>Esta ação é <Text style={{ color: T.red, fontWeight: '900' }}>IRREVERSÍVEL</Text>. Todos os produtos cadastrados nesta prateleira serão permanentemente removidos do banco de dados.</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity onPress={() => setDeleteShelfModal(false)} style={{ flex: 1, paddingVertical: 16, borderRadius: 18, backgroundColor: T.bgInput, alignItems: 'center', borderWidth: 1.5, borderColor: T.border }}>
+                <Text style={{ color: T.textSub, fontWeight: '900', fontSize: 15 }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={doDeleteAllProducts} style={{ flex: 1, paddingVertical: 16, borderRadius: 18, backgroundColor: T.red, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 15 }}>Apagar tudo</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Modal confirmação deletar colaborador ───────────────────────────── */}
+      <Modal visible={deleteUserModal.visible} transparent animationType="fade" onRequestClose={() => setDeleteUserModal({ visible: false, user: null })}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 28 }}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setDeleteUserModal({ visible: false, user: null })} />
+          <View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 28, borderWidth: 2, borderColor: T.red + '50', elevation: 20 }}>
+            <View style={{ alignItems: 'center', marginBottom: 22 }}>
+              <View style={{ width: 70, height: 70, borderRadius: 22, backgroundColor: T.redGlow, justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 2, borderColor: T.red + '40' }}>
+                <Feather name="user-x" size={32} color={T.red} />
+              </View>
+              <Text style={{ fontSize: 20, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 8 }}>Remover colaborador?</Text>
+              {deleteUserModal.user ? (
+                <View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: T.bgInput, borderRadius: 14, borderWidth: 1, borderColor: T.border, marginBottom: 10 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '900', color: T.text, textAlign: 'center' }}>{deleteUserModal.user.NOME}</Text>
+                  <Text style={{ fontSize: 12, color: T.textSub, textAlign: 'center', marginTop: 2 }}>{deleteUserModal.user.USUARIO}</Text>
+                </View>
+              ) : null}
+              <Text style={{ fontSize: 14, color: T.textSub, textAlign: 'center', lineHeight: 22, fontWeight: '600' }}>Este colaborador será <Text style={{ color: T.red, fontWeight: '900' }}>permanentemente deletado</Text>. Essa ação não pode ser desfeita.</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity onPress={() => setDeleteUserModal({ visible: false, user: null })} style={{ flex: 1, paddingVertical: 16, borderRadius: 18, backgroundColor: T.bgInput, alignItems: 'center', borderWidth: 1.5, borderColor: T.border }}>
+                <Text style={{ color: T.textSub, fontWeight: '900', fontSize: 15 }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={doDeleteUser} style={{ flex: 1, paddingVertical: 16, borderRadius: 18, backgroundColor: T.red, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 15 }}>Deletar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
 };
 
 const RastreioModal = ({ visible, onClose, T, fontScale }) => {
@@ -4402,6 +4537,9 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
   const [novoData, setNovoData]       = useState('');
   const [salvando, setSalvando]       = useState(false);
   const [ouvinHorario, setOuvindoHor] = useState(false);
+  const [lembreteErr, setLembreteErr] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [similarConfirm, setSimilarConfirm] = useState(null);
   const [saveAnim]                    = useState(new Animated.Value(0));
   const typingTimerRef = useRef(null);
   const isMountedRef   = useRef(false);
@@ -4522,7 +4660,8 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
 
   // ── Salvar lembrete personalizado (com anti-duplicata) ───────────────────
   const salvarLembrete = async () => {
-    if (!novoTexto.trim()) { AppAlert.alert('Atenção','Descreva o lembrete.'); return; }
+    setLembreteErr('');
+    if (!novoTexto.trim()) { setLembreteErr('Descreva o lembrete antes de salvar.'); return; }
     const horValido=/^\d{2}:\d{2}$/.test(novoHorario)?novoHorario:'10:00';
     // Auto-completa ano se o usuário digitou apenas DD/MM
     let dataNorm=(novoData||'').trim();
@@ -4536,24 +4675,24 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
     const duplicado=existentes.find(l=>normalizar(l.produto)===textoNorm&&(!dataNorm||!l.validade||l.validade===dataNorm)&&l.horario===horValido);
     if (duplicado) {
       setSalvando(false);
-      AppAlert.alert('⚠️ Já existe',`Lembrete idêntico já agendado:\n"${duplicado.produto}" às ${duplicado.horario}\n\nNão é necessário criar outro.`,[{text:'OK',style:'cancel'}]);
+      setLembreteErr(`Lembrete idêntico já existe: "${duplicado.produto}" às ${duplicado.horario}`);
       return;
     }
     const similar=existentes.find(l=>normalizar(l.produto)===textoNorm);
     if (similar) {
-      const continuar=await new Promise(r=>AppAlert.alert('🔔 Similar encontrado',`Já existe um lembrete similar:\n"${similar.produto}" às ${similar.horario}\n\nCriar outro mesmo assim?`,[{text:'Cancelar',style:'cancel',onPress:()=>r(false)},{text:'Criar mesmo assim',onPress:()=>r(true)}]));
+      const continuar=await new Promise(r=>setSimilarConfirm({similar,resolve:r}));
       if (!continuar) { setSalvando(false); return; }
     }
     const granted=await requestNotifPermission();
     if (!granted) { 
       speakWithElevenLabs('Para agendar lembretes, eu preciso da sua permissão para enviar notificações. Por favor, ative-as para continuar.', () => {});
-      AppAlert.alert('Permissão necessária','Permita notificações para agendar lembretes.'); 
-      setSalvando(false); 
+      setLembreteErr('Permita notificações nas configurações para agendar lembretes.');
+      setSalvando(false);
       return; 
     }
     await initNotifChannel();
     const notifId=await scheduleCustomLembrete(novoTexto.trim(),horValido,dataNorm||null);
-    if (!notifId) { AppAlert.alert('Horário inválido','Horário já passou. Escolha um horário futuro ou informe uma data.'); setSalvando(false); return; }
+    if (!notifId) { setLembreteErr('Horário inválido. Escolha um horário futuro ou informe uma data.'); setSalvando(false); return; }
     const novo={ id:`custom-${Date.now()}-${Math.random()}`, produto:novoTexto.trim(), validade:dataNorm||'', notifId, horario:horValido, tipo:'personalizado', criadoEm:new Date().toISOString() };
     const updated=[novo,...existentes];
     await saveLembretes(updated);
@@ -4585,7 +4724,7 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
 
   // ── Ouvir horário por voz ────────────────────────────────────────────────
   const ouvirHorarioPorVoz = () => {
-    if (!SPEECH_RECOGNITION_AVAILABLE) { AppAlert.alert('Indisponível','Use o teclado para digitar o horário.'); return; }
+    if (!SPEECH_RECOGNITION_AVAILABLE) { setLembreteErr('Reconhecimento de voz indisponível. Use o teclado.'); return; }
     setOuvindoHor(true);
     speakWithElevenLabs('Diga o horário. Por exemplo: às dez da manhã, ou às quatorze horas.',async()=>{
       try { await ExpoSpeechRecognitionModule.start({lang:'pt-BR',interimResults:false,continuous:false}); } catch { setOuvindoHor(false); }
@@ -4600,8 +4739,8 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
       setAutoAgendado(false);
       slideA.setValue(WIN.height); opacA.setValue(0);
       Animated.parallel([
-        Animated.spring(slideA,{toValue:0,tension:55,friction:11,useNativeDriver:false}),
-        Animated.timing(opacA,{toValue:1,duration:260,useNativeDriver:false}),
+        Animated.spring(slideA,{toValue:0,tension:65,friction:13,useNativeDriver:false}),
+        Animated.timing(opacA,{toValue:1,duration:220,useNativeDriver:false}),
       ]).start();
       setDisplayedText(''); setIsTyping(false); setActiveTab('resumo');
       gerarResumo(stockData);
@@ -4644,17 +4783,19 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
-      <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.85)',justifyContent:'center',padding:16}}>
+      <View style={{flex:1,backgroundColor:'rgba(0,0,0,0.85)',justifyContent:'flex-end'}}>
         <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
 
         <Animated.View style={{
           backgroundColor:T.bgCard,
-          borderRadius:42,
-          paddingBottom:24,
+          borderTopLeftRadius:42, borderTopRightRadius:42,
+          borderBottomLeftRadius:0, borderBottomRightRadius:0,
           borderWidth:2, borderColor:T.purple+'80',
-          overflow: 'hidden',
+          borderBottomWidth:0,
+          overflow:'hidden',
           transform:[{translateY:slideA}], opacity:opacA,
-          maxHeight:WIN.height*0.94,
+          maxHeight:WIN.height*0.92,
+          height:WIN.height*0.92,
           shadowColor:'#000', shadowOffset:{width:0,height:-16},
           shadowOpacity:0.7, shadowRadius:36, elevation:40,
         }}>
@@ -4774,8 +4915,8 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
             </View>
           </View>
 
-          <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1}}>
-            <ScrollView style={{flex:1,paddingHorizontal:22}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <KeyboardAvoidingView behavior={Platform.OS==='ios'?'padding':'height'} style={{flex:1,minHeight:0}}>
+            <ScrollView style={{flex:1,paddingHorizontal:22}} contentContainerStyle={{paddingBottom:32,flexGrow:1}} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
               {/* ══════════════════ ABA RESUMO ══════════════════ */}
               {activeTab==='resumo'&&(<>
@@ -4897,7 +5038,7 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
                             </View>
                           </View>
                           <TouchableOpacity
-                            onPress={()=>AppAlert.alert('Remover',`Remover lembrete de "${item.produto}"?`,[{text:'Cancelar',style:'cancel'},{text:'Remover',style:'destructive',onPress:()=>removerLembrete(item)}])}
+                            onPress={()=>setDeleteConfirm(item)}
                             style={{width:32,height:32,borderRadius:10,backgroundColor:T.redGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.red+'25'}}>
                             <Feather name="trash-2" size={13} color={T.red} />
                           </TouchableOpacity>
@@ -4944,7 +5085,7 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
                             </View>
                           </View>
                           <TouchableOpacity
-                            onPress={()=>AppAlert.alert('Remover',`Remover "${item.produto}"?`,[{text:'Cancelar',style:'cancel'},{text:'Remover',style:'destructive',onPress:()=>removerLembrete(item)}])}
+                            onPress={()=>setDeleteConfirm(item)}
                             style={{width:32,height:32,borderRadius:10,backgroundColor:T.redGlow,justifyContent:'center',alignItems:'center',borderWidth:1,borderColor:T.red+'25'}}>
                             <Feather name="trash-2" size={13} color={T.red} />
                           </TouchableOpacity>
@@ -5147,6 +5288,50 @@ const NovidadesModal = ({ visible, onClose, stockData, T, fontScale, userData })
 
             </ScrollView>
           </KeyboardAvoidingView>
+
+          {/* ── Banner de erro inline ── */}
+          {lembreteErr ? (
+            <View style={{margin:16,marginTop:0,flexDirection:'row',alignItems:'center',gap:10,padding:14,backgroundColor:T.redGlow,borderRadius:16,borderWidth:1.5,borderColor:T.red+'40'}}>
+              <Feather name="alert-circle" size={17} color={T.red} />
+              <Text style={{flex:1,fontSize:13,fontWeight:'800',color:T.red,lineHeight:19}}>{lembreteErr}</Text>
+              <TouchableOpacity onPress={()=>setLembreteErr('')} style={{padding:4}}><Feather name="x" size={15} color={T.red} /></TouchableOpacity>
+            </View>
+          ) : null}
+
+          {/* ── Mini-modal confirmação deletar lembrete ── */}
+          {deleteConfirm && (
+            <View style={{...StyleSheet.absoluteFillObject,backgroundColor:'rgba(0,0,0,0.55)',justifyContent:'flex-end',borderRadius:42,overflow:'hidden'}}>
+              <View style={{backgroundColor:T.bgCard,borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,borderWidth:1.5,borderColor:T.red+'40',borderBottomWidth:0}}>
+                <View style={{alignItems:'center',marginBottom:18}}>
+                  <View style={{width:52,height:52,borderRadius:16,backgroundColor:T.redGlow,justifyContent:'center',alignItems:'center',marginBottom:12,borderWidth:1.5,borderColor:T.red+'40'}}><Feather name="trash-2" size={24} color={T.red} /></View>
+                  <Text style={{fontSize:17,fontWeight:'900',color:T.text,textAlign:'center',marginBottom:6}}>Remover lembrete?</Text>
+                  <Text style={{fontSize:13,color:T.textSub,textAlign:'center',fontWeight:'600',lineHeight:20}}>"{deleteConfirm.produto}"</Text>
+                </View>
+                <View style={{flexDirection:'row',gap:10}}>
+                  <TouchableOpacity onPress={()=>setDeleteConfirm(null)} style={{flex:1,paddingVertical:15,borderRadius:16,backgroundColor:T.bgInput,alignItems:'center',borderWidth:1,borderColor:T.border}}><Text style={{color:T.textSub,fontWeight:'900',fontSize:15}}>Cancelar</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={()=>{removerLembrete(deleteConfirm);setDeleteConfirm(null);}} style={{flex:1,paddingVertical:15,borderRadius:16,backgroundColor:T.red,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900',fontSize:15}}>Remover</Text></TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* ── Mini-modal similar encontrado ── */}
+          {similarConfirm && (
+            <View style={{...StyleSheet.absoluteFillObject,backgroundColor:'rgba(0,0,0,0.55)',justifyContent:'flex-end',borderRadius:42,overflow:'hidden'}}>
+              <View style={{backgroundColor:T.bgCard,borderTopLeftRadius:28,borderTopRightRadius:28,padding:24,borderWidth:1.5,borderColor:T.amber+'40',borderBottomWidth:0}}>
+                <View style={{alignItems:'center',marginBottom:18}}>
+                  <View style={{width:52,height:52,borderRadius:16,backgroundColor:T.amberGlow,justifyContent:'center',alignItems:'center',marginBottom:12,borderWidth:1.5,borderColor:T.amber+'40'}}><Feather name="bell" size={24} color={T.amber} /></View>
+                  <Text style={{fontSize:17,fontWeight:'900',color:T.text,textAlign:'center',marginBottom:6}}>Lembrete similar encontrado</Text>
+                  <Text style={{fontSize:13,color:T.textSub,textAlign:'center',fontWeight:'600',lineHeight:20}}>"{similarConfirm.similar.produto}" às {similarConfirm.similar.horario}</Text><Text style={{fontSize:13,color:T.textSub,textAlign:'center',fontWeight:'600'}}>Criar outro mesmo assim?</Text>
+                </View>
+                <View style={{flexDirection:'row',gap:10}}>
+                  <TouchableOpacity onPress={()=>{const r=similarConfirm.resolve;setSimilarConfirm(null);r(false);}} style={{flex:1,paddingVertical:15,borderRadius:16,backgroundColor:T.bgInput,alignItems:'center',borderWidth:1,borderColor:T.border}}><Text style={{color:T.textSub,fontWeight:'900',fontSize:15}}>Cancelar</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={()=>{const r=similarConfirm.resolve;setSimilarConfirm(null);r(true);}} style={{flex:1,paddingVertical:15,borderRadius:16,backgroundColor:T.amber,alignItems:'center'}}><Text style={{color:'#fff',fontWeight:'900',fontSize:15}}>Criar mesmo assim</Text></TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
         </Animated.View>
       </View>
     </Modal>
@@ -8390,6 +8575,7 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [sourceModalVisible, setSourceModalVisible] = useState(false);
   const [currentSources, setCurrentSources] = useState([]);
+  const [notFoundModal, setNotFoundModal] = useState({ visible: false, ean: '' });
   const [scannedEAN, setScannedEAN] = useState('');
   const [cleanToast, setCleanToast] = useState(null);
   const [showPinhasModal, setShowPinhasModal] = useState(false);
@@ -8668,8 +8854,7 @@ export default function App() {
       setShowAchandoGif(false);
 
       if (!sources || sources.length === 0) {
-        showErr('Nenhum produto encontrado ou todas as fontes falharam.');
-        handleStartScanning();
+        setNotFoundModal({ visible: true, ean: data });
         setCurrentSources([]);
         setSourceModalVisible(false);
       } else if (sources.length === 1) {
@@ -8700,29 +8885,11 @@ export default function App() {
       }
     } catch (ex) {
       setShowAchandoGif(false);
-      console.error('Erro ao buscar fontes:', ex);
-      showErr('Erro ao consultar fontes de dados.');
-      handleStartScanning();
+      setNotFoundModal({ visible: true, ean: data || '' });
     }
   };
-  const onSourceSelected = ({ nome, giro }) => { setProdName(nome); setGiro(giro); setSourceModalVisible(false); setCurrentSources([]); navTo('cadastro'); };
-  const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SafeStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass);       if (!user) {
-        const newAttempts = failedAttempts + 1;
-        const newTotalFailures = totalFailures + 1;
-        setFailedAttempts(newAttempts);
-        setTotalFailures(newTotalFailures);
-        await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} (Total: ${newTotalFailures}) para ${sanitizedEmail}`, null);
-        if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
-          const multiplier = Math.pow(3, Math.floor((newTotalFailures - 1) / 3));
-          const waitTime = INITIAL_LOCKOUT_SECS * multiplier;
-          startLockout(waitTime);
-          showErr(`Acesso bloqueado por ${waitTime} segundos após ${newAttempts} tentativas incorretas.`);
-        } else {
-          const remaining = MAX_LOGIN_ATTEMPTS - newAttempts;
-          showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`);
-        }
-        return;
-      } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
+  const onSourceSelected = ({ nome }) => { setProdName(nome); setSourceModalVisible(false); setCurrentSources([]); navTo('cadastro'); };
+  const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SafeStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass); if (!user) { const newAttempts = failedAttempts + 1; setFailedAttempts(newAttempts); const remaining = MAX_LOGIN_ATTEMPTS - newAttempts; await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} para ${sanitizedEmail}`, null); if (newAttempts >= MAX_LOGIN_ATTEMPTS) { startLockout(); showErr(`Acesso bloqueado por ${LOCKOUT_SECS} segundos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`); } else { showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`); } return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
   const onQR = async ({ data }) => { if (!data) return; try { const payload = JSON.parse(data); if (!payload.usuario || !payload.loginRapido || !payload.timestamp || !payload.expiraEm) { showErr('QR Code inválido ou corrompido.'); await addAuditLog('QR_INVALID', 'QR Code inválido', null); return; } if (Date.now() > payload.expiraEm) { showErr('QR Code expirado. Gere um novo.'); await addAuditLog('QR_EXPIRED', 'QR Code expirado', null); return; } const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === payload.usuario); if (!user) { showErr('Usuário não encontrado.'); await addAuditLog('QR_USER_NOT_FOUND', `Usuário ${payload.usuario} não encontrado`, null); return; } if (user.LOGINRAPIDO !== payload.loginRapido) { showErr('QR Code inválido - código de acesso não corresponde.'); await addAuditLog('QR_MISMATCH', `LOGINRAPIDO não confere para ${payload.usuario}`, user.id); return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('QR_ACCESS_DENIED', `Acesso negado para ${payload.usuario} via QR`, user.id); return; } user.PERFIL = qrRole; await addAuditLog('QR_LOGIN_SUCCESS', `Login via QR bem-sucedido para ${payload.usuario}`, user.id); await updateLastLogin(user.id); onOk(user); } catch (e) { showErr('QR Code inválido.'); await addAuditLog('QR_ERROR', `Erro ao processar QR: ${e.message}`, null); } };
   const onOk = useCallback(user => { setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role'); const area = extractShelf(user.AREA); const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.()); const prat = !ehPerfil && SHELVES[area] ? area : ''; let def = ''; if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); } else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); } setActiveShelf(def); if (def) loadStock(def); setTimeout(() => triggerAutoClean(), 1500);
     // OneSignal: registra usuário e envia tags para segmentação
@@ -8802,12 +8969,10 @@ Pergunta do usuário: "${txt}"`;
   const enableBiometrics = async (value) => { if (value) { const { isAvailable } = await checkBiometricSupport(); if (!isAvailable) { AppAlert.alert('Biometria não disponível', 'Seu dispositivo não suporta ou não tem biometria configurada.'); return; } const auth = await authenticateWithBiometrics('Confirme para ativar login biométrico'); if (!auth.success) { AppAlert.alert('Falha na autenticação', 'Não foi possível ativar a biometria.'); return; } try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${userData?.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData?.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } else { try { await SafeStore.deleteItemAsync('bio_token'); if (userData?.id) { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: '' }); } } catch (_) { /* noop */ } } setBiometricEnabled(value); await SafeStore.setItemAsync('biometric_enabled', value ? 'true' : 'false'); await addAuditLog(`BIOMETRIC_TOGGLED`, `Biometria ${value ? "ativada" : "desativada"}`, userData?.id); };
 
   const [failedAttempts, setFailedAttempts] = useState(0);
-  const [totalFailures, setTotalFailures] = useState(0);
   const [lockedOut, setLockedOut] = useState(false);
   const [lockoutRemaining, setLockoutRemaining] = useState(0);
-  const [currentMaxLockout, setCurrentMaxLockout] = useState(INITIAL_LOCKOUT_SECS);
   const lockoutTimerRef = useRef(null);
-  const startLockout = useCallback((seconds) => { setLockedOut(true); setLockoutRemaining(seconds); setCurrentMaxLockout(seconds); let remaining = seconds; if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); lockoutTimerRef.current = setInterval(() => { remaining -= 1; setLockoutRemaining(remaining); if (remaining <= 0) { clearInterval(lockoutTimerRef.current); setLockedOut(false); setFailedAttempts(0); setLockoutRemaining(0); } }, 1000); }, []);
+  const startLockout = useCallback(() => { setLockedOut(true); setLockoutRemaining(LOCKOUT_SECS); let remaining = LOCKOUT_SECS; lockoutTimerRef.current = setInterval(() => { remaining -= 1; setLockoutRemaining(remaining); if (remaining <= 0) { clearInterval(lockoutTimerRef.current); setLockedOut(false); setFailedAttempts(0); setLockoutRemaining(0); } }, 1000); }, []);
   useEffect(() => () => { if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }, []);
   const sessionTimerRef = useRef(null);
   const resetSessionTimer = useCallback(() => {
@@ -8900,8 +9065,8 @@ Pergunta do usuário: "${txt}"`;
           <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}>
             <Text style={{ fontSize: 22, fontWeight: '900', color: T.text, marginBottom: 6 }}>Bem-vindo de volta</Text>
             <Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24, lineHeight: 20 }}>Acesse sua conta para gerenciar o estoque em tempo real.</Text>
-            {lockedOut && (<View style={{ backgroundColor: T.redGlow, borderRadius: 18, padding: 18, marginBottom: 20, borderWidth: 2, borderColor: T.red + '50', alignItems: 'center', gap: 12 }}><View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.red + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.red + '50' }}><Feather name="lock" size={28} color={T.red} /></View><View style={{ alignItems: 'center' }}><Text style={{ fontSize: 15, fontWeight: '900', color: T.red, textAlign: 'center' }}>Acesso temporariamente bloqueado</Text><Text style={{ fontSize: 13, color: T.textSub, marginTop: 4, textAlign: 'center' }}>Muitas tentativas incorretas. Aguarde para continuar.</Text></View><View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: T.red + '18', borderWidth: 3, borderColor: T.red, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 26, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{lockoutRemaining}</Text><Text style={{ fontSize: 8, fontWeight: '800', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>seg</Text></View><View style={{ width: '100%', height: 6, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}><View style={{ height: '100%', backgroundColor: T.red, borderRadius: 3, width: `${(lockoutRemaining / currentMaxLockout) * 100}%` }} /></View><Text style={{ fontSize: 11, color: T.textMuted, fontWeight: '700', textAlign: 'center' }}>{MAX_LOGIN_ATTEMPTS} tentativas incorretas consecutivas detectadas. Por segurança, o acesso foi suspenso temporariamente.</Text></View>)}
-            {!lockedOut && failedAttempts > 0 && failedAttempts < MAX_LOGIN_ATTEMPTS && (<View style={{ backgroundColor: T.amberGlow, borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1.5, borderColor: T.amber + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}><Feather name="alert-triangle" size={20} color={T.amber} /><View style={{ flex: 1 }}><Text style={{ fontSize: 13, fontWeight: '800', color: T.amber }}>Atenção: {failedAttempts}/{MAX_LOGIN_ATTEMPTS} tentativas usadas</Text><Text style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>Após {MAX_LOGIN_ATTEMPTS} tentativas, o acesso será bloqueado temporariamente.</Text></View><View style={{ flexDirection: 'row', gap: 4 }}>{Array.from({ length: MAX_LOGIN_ATTEMPTS }).map((_, i) => (<View key={i} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: i < failedAttempts ? T.red : T.border }} />))}</View></View>)}
+            {lockedOut && (<View style={{ backgroundColor: T.redGlow, borderRadius: 18, padding: 18, marginBottom: 20, borderWidth: 2, borderColor: T.red + '50', alignItems: 'center', gap: 12 }}><View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.red + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.red + '50' }}><Feather name="lock" size={28} color={T.red} /></View><View style={{ alignItems: 'center' }}><Text style={{ fontSize: 15, fontWeight: '900', color: T.red, textAlign: 'center' }}>Acesso temporariamente bloqueado</Text><Text style={{ fontSize: 13, color: T.textSub, marginTop: 4, textAlign: 'center' }}>Muitas tentativas incorretas. Aguarde para continuar.</Text></View><View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: T.red + '18', borderWidth: 3, borderColor: T.red, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 26, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{lockoutRemaining}</Text><Text style={{ fontSize: 8, fontWeight: '800', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>seg</Text></View><View style={{ width: '100%', height: 6, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}><View style={{ height: '100%', backgroundColor: T.red, borderRadius: 3, width: `${(lockoutRemaining / LOCKOUT_SECS) * 100}%` }} /></View><Text style={{ fontSize: 11, color: T.textMuted, fontWeight: '700', textAlign: 'center' }}>{MAX_LOGIN_ATTEMPTS} tentativas incorretas detectadas. Por segurança, o acesso foi suspenso temporariamente.</Text></View>)}
+            {!lockedOut && failedAttempts > 0 && failedAttempts < MAX_LOGIN_ATTEMPTS && (<View style={{ backgroundColor: T.amberGlow, borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1.5, borderColor: T.amber + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}><Feather name="alert-triangle" size={20} color={T.amber} /><View style={{ flex: 1 }}><Text style={{ fontSize: 13, fontWeight: '800', color: T.amber }}>Atenção: {failedAttempts}/{MAX_LOGIN_ATTEMPTS} tentativas usadas</Text><Text style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>Após {MAX_LOGIN_ATTEMPTS} tentativas, o acesso será bloqueado por {LOCKOUT_SECS}s.</Text></View><View style={{ flexDirection: 'row', gap: 4 }}>{Array.from({ length: MAX_LOGIN_ATTEMPTS }).map((_, i) => (<View key={i} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: i < failedAttempts ? T.red : T.border }} />))}</View></View>)}
             <View style={{ gap: 16, marginBottom: 24 }}>
               <View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>E-MAIL</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, padding: 16, borderRadius: 16, fontSize: 15, color: T.text, opacity: lockedOut ? 0.5 : 1 }} placeholder="seu@email.com" placeholderTextColor={T.textMuted} value={emailIn} onChangeText={v => setEmailIn(v.toLowerCase())} autoCapitalize="none" keyboardType="email-address" editable={!lockedOut} /></View>
               <View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>SENHA</Text><CapsLockDetector onCapsLockChange={setCapsLockActive}>{({ ref, onKeyPress, isCapsLock }) => (<View><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: isCapsLock ? T.amber : T.border, borderRadius: 16, paddingRight: 12, opacity: lockedOut ? 0.5 : 1 }}><TextInput ref={ref} style={{ flex: 1, padding: 16, fontSize: 15, color: T.text }} placeholder="••••••••" placeholderTextColor={T.textMuted} value={passIn} onChangeText={setPassIn} secureTextEntry={!showPass} editable={!lockedOut} onKeyPress={onKeyPress} /><TouchableOpacity onPress={() => setShowPass(!showPass)} disabled={lockedOut}><Feather name={showPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View>{isCapsLock && (<View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}><Feather name="alert-triangle" size={12} color={T.amber} /><Text style={{ fontSize: 11, color: T.amber, fontWeight: '600' }}>CAPS LOCK está ativado</Text></View>)}</View>)}</CapsLockDetector></View>
@@ -9009,6 +9174,37 @@ Pergunta do usuário: "${txt}"`;
       <Modal visible={showRoboGif} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}><View style={{ flex: 1, backgroundColor: 'rgba(0,10,40,0.92)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}><View style={{ backgroundColor: '#FFFFFF', borderRadius: 36, padding: 28, width: '90%', alignItems: 'center', shadowColor: '#3B5BFF', shadowOpacity: 0.5, shadowRadius: 40, elevation: 20, borderWidth: 2, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(59,91,255,0.1)', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#3B5BFF' }} /><Text style={{ fontSize: 11, fontWeight: '900', color: '#3B5BFF', letterSpacing: 1.5, textTransform: 'uppercase' }}>IA Vision · GEI.AI</Text></View><View style={{ width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(59,91,255,0.06)', borderWidth: 3, borderColor: 'rgba(59,91,255,0.3)', justifyContent: 'center', alignItems: 'center', marginBottom: 20, shadowColor: '#3B5BFF', shadowOpacity: 0.3, shadowRadius: 20, elevation: 8 }}><Image source={RoboGif} style={{ width: 170, height: 170, borderRadius: 85 }} resizeMode="cover" fadeDuration={0} /></View><View style={{ width: '80%', height: 1, backgroundColor: 'rgba(59,91,255,0.12)', marginBottom: 16 }} /><Text style={{ fontSize: 13, fontWeight: '800', color: '#3B5BFF', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Produto Identificado!</Text><Text style={{ fontSize: 16, fontWeight: '900', color: '#0F172A', textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 }} numberOfLines={3}>{roboMsg.split('\n')[1]}</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18, backgroundColor: 'rgba(22,163,74,0.08)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(22,163,74,0.25)' }}><Feather name="check-circle" size={14} color="#16A34A" /><Text style={{ fontSize: 12, fontWeight: '800', color: '#16A34A' }}>Cadastro sendo aberto...</Text></View></View></View></Modal>
       {!scanning && (<View style={{ height: TAB_SAFE, backgroundColor: T.bgCard, borderTopWidth: 1, borderColor: T.border, flexDirection: 'row', paddingBottom: NAV_BAR_H, paddingHorizontal: 10 }}><TabBtn icon="home" label="Início" active={currentTab === 'home'} onPress={() => navTo('home')} T={T} fontScale={fontScale} /><TabBtn icon="layers" label="Estoque" active={currentTab === 'estoque'} onPress={() => navTo('estoque')} T={T} fontScale={fontScale} /><View style={{ flex: 1.2, alignItems: 'center', justifyContent: 'center' }}><TouchableOpacity activeOpacity={0.9} style={{ width: 58, height: 58, borderRadius: 22, backgroundColor: T.blue, marginTop: -34, justifyContent: 'center', alignItems: 'center', elevation: 10, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 12, borderWidth: 4, borderColor: T.bgCard }} onPress={() => { resetWiz(); setProdName(''); setGiro(''); navTo('cadastro'); }}><Feather name="plus" size={28} color="#FFF" /></TouchableOpacity></View><TabBtn icon="message-circle" label="IA Chat" active={currentTab === 'chat'} onPress={() => navTo('chat')} T={T} fontScale={fontScale} /><TabBtn icon="settings" label="Ajustes" active={currentTab === 'config'} onPress={() => navTo('config')} T={T} fontScale={fontScale} /></View>)}
       {selectedProduct && (<ProductDetailModal visible={!!selectedProduct} product={selectedProduct} onClose={() => setSelectedProduct(null)} onDelete={deleteProduct} T={T} fontScale={fontScale} fifoMode={fifoMode} allProducts={stockData} />)}
+      {/* Not Found Modal */}
+      <Modal visible={notFoundModal.visible} transparent animationType="fade" onRequestClose={() => setNotFoundModal({ visible: false, ean: '' })}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 24 }}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setNotFoundModal({ visible: false, ean: '' })} />
+          <View style={{ backgroundColor: T.bgCard, borderRadius: 32, padding: 28, borderWidth: 1.5, borderColor: T.border, elevation: 24 }}>
+            <View style={{ alignItems: 'center', marginBottom: 24 }}>
+              <View style={{ width: 80, height: 80, borderRadius: 26, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center', marginBottom: 18, borderWidth: 2, borderColor: T.amber + '50' }}>
+                <Feather name="search" size={36} color={T.amber} />
+              </View>
+              <Text style={{ fontSize: 21, fontWeight: '900', color: T.text, textAlign: 'center', marginBottom: 8 }}>Produto nao encontrado</Text>
+              {notFoundModal.ean ? (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: T.bgInput, borderRadius: 12, borderWidth: 1, borderColor: T.border, marginBottom: 8 }}><Feather name="bar-chart-2" size={14} color={T.textSub} /><Text style={{ fontSize: 13, fontWeight: '700', color: T.textSub }}>EAN: {notFoundModal.ean}</Text></View>) : null}
+              <Text style={{ fontSize: 14, color: T.textSub, textAlign: 'center', lineHeight: 22, fontWeight: '600', paddingHorizontal: 8 }}>Nao foi possivel identificar este produto nas fontes disponiveis. Cadastre manualmente ou tente escanear novamente.</Text>
+            </View>
+            <View style={{ gap: 12 }}>
+              <TouchableOpacity onPress={() => { setNotFoundModal({ visible: false, ean: '' }); setProdName(''); setWStep(1); navTo('cadastro'); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 18, paddingHorizontal: 20, borderRadius: 20, backgroundColor: T.blueGlow, borderWidth: 1.5, borderColor: T.blue + '50' }}>
+                <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.blue + '25', justifyContent: 'center', alignItems: 'center' }}><Feather name="edit-3" size={20} color={T.blue} /></View>
+                <View style={{ flex: 1 }}><Text style={{ fontSize: 15, fontWeight: '900', color: T.blue }}>Cadastrar manualmente</Text><Text style={{ fontSize: 12, color: T.blue + 'AA', fontWeight: '600', marginTop: 2 }}>Digite o nome do produto voce mesmo</Text></View>
+                <Feather name="chevron-right" size={18} color={T.blue} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setNotFoundModal({ visible: false, ean: '' }); setScannedEAN(''); handleStartScanning('barcode'); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 18, paddingHorizontal: 20, borderRadius: 20, backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border }}>
+                <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.bgElevated, justifyContent: 'center', alignItems: 'center' }}><Feather name="camera" size={20} color={T.textSub} /></View>
+                <View style={{ flex: 1 }}><Text style={{ fontSize: 15, fontWeight: '900', color: T.text }}>Escanear novamente</Text><Text style={{ fontSize: 12, color: T.textSub, fontWeight: '600', marginTop: 2 }}>Tente apontar a camera de outro angulo</Text></View>
+                <Feather name="chevron-right" size={18} color={T.textSub} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setNotFoundModal({ visible: false, ean: '' })} style={{ alignItems: 'center', paddingVertical: 14 }}>
+                <Text style={{ fontSize: 14, color: T.textSub, fontWeight: '700' }}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <ProductSourceModal visible={sourceModalVisible} sources={currentSources} onSelect={onSourceSelected} onClose={() => { setSourceModalVisible(false); setCurrentSources([]); setProdName(''); }} T={T} fontScale={fontScale} />
       <Modal visible={shelfModal} transparent animationType="fade" onRequestClose={() => setShelfModal(false)}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}><TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShelfModal(false)} /><View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1, borderColor: T.border, elevation: 20 }}><Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.text, marginBottom: 6 }}>Selecionar Prateleira</Text><Text style={{ fontSize: 14 * fontScale, color: T.textSub, marginBottom: 20 }}>Escolha qual setor deseja gerenciar agora.</Text><View style={{ gap: 10 }}>{SHELF_KEYS.map(k => { const on = activeShelf === k; const pal = shelfPalette(T, k); return (<TouchableOpacity key={k} style={[{ flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 18, backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, gap: 14 }, on && { backgroundColor: pal.glow, borderColor: pal.accent }]} onPress={() => switchShelf(k)}><View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: on ? pal.accent : T.bgElevated, justifyContent: 'center', alignItems: 'center' }}><Feather name={pal.icon} size={18} color={on ? '#FFF' : T.textSub} /></View><Text style={[{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub, flex: 1 }, on && { color: pal.accent, fontWeight: '900' }]}>{shlabel(k)}</Text>{on && <Feather name="check-circle" size={20} color={pal.accent} />}</TouchableOpacity>); })}</View><PrimaryBtn label="Fechar" onPress={() => setShelfModal(false)} outline color={T.textSub} style={{ marginTop: 20 }} fontScale={fontScale} /></View></View></Modal>
       {busy && (<View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 9999, alignItems: 'center', justifyContent: 'center' }}><View style={{ backgroundColor: T.bgCard, padding: 30, borderRadius: 24, alignItems: 'center', gap: 20, borderWidth: 1, borderColor: T.border }}><ActivityIndicator size="large" color={T.blue} /><Text style={{ color: T.text, fontWeight: '800', fontSize: 16 }}>{busyMsg || 'Processando...'}</Text></View></View>)}
