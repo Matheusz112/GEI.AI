@@ -253,10 +253,11 @@ class AppAlertManager extends React.Component {
   constructor(props) {
     super(props);
     this.state = { visible: false, queue: [], current: null };
-    this.scaleAnim = new Animated.Value(0.85);
+    this.scaleAnim = new Animated.Value(0.9);
     this.opacAnim = new Animated.Value(0);
     this.backdropAnim = new Animated.Value(0);
     this.iconBounce = new Animated.Value(0);
+    this.contentTranslateY = new Animated.Value(20);
   }
   componentDidMount() { AppAlertService._flush(this); }
   show(entry) {
@@ -271,25 +272,28 @@ class AppAlertManager extends React.Component {
     });
   }
   _animateIn() {
-    this.scaleAnim.setValue(0.82);
+    this.scaleAnim.setValue(0.92);
     this.opacAnim.setValue(0);
     this.backdropAnim.setValue(0);
     this.iconBounce.setValue(0);
+    this.contentTranslateY.setValue(25);
     Animated.parallel([
-      Animated.timing(this.backdropAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.spring(this.scaleAnim, { toValue: 1, tension: 180, friction: 10, useNativeDriver: true }),
-      Animated.timing(this.opacAnim, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.timing(this.backdropAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.spring(this.scaleAnim, { toValue: 1, damping: 12, stiffness: 100, useNativeDriver: true }),
+      Animated.timing(this.opacAnim, { toValue: 1, duration: 220, useNativeDriver: true }),
+      Animated.timing(this.contentTranslateY, { toValue: 0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start(() => {
       Animated.sequence([
-        Animated.timing(this.iconBounce, { toValue: 1, duration: 260, easing: Easing.out(Easing.back(2.5)), useNativeDriver: true }),
+        Animated.timing(this.iconBounce, { toValue: 1, duration: 350, easing: Easing.out(Easing.back(1.8)), useNativeDriver: true }),
       ]).start();
     });
   }
   _dismiss(cb) {
     Animated.parallel([
-      Animated.timing(this.backdropAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
-      Animated.timing(this.scaleAnim, { toValue: 0.88, duration: 160, useNativeDriver: true }),
-      Animated.timing(this.opacAnim, { toValue: 0, duration: 160, useNativeDriver: true }),
+      Animated.timing(this.backdropAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(this.scaleAnim, { toValue: 0.95, duration: 180, useNativeDriver: true }),
+      Animated.timing(this.opacAnim, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(this.contentTranslateY, { toValue: 15, duration: 200, useNativeDriver: true }),
     ]).start(() => {
       if (cb) cb();
       this.setState(prev => {
@@ -333,25 +337,26 @@ class AppAlertManager extends React.Component {
           />
           <Animated.View style={{
             width: '100%', backgroundColor: T.bgCard,
-            borderRadius: 28, overflow: 'hidden',
-            borderWidth: 1.5, borderColor: iconColor + '30',
-            shadowColor: iconColor, shadowOpacity: 0.22, shadowRadius: 28, elevation: 24,
-            transform: [{ scale: this.scaleAnim }],
+            borderRadius: 32, overflow: 'hidden',
+            borderWidth: 1.5, borderColor: iconColor + '40',
+            shadowColor: iconColor, shadowOpacity: 0.3, shadowRadius: 35, elevation: 24,
+            transform: [{ scale: this.scaleAnim }, { translateY: this.contentTranslateY }],
             opacity: this.opacAnim,
           }}>
-            {/* Topo colorido */}
-            <View style={{ height: 5, backgroundColor: iconColor, width: '100%' }} />
-            <View style={{ padding: 28, alignItems: 'center' }}>
+            {/* Topo colorido com gradiente simulado */}
+            <View style={{ height: 6, backgroundColor: iconColor, width: '100%', opacity: 0.9 }} />
+            <View style={{ padding: 32, alignItems: 'center' }}>
               {/* Ícone animado */}
               <Animated.View style={{
-                width: 68, height: 68, borderRadius: 34,
+                width: 76, height: 76, borderRadius: 38,
                 backgroundColor: iconBg, justifyContent: 'center', alignItems: 'center',
-                marginBottom: 18,
-                borderWidth: 2, borderColor: iconColor + '40',
+                marginBottom: 20,
+                borderWidth: 2.5, borderColor: iconColor + '50',
+                shadowColor: iconColor, shadowOpacity: 0.2, shadowRadius: 10,
                 transform: [{ scale: iconScale }],
                 opacity: iconOpac,
               }}>
-                <Feather name={iconName} size={34} color={iconColor} />
+                <Feather name={iconName} size={38} color={iconColor} />
               </Animated.View>
               {/* Título */}
               {!!current.title && (
@@ -398,15 +403,15 @@ class AppAlertManager extends React.Component {
                       borderRightWidth: buttons.length > 1 && !isLast ? 1 : 0,
                       borderColor: T.border,
                       backgroundColor: isDestr ? T.red + '10' : isCancel ? 'transparent' : iconColor + '08',
-                      borderBottomLeftRadius: buttons.length === 1 ? 0 : idx === 0 ? 26 : 0,
-                      borderBottomRightRadius: buttons.length === 1 ? 0 : isLast ? 26 : 0,
+                      borderBottomLeftRadius: buttons.length === 1 ? 26 : idx === 0 ? 30 : 0,
+                      borderBottomRightRadius: buttons.length === 1 ? 26 : isLast ? 30 : 0,
                       marginBottom: buttons.length === 1 ? 0 : 0,
                     }}
                   >
                     <Text style={{
-                      fontSize: 15, fontWeight: isDestr || (!isCancel) ? '800' : '600',
+                      fontSize: 15.5, fontWeight: isDestr || (!isCancel) ? '900' : '700',
                       color: btnColor,
-                      letterSpacing: 0.2,
+                      letterSpacing: 0.3,
                     }}>
                       {btn.text}
                     </Text>
@@ -450,16 +455,15 @@ const W = WIN.width;
 
 // ─── SEGURANÇA ──────────────────────────────────────────────────────────────
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_SECS = 60;
+const MAX_LOGIN_ATTEMPTS = 3;
+const INITIAL_LOCKOUT_SECS = 30;
 const INPUT_SANITIZE_REGEX = /[<>'"]/g;
 const SQL_INJECTION_PATTERN = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|UNION|--|\bOR\b|\bAND\b)\b)/i;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 // ─── API SEGURA PARA TOKENS ─────────────────────────────────────────────────
 const TOKEN_API_URL = 'https://gei-ai-eta.vercel.app/api/estoque';
-// Chave fragmentada — nunca exposta em texto puro no bundle
-const TOKEN_API_KEY = (() => { const a='cordeiro'; const b='request'; const c='loja3'; return a+b+c; })();
+const TOKEN_API_KEY = 'cordeirorequestloja3';
 let BASEROW_TOKEN = '';
 let RT_API_KEY_IA = '';
 let RT_BLUESOFT_TOKEN = '';
@@ -2067,15 +2071,11 @@ const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale,
         {elevenLabsQuota ? (
           <View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Fonte:</Text>
-              <Text style={{ fontSize: 13 * fontScale, color: T.text, fontWeight: '700' }}>{elevenLabsQuota.key}</Text>
-            </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
               <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Caracteres usados:</Text>
               <Text style={{ fontSize: 13 * fontScale, color: T.text, fontWeight: '700' }}>{elevenLabsQuota.characterCount.toLocaleString()}</Text>
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Limite total:</Text>
+              <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600' }}>Limite do plano:</Text>
               <Text style={{ fontSize: 13 * fontScale, color: T.text, fontWeight: '700' }}>{elevenLabsQuota.characterLimit.toLocaleString()}</Text>
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -2093,28 +2093,6 @@ const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale,
             <Text style={{ fontSize: 11 * fontScale, color: T.textMuted, marginTop: 6, textAlign: 'center' }}>
               {elevenLabsQuota.percentUsed}% usado
             </Text>
-            {/* Detalhe por chave se há múltiplas */}
-            {elevenLabsQuota.error && (
-                <View style={{ marginTop: 8, padding: 8, borderRadius: 8, backgroundColor: T.redGlow || '#2D0A0A' }}>
-                  <Text style={{ fontSize: 11 * fontScale, color: T.red || '#EF4444', fontWeight: '700' }}>
-                    ⚠️ {elevenLabsQuota.error}
-                  </Text>
-                </View>
-              )}
-            {elevenLabsQuota.keys && elevenLabsQuota.keys.length > 1 && (
-              <View style={{ marginTop: 10, backgroundColor: T.bgElevated, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: T.border }}>
-                <Text style={{ fontSize: 10 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>Detalhes por Chave</Text>
-                {elevenLabsQuota.keys.map((k, i) => (
-                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600' }}>{k.key}</Text>
-                    {k.error
-                      ? <Text style={{ fontSize: 11 * fontScale, color: T.red, fontWeight: '700' }}>Erro: {k.error}</Text>
-                      : <Text style={{ fontSize: 11 * fontScale, color: '#10B981', fontWeight: '700' }}>{k.remaining.toLocaleString()} restantes</Text>
-                    }
-                  </View>
-                ))}
-              </View>
-            )}
           </View>
         ) : (
           <TouchableOpacity 
@@ -2173,39 +2151,34 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, busy, s
   );
 };
 
-const CadastroScreen = ({ T, fontScale, perf, cadastroShelf, setCadastroShelf, activeShelf, prodName, setProdName, validade, setValidade, qtd, setQtd, giro, setGiro, wStep, setWStep, nextStep, saveProduct, TAB_SAFE, GIRO, isCoord, isDeposito, SHELF_KEYS, shlabel, shelfPalette, showErr }) => {
+const CadastroScreen = ({ T, fontScale, perf, cadastroShelf, setCadastroShelf, activeShelf, prodName, setProdName, validade, setValidade, wStep, setWStep, nextStep, saveProduct, TAB_SAFE, isCoord, isDeposito, SHELF_KEYS, shlabel, shelfPalette, showErr }) => {
   const stepAnim = useRef(new Animated.Value(1)).current;
   const inputRef = useRef(null);
   const [shakeAnim] = useState(new Animated.Value(0));
   const [showPreview, setShowPreview] = useState(false);
-  const [showCalculator, setShowCalculator] = useState(false);
   const fmtDate = v => { const c = v.replace(/\D/g, ''); if (c.length <= 2) { setValidade(c); return; } if (c.length <= 4) { setValidade(`${c.slice(0, 2)}/${c.slice(2)}`); return; } const formatted = `${c.slice(0, 2)}/${c.slice(2, 4)}/${c.slice(4, 8)}`; setValidade(formatted); if (formatted.length === 10 && isValidDate(formatted)) { Keyboard.dismiss(); } };
   const animateStep = (fn) => { Animated.sequence([Animated.timing(stepAnim, { toValue: 0.94, duration: 100, useNativeDriver: false }), Animated.timing(stepAnim, { toValue: 1, duration: 160, useNativeDriver: false })]).start(); fn(); };
   const getTargetShelf = () => (isCoord(perf) || isDeposito(perf)) && cadastroShelf ? cadastroShelf : activeShelf;
-  const metrics = useMemo(() => { if (!giro || !qtd) return null; return buildDepletionMetricsOriginal({ quantidade: qtd, MARGEM: giro, DATAENVIO: new Date().toLocaleDateString('pt-BR') }); }, [giro, qtd]);
-  const STEPS = ['Nome', 'Validade', 'Qtd', 'Giro'];
+  const STEPS = ['Nome', 'Validade'];
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 200); }, [wStep]);
-  const handleNext = () => { if (wStep === 1 && !prodName.trim()) { shake(); showErr('O nome do produto é obrigatório.'); return; } if (wStep === 2) { if (!validade) { shake(); showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { shake(); showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } } if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { shake(); showErr('A quantidade deve ser um número positivo.'); return; } if (wStep === 4 && !giro) { shake(); showErr('Selecione o giro estimado.'); return; } animateStep(() => nextStep()); };
+  const handleNext = () => { if (wStep === 1 && !prodName.trim()) { shake(); showErr('O nome do produto é obrigatório.'); return; } if (wStep === 2) { if (!validade) { shake(); showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { shake(); showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } } animateStep(() => nextStep()); };
   const shake = () => { Animated.sequence([Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }), Animated.timing(shakeAnim, { toValue: -8, duration: 50, useNativeDriver: true }), Animated.timing(shakeAnim, { toValue: 4, duration: 50, useNativeDriver: true }), Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true })]).start(); };
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: T.bg }}>
       <Animated.View style={{ flex: 1, transform: [{ translateX: shakeAnim }] }}>
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: TAB_SAFE + 24 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, justifyContent: 'space-between' }}><Text style={{ fontSize: 28 * fontScale, fontWeight: '900', color: T.text, letterSpacing: -0.5 }}>Novo Produto</Text><TouchableOpacity onPress={() => setShowPreview(!showPreview)} style={{ padding: 8, backgroundColor: T.bgInput, borderRadius: 20 }}><Feather name={showPreview ? 'eye-off' : 'eye'} size={22} color={T.blue} /></TouchableOpacity></View>
-          <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 20 }}>Passo {wStep} de 4</Text>
+          <Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 20 }}>Passo {wStep} de 2</Text>
           {(isCoord(perf) || isDeposito(perf)) && (<View style={{ backgroundColor: T.bgCard, borderRadius: 20, padding: 16, marginBottom: 20, borderWidth: 1.5, borderColor: T.orange + '50' }}><Text style={{ fontSize: 12 * fontScale, fontWeight: '800', color: T.orange, textTransform: 'uppercase', marginBottom: 12 }}>Prateleira de Destino</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{SHELF_KEYS.map(k => { const on = (cadastroShelf || activeShelf) === k; const pal = shelfPalette(T, k); return (<TouchableOpacity key={k} style={[{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }, on && { backgroundColor: pal.glow, borderColor: pal.accent + '70' }]} onPress={() => setCadastroShelf(k)}><Feather name={pal.icon} size={13} color={on ? pal.accent : T.textSub} /><Text style={[{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: pal.accent, fontWeight: '900' }]}>{shlabel(k)}</Text></TouchableOpacity>); })}</View></View>)}
           <View style={{ flexDirection: 'row', gap: 6, marginBottom: 28 }}>{STEPS.map((s, i) => { const done = wStep > i + 1, active = wStep === i + 1; return (<View key={s} style={{ flex: 1, alignItems: 'center', gap: 4 }}><View style={{ height: 5, width: '100%', borderRadius: 3, backgroundColor: done || active ? T.blue : T.bgInput, opacity: done ? 0.5 : 1 }} /><Text style={{ fontSize: 9 * fontScale, fontWeight: active ? '900' : '700', color: active ? T.blue : T.textMuted }}>{s}</Text></View>); })}</View>
           <Animated.View style={{ backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 1.5, borderColor: T.border, shadowColor: T.textMuted, shadowOpacity: 0.06, shadowRadius: 16, elevation: 4, opacity: stepAnim }}>
-            {wStep === 1 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><Feather name="tag" size={20} color={T.blue} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 1 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Nome do Produto</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16, lineHeight: 19 }}>Digite o nome do produto que será cadastrado na prateleira.</Text><TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 18, borderRadius: 18, fontSize: 16 * fontScale, color: T.text, fontWeight: '700', minHeight: 80, textAlignVertical: 'top' }} placeholder="Ex: Leite Integral Parmalat 1L" placeholderTextColor={T.textSub} value={prodName} onChangeText={setProdName} multiline autoCorrect />{prodName.length > 0 && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 12, backgroundColor: T.blueGlow, borderRadius: 12, borderWidth: 1, borderColor: T.blue + '30' }}><Feather name="check-circle" size={14} color={T.blue} /><Text style={{ fontSize: 12 * fontScale, color: T.blue, fontWeight: '700', flex: 1 }} numberOfLines={1}>{prodName}</Text></View>)}</>)}
-            {wStep === 2 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.amber + '50' }}><Feather name="calendar" size={20} color={T.amber} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.amber, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 2 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Data de Validade</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Informe a data de vencimento impressa na embalagem.</Text><TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 20, borderRadius: 18, fontSize: 28 * fontScale, color: T.text, textAlign: 'center', letterSpacing: 4, fontWeight: '900' }} keyboardType="numeric" placeholder="DD/MM/AAAA" placeholderTextColor={T.textSub} value={validade} onChangeText={fmtDate} maxLength={10} autoFocus />{validade.length === 10 && (isValidDate(validade) ? (() => { const vs = vencStatus(validade); const colors = { expired: T.red, warning: T.amber, ok: T.green, unknown: T.textMuted }; const icons = { expired: 'alert-circle', warning: 'alert-triangle', ok: 'check-circle', unknown: 'clock' }; const labels = { expired: `Produto já vencido!`, warning: `Vence em ${vs.days} dia${vs.days !== 1 ? 's' : ''}`, ok: `Válido até ${validade}`, unknown: 'Data inválida' }; return (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: colors[vs.status] + '18', borderRadius: 12, borderWidth: 1, borderColor: colors[vs.status] + '40' }}><Feather name={icons[vs.status]} size={16} color={colors[vs.status]} /><Text style={{ fontSize: 13 * fontScale, color: colors[vs.status], fontWeight: '800' }}>{labels[vs.status]}</Text></View>); })() : (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: T.redGlow, borderRadius: 12, borderWidth: 1, borderColor: T.red + '40' }}><Feather name="alert-circle" size={16} color={T.red} /><Text style={{ fontSize: 13 * fontScale, color: T.red, fontWeight: '800' }}>Data inválida! Use o formato DD/MM/AAAA e uma data real.</Text></View>))}</>)}
-            {wStep === 3 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><Feather name="box" size={20} color={T.blue} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 3 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Quantidade</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Quantas unidades foram colocadas nesta prateleira?</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><TextInput ref={inputRef} style={{ flex: 1, backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 20, borderRadius: 18, fontSize: 36 * fontScale, color: T.text, textAlign: 'center', letterSpacing: 2, fontWeight: '900' }} keyboardType="numeric" placeholder="0" placeholderTextColor={T.textSub} value={qtd} onChangeText={setQtd} autoFocus /><TouchableOpacity onPress={() => setShowCalculator(true)} style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.blue }}><Feather name="calculator" size={28} color={T.blue} /></TouchableOpacity></View>{qtd && Number(qtd) > 0 && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: T.blueGlow, borderRadius: 12, borderWidth: 1, borderColor: T.blue + '30' }}><Feather name="package" size={14} color={T.blue} /><Text style={{ fontSize: 13 * fontScale, color: T.blue, fontWeight: '800' }}>{qtd} unidades serão registradas</Text></View>)}</>)}
-            {wStep === 4 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.purpleGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.purple + '50' }}><Feather name="refresh-cw" size={20} color={T.purple} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.purple, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 4 de 4</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Giro Estimado</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Qual a velocidade de venda esperada deste produto?</Text><View style={{ gap: 10, marginBottom: 16 }}>{['Grande giro', 'Médio giro', 'Pouco giro'].map(g => { const cfg = GIRO[g]; const on = giro === g; return (<TouchableOpacity key={g} style={[{ flexDirection: 'row', alignItems: 'center', padding: 18, borderRadius: 18, borderWidth: 2, borderColor: T.border, backgroundColor: T.bgInput, gap: 14 }, on && { backgroundColor: cfg.glow, borderColor: cfg.color + '80' }]} onPress={() => setGiro(g)}><View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: on ? cfg.color + '25' : T.bgElevated, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: on ? cfg.color + '50' : T.border }}><Feather name={cfg.icon} size={20} color={cfg.color} /></View><View style={{ flex: 1 }}><Text style={[{ fontSize: 16 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: cfg.color, fontWeight: '900' }]}>{g}</Text><Text style={{ fontSize: 11 * fontScale, color: T.textMuted, marginTop: 3 }}>~{cfg.rate.toFixed(1)} unidades/dia</Text></View>{on && <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: cfg.color, justifyContent: 'center', alignItems: 'center' }}><Feather name="check" size={14} color="#FFF" /></View>}</TouchableOpacity>); })}</View>{metrics && (<View style={{ padding: 16, borderRadius: 16, backgroundColor: T.purpleGlow, borderWidth: 1, borderColor: T.purple + '35' }}><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.purple, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Previsão Automática</Text><View style={{ flexDirection: 'row', gap: 10 }}><View style={{ flex: 1, backgroundColor: T.bgCard, borderRadius: 12, padding: 10, alignItems: 'center' }}><Text style={{ fontSize: 8 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase' }}>Ruptura</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.purple, marginTop: 3 }}>{metrics.depletionDateFull}</Text></View><View style={{ flex: 1, backgroundColor: T.bgCard, borderRadius: 12, padding: 10, alignItems: 'center' }}><Text style={{ fontSize: 8 * fontScale, color: T.textMuted, fontWeight: '800', textTransform: 'uppercase' }}>Em</Text><Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.purple, marginTop: 3 }}>{metrics.remainingDays} dias</Text></View></View></View>)}</>)}
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>{wStep > 1 && (<TouchableOpacity style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => animateStep(() => setWStep(p => p - 1))}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity>)}<PrimaryBtn label={wStep < 4 ? 'Avançar →' : '✓ Finalizar Cadastro'} onPress={handleNext} style={{ flex: 1 }} color={T.blue} fontScale={fontScale} /></View>
+            {wStep === 1 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.blueGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.blue + '50' }}><Feather name="tag" size={20} color={T.blue} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 1 de 2</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Nome do Produto</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16, lineHeight: 19 }}>Digite o nome do produto que será cadastrado na prateleira.</Text><TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 18, borderRadius: 18, fontSize: 16 * fontScale, color: T.text, fontWeight: '700', minHeight: 80, textAlignVertical: 'top' }} placeholder="Ex: Leite Integral Parmalat 1L" placeholderTextColor={T.textSub} value={prodName} onChangeText={setProdName} multiline autoCorrect />{prodName.length > 0 && (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 12, backgroundColor: T.blueGlow, borderRadius: 12, borderWidth: 1, borderColor: T.blue + '30' }}><Feather name="check-circle" size={14} color={T.blue} /><Text style={{ fontSize: 12 * fontScale, color: T.blue, fontWeight: '700', flex: 1 }} numberOfLines={1}>{prodName}</Text></View>)}</>)}
+            {wStep === 2 && (<><View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 }}><View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.amberGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.amber + '50' }}><Feather name="calendar" size={20} color={T.amber} /></View><View><Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.amber, textTransform: 'uppercase', letterSpacing: 0.8 }}>Passo 2 de 2</Text><Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.text }}>Data de Validade</Text></View></View><Text style={{ fontSize: 13 * fontScale, color: T.textSub, fontWeight: '600', marginBottom: 16 }}>Informe a data de vencimento impressa na embalagem.</Text><TextInput ref={inputRef} style={{ backgroundColor: T.bgInput, borderWidth: 2, borderColor: T.border, padding: 20, borderRadius: 18, fontSize: 28 * fontScale, color: T.text, textAlign: 'center', letterSpacing: 4, fontWeight: '900' }} keyboardType="numeric" placeholder="DD/MM/AAAA" placeholderTextColor={T.textSub} value={validade} onChangeText={fmtDate} maxLength={10} autoFocus />{validade.length === 10 && (isValidDate(validade) ? (() => { const vs = vencStatus(validade); const colors = { expired: T.red, warning: T.amber, ok: T.green, unknown: T.textMuted }; const icons = { expired: 'alert-circle', warning: 'alert-triangle', ok: 'check-circle', unknown: 'clock' }; const labels = { expired: `Produto já vencido!`, warning: `Vence em ${vs.days} dia${vs.days !== 1 ? 's' : ''}`, ok: `Válido até ${validade}`, unknown: 'Data inválida' }; return (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: colors[vs.status] + '18', borderRadius: 12, borderWidth: 1, borderColor: colors[vs.status] + '40' }}><Feather name={icons[vs.status]} size={16} color={colors[vs.status]} /><Text style={{ fontSize: 13 * fontScale, color: colors[vs.status], fontWeight: '800' }}>{labels[vs.status]}</Text></View>); })() : (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12, padding: 12, backgroundColor: T.redGlow, borderRadius: 12, borderWidth: 1, borderColor: T.red + '40' }}><Feather name="alert-circle" size={16} color={T.red} /><Text style={{ fontSize: 13 * fontScale, color: T.red, fontWeight: '800' }}>Data inválida! Use o formato DD/MM/AAAA e uma data real.</Text></View>))}</>)}
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>{wStep > 1 && (<TouchableOpacity style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }} onPress={() => animateStep(() => setWStep(p => p - 1))}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity>)}<PrimaryBtn label={wStep < 2 ? 'Avançar →' : '✓ Finalizar Cadastro'} onPress={handleNext} style={{ flex: 1 }} color={T.blue} fontScale={fontScale} /></View>
           </Animated.View>
-          {showPreview && (prodName || validade || qtd || giro) && (<View style={{ marginTop: 20, backgroundColor: T.bgCard, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 }}>Resumo do Cadastro</Text>{[{ label: 'Produto', val: prodName, icon: 'tag', c: T.blue }, { label: 'Validade', val: validade, icon: 'calendar', c: T.amber }, { label: 'Quantidade', val: qtd ? `${qtd} un` : '', icon: 'package', c: T.green }, { label: 'Giro', val: giro, icon: 'refresh-cw', c: T.purple }, { label: 'Destino', val: shlabel(getTargetShelf?.() || cadastroShelf || activeShelf), icon: 'layers', c: T.orange }].filter(i => i.val).map(i => (<View key={i.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, borderTopWidth: 1, borderColor: T.border }}><Feather name={i.icon} size={13} color={i.c} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted, width: 64 }}>{i.label}</Text><Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.text, flex: 1 }} numberOfLines={1}>{i.val}</Text></View>))}</View>)}
+          {showPreview && (prodName || validade) && (<View style={{ marginTop: 20, backgroundColor: T.bgCard, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 }}>Resumo do Cadastro</Text>{[{ label: 'Produto', val: prodName, icon: 'tag', c: T.blue }, { label: 'Validade', val: validade, icon: 'calendar', c: T.amber }, { label: 'Destino', val: shlabel(getTargetShelf?.() || cadastroShelf || activeShelf), icon: 'layers', c: T.orange }].filter(i => i.val).map(i => (<View key={i.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, borderTopWidth: 1, borderColor: T.border }}><Feather name={i.icon} size={13} color={i.c} /><Text style={{ fontSize: 11 * fontScale, fontWeight: '700', color: T.textMuted, width: 64 }}>{i.label}</Text><Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.text, flex: 1 }} numberOfLines={1}>{i.val}</Text></View>))}</View>)}
         </ScrollView>
       </Animated.View>
-      <CalculatorModal visible={showCalculator} onClose={() => setShowCalculator(false)} onResult={(val) => setQtd(String(val))} T={T} fontScale={fontScale} />
     </KeyboardAvoidingView>
   );
 };
@@ -2685,20 +2658,6 @@ const detectCalculadoraCmd = (text) => {
   if (!text) return false;
   const n = stripAccents(text);
   return ['calculadora','calcular pinha','calcula pinha','calculadora de pinha','abre calculadora','abrir calculadora','abra calculadora'].some(w => n.includes(stripAccents(w)));
-};
-
-// ── Detecção de comando "Modo Super Inteligente" ──────────────────────────────
-const detectSuperMode = (text) => {
-  if (!text) return false;
-  const n = stripAccents(text.toLowerCase());
-  return /(modo super inteligente|modo super|super inteligente|abrir modo super|ativar modo super)/.test(n);
-};
-
-// ── Detecção de comando "Painel Inteligente" ──────────────────────────────────
-const detectPainelInteligente = (text) => {
-  if (!text) return false;
-  const n = stripAccents(text.toLowerCase());
-  return /(painel inteligente|abrir painel inteligente|abre painel inteligente|abrir modo avancado|modo avancado|ativar modo avancado|central de inteligencia|central inteligente)/.test(n);
 };
 
 // Parser de fala para números (pt-BR)
@@ -3588,7 +3547,7 @@ const RegisterScreen = ({ T, fontScale, onBack, onRegisterSuccess, showErr }) =>
     setLoading(true);
     try {
       const randomDigits = Math.floor(1000 + Math.random() * 9000);
-      const _pfx = ['cor','dei','ro'].join(''); const rastreio = `${_pfx}${randomDigits}`;
+      const rastreio = `cordeiro${randomDigits}`;
       const checkRes = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true&filter__USUARIO__equal=${encodeURIComponent(email)}`);
       if (checkRes.data.results.length > 0) { showErr('E-mail já cadastrado.'); setLoading(false); return; }
       const newUser = { USUARIO: email, SENHA: senha, NOME: nome, PERFIL: perfil, AREA: perfil === 'Repositor' ? area : '', ACESSO: false, RASTREIO: rastreio, LOGINRAPIDO: '', TOKEN_BIOMETRICO: '', UTIMOLOGIN: '' };
@@ -3626,52 +3585,69 @@ const AdminPanel = ({ T, fontScale, onBack }) => {
   const [adminPass, setAdminPass] = useState('');
   const [showAdminLogin, setShowAdminLogin] = useState(true);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [adminFailedAttempts, setAdminFailedAttempts] = useState(0);
+  const [adminTotalFailures, setAdminTotalFailures] = useState(0);
+  const [adminLockedOut, setAdminLockedOut] = useState(false);
+  const [adminLockoutRemaining, setAdminLockoutRemaining] = useState(0);
+  const [adminMaxLockout, setAdminMaxLockout] = useState(INITIAL_LOCKOUT_SECS);
+  const adminLockoutTimer = useRef(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  const startAdminLockout = useCallback((seconds) => {
+    setAdminLockedOut(true);
+    setAdminLockoutRemaining(seconds);
+    setAdminMaxLockout(seconds);
+    let rem = seconds;
+    if (adminLockoutTimer.current) clearInterval(adminLockoutTimer.current);
+    adminLockoutTimer.current = setInterval(() => {
+      rem -= 1;
+      setAdminLockoutRemaining(rem);
+      if (rem <= 0) {
+        clearInterval(adminLockoutTimer.current);
+        setAdminLockedOut(false);
+        setAdminFailedAttempts(0);
+        setAdminLockoutRemaining(0);
+      }
+    }, 1000);
+  }, []);
 
   useEffect(() => { if (adminAuthenticated) { loadUsers(); Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: false }).start(); } }, [adminAuthenticated, fadeAnim, loadUsers]);
   const loadUsers = useCallback(async () => { setLoading(true); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); setUsers(res.data.results); } catch (error) { AppAlert.alert('Erro', 'Não foi possível carregar os usuários.'); } finally { setLoading(false); } }, []);
   const toggleAccess = async (user) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { ACESSO: !user.ACESSO }); await addAuditLog('ADMIN_TOGGLE_ACCESS', `Acesso do usuário ${user.USUARIO} alterado para ${!user.ACESSO}`); loadUsers(); } catch (error) { AppAlert.alert('Erro', 'Falha ao alterar acesso.'); } };
   const changeArea = async (user, newArea) => { try { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { AREA: newArea }); await addAuditLog('ADMIN_CHANGE_AREA', `Área do usuário ${user.USUARIO} alterada para ${newArea}`); loadUsers(); } catch (error) { AppAlert.alert('Erro', 'Falha ao alterar área.'); } };
   const deleteUser = async (user) => { AppAlert.alert('Deletar colaborador', `Tem certeza que deseja deletar permanentemente ${user.NOME}? Essa ação é irreversível.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Deletar', style: 'destructive', onPress: async () => { try { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/`); await addAuditLog('ADMIN_DELETE_USER', `Usuário ${user.USUARIO} deletado`); loadUsers(); AppAlert.alert('Sucesso', 'Colaborador removido.'); } catch (error) { AppAlert.alert('Erro', 'Não foi possível deletar o colaborador.'); } } }]); };
-  const deleteAllProductsFromShelf = async () => { if (!selectedShelfForDelete) { AppAlert.alert('Selecione uma prateleira'); return; } const tableId = SHELVES[selectedShelfForDelete]; if (!tableId) return; AppAlert.alert('Apagar todos os produtos', `Tem certeza que deseja apagar TODOS os produtos da prateleira ${shlabel(selectedShelfForDelete)}? Essa ação é irreversível.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Apagar tudo', style: 'destructive', onPress: async () => { setDeleting(true); try {
-    // Busca TODOS os produtos paginando (não só os 200 primeiros)
-    let allRows = [];
-    let page = 1;
-    while (true) {
-      const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true&size=200&page=${page}`);
-      const rows = res.data.results || [];
-      allRows = allRows.concat(rows);
-      if (!res.data.next) break; // sem próxima página
-      page++;
-    }
-    // Deleta em lotes paralelos para agilizar
-    const BATCH = 10;
-    for (let i = 0; i < allRows.length; i += BATCH) {
-      const batch = allRows.slice(i, i + BATCH);
-      await Promise.all(batch.map(row => secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${row.id}/`).catch(() => {})));
-    }
-    await addAuditLog('ADMIN_DELETE_ALL_PRODUCTS', `Todos os ${allRows.length} produtos da prateleira ${selectedShelfForDelete} foram apagados`);
-    AppAlert.alert('Sucesso', `Todos os ${allRows.length} produto${allRows.length !== 1 ? 's' : ''} da prateleira ${shlabel(selectedShelfForDelete)} foram removidos.`);
-  } catch (error) { AppAlert.alert('Erro', 'Falha ao apagar produtos.'); } finally { setDeleting(false); } } }]); };
-  // Nunca compara texto puro — só compara o hash SHA-256
-  const _ADMIN_H = '4b3932cebf7f2cad3d884fd1f20de7b5a460edfb136903129f7b6e31446fae03';
-  const handleAdminLogin = async () => {
-    try {
-      const h = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, adminPass);
-      if (h === _ADMIN_H) {
-        setAdminAuthenticated(true);
-        setShowAdminLogin(false);
+  const deleteAllProductsFromShelf = async () => { if (!selectedShelfForDelete) { AppAlert.alert('Atenção', 'Selecione uma prateleira antes de apagar.'); return; } const tableId = SHELVES[selectedShelfForDelete]; if (!tableId) { AppAlert.alert('Erro', 'Prateleira inválida.'); return; } AppAlert.alert('Apagar todos os produtos', `Tem certeza que deseja apagar TODOS os produtos da prateleira ${shlabel(selectedShelfForDelete)}? Essa ação é IRREVERSÍVEL.`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Apagar tudo', style: 'destructive', onPress: async () => { setDeleting(true); try { let page = 1; let totalDeleted = 0; while (true) { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true&size=100&page=${page}`); const rows = res.data?.results || []; if (rows.length === 0) break; for (const row of rows) { await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tableId}/${row.id}/`); totalDeleted++; } if (!res.data?.next) break; page++; } await addAuditLog('ADMIN_DELETE_ALL_PRODUCTS', `${totalDeleted} produtos da prateleira ${selectedShelfForDelete} foram apagados`); AppAlert.alert('Sucesso', `${totalDeleted} produto(s) da prateleira ${selectedShelfForDelete} foram removidos com sucesso.`); setSelectedShelfForDelete(''); } catch (error) { AppAlert.alert('Erro', `Falha ao apagar produtos: ${error?.message || 'Erro desconhecido'}`); } finally { setDeleting(false); } } }]); };
+  const [loginError, setLoginError] = useState('');
+  const handleAdminLogin = () => {
+    if (adminLockedOut) return;
+    if (adminPass.trim() === 'cordeiroadmin') {
+      setLoginError('');
+      setAdminAuthenticated(true);
+      setShowAdminLogin(false);
+      setAdminFailedAttempts(0);
+      setAdminTotalFailures(0);
+    } else {
+      const newAttempts = adminFailedAttempts + 1;
+      const newTotal = adminTotalFailures + 1;
+      setAdminFailedAttempts(newAttempts);
+      setAdminTotalFailures(newTotal);
+      if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+        const mult = Math.pow(3, Math.floor((newTotal - 1) / 3));
+        const wait = INITIAL_LOCKOUT_SECS * mult;
+        startAdminLockout(wait);
+        setLoginError(`Bloqueado por ${wait}s após ${newAttempts} erros.`);
+        AppAlert.alert('Acesso bloqueado', `Muitas tentativas incorretas. Aguarde ${wait} segundos.`);
       } else {
-        AppAlert.alert('Acesso negado', 'Senha de admin incorreta.');
+        const rem = MAX_LOGIN_ATTEMPTS - newAttempts;
+        setLoginError(`Senha incorreta. ${rem} tentativa(s) restante(s).`);
+        AppAlert.alert('Acesso negado', 'Senha de administrador incorreta.');
       }
-    } catch {
-      AppAlert.alert('Erro', 'Falha ao verificar credenciais.');
     }
   };
   const renderUserItem = ({ item }) => (<View style={{ backgroundColor: T.bgCard, borderRadius: 20, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}><View style={{ flex: 1, marginRight: 8 }}><Text style={{ fontSize: 16, fontWeight: '900', color: T.text }} numberOfLines={1}>{item.NOME}</Text><Text style={{ fontSize: 13, color: T.textSub }} numberOfLines={1}>{item.USUARIO}</Text></View><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Acesso:</Text><Switch value={item.ACESSO} onValueChange={() => toggleAccess(item)} trackColor={{ false: T.border, true: T.green }} thumbColor={item.ACESSO ? T.green : T.textMuted} /><TouchableOpacity onPress={() => deleteUser(item)} style={{ padding: 8, backgroundColor: T.redGlow, borderRadius: 12 }}><Feather name="trash-2" size={18} color={T.red} /></TouchableOpacity></View></View><View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 12, flexWrap: 'wrap' }}><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Função: {roleLabel(item.PERFIL)}</Text><Text style={{ fontSize: 12, fontWeight: '700', color: T.textSub }}>Área: {shlabel(item.AREA)}</Text></View>{item.PERFIL === 'Repositor' && (<View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} onPress={() => changeArea(item, k)} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: item.AREA === k ? T.blueGlow : T.bgInput, borderWidth: 1, borderColor: item.AREA === k ? T.blue : T.border }}><Text style={{ fontSize: 10, fontWeight: '700', color: item.AREA === k ? T.blue : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View>)}{item.RASTREIO && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 8 }}>Código Rastreio: {item.RASTREIO}</Text>)}{item.UTIMOLOGIN && (<Text style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>Último login: {item.UTIMOLOGIN}</Text>)}</View>);
 
   if (!adminAuthenticated) {
-    return (<View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', padding: 24 }}><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 24, fontWeight: '900', color: T.text, marginBottom: 8 }}>Admin GEI.AI</Text><Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24 }}>Digite a senha de administrador para acessar o painel.</Text><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 20, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 16, color: T.text, fontSize: 15 }} placeholder="Senha" secureTextEntry={!showAdminPassword} value={adminPass} onChangeText={setAdminPass} /><TouchableOpacity onPress={() => setShowAdminPassword(!showAdminPassword)}><Feather name={showAdminPassword ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View><PrimaryBtn label="Acessar Painel" onPress={handleAdminLogin} color={T.blue} /><TouchableOpacity onPress={onBack} style={{ marginTop: 20, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>← Voltar ao login</Text></TouchableOpacity></View></View>);
+    return (<View style={{ flex: 1, backgroundColor: T.bg, justifyContent: 'center', padding: 24 }}><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 24, fontWeight: '900', color: T.text, marginBottom: 8 }}>Admin GEI.AI</Text><Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24 }}>Digite a senha de administrador para acessar o painel.</Text><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, borderRadius: 14, marginBottom: 20, paddingRight: 12 }}><TextInput style={{ flex: 1, padding: 16, color: T.text, fontSize: 15 }} placeholder="Senha" secureTextEntry={!showAdminPassword} value={adminPass} onChangeText={setAdminPass} /><TouchableOpacity onPress={() => setShowAdminPassword(!showAdminPassword)}><Feather name={showAdminPassword ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View>{adminLockedOut && (<View style={{ backgroundColor: T.redGlow, borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1.5, borderColor: T.red + '40', alignItems: 'center', gap: 10 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}><Feather name="lock" size={18} color={T.red} /><Text style={{ fontSize: 14, fontWeight: '900', color: T.red }}>Acesso Bloqueado</Text></View><Text style={{ fontSize: 24, fontWeight: '900', color: T.red }}>{adminLockoutRemaining}s</Text><View style={{ width: '100%', height: 4, backgroundColor: T.border, borderRadius: 2, overflow: 'hidden' }}><View style={{ height: '100%', backgroundColor: T.red, width: `${(adminLockoutRemaining / adminMaxLockout) * 100}%` }} /></View></View>)}{loginError ? (<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, backgroundColor: T.redGlow, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: T.red + '30' }}><Feather name="alert-circle" size={16} color={T.red} /><Text style={{ color: T.red, fontWeight: '800', fontSize: 13, flex: 1 }}>{loginError}</Text></View>) : null}<PrimaryBtn label={adminLockedOut ? `Aguarde ${adminLockoutRemaining}s` : "Acessar Painel"} onPress={handleAdminLogin} color={adminLockedOut ? T.textMuted : T.blue} disabled={adminLockedOut} /><TouchableOpacity onPress={onBack} style={{ marginTop: 20, alignSelf: 'center' }}><Text style={{ color: T.textSub }}>← Voltar ao login</Text></TouchableOpacity></View></View>);
   }
   return (<View style={{ flex: 1, backgroundColor: T.bg }}><View style={{ paddingHorizontal: 20, paddingTop: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}><TouchableOpacity onPress={onBack} style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}><Feather name="arrow-left" size={20} color={T.textSub} /></TouchableOpacity><Text style={{ fontSize: 20, fontWeight: '900', color: T.text }}>Painel Admin</Text><View style={{ width: 44 }} /></View><Animated.ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false} style={{ opacity: fadeAnim }}><View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 16, fontWeight: '900', color: T.text, marginBottom: 12 }}>Apagar todos os produtos de uma prateleira</Text><View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>{SHELF_KEYS.map(k => (<TouchableOpacity key={k} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, backgroundColor: selectedShelfForDelete === k ? T.redGlow : T.bgInput, borderWidth: 1, borderColor: selectedShelfForDelete === k ? T.red : T.border }} onPress={() => setSelectedShelfForDelete(k)}><Text style={{ fontWeight: '700', color: selectedShelfForDelete === k ? T.red : T.textSub }}>{shlabel(k)}</Text></TouchableOpacity>))}</View><PrimaryBtn label={deleting ? 'Apagando...' : 'Apagar todos os produtos'} onPress={deleteAllProductsFromShelf} color={T.red} disabled={deleting} /></View><Text style={{ fontSize: 18, fontWeight: '900', color: T.text, marginBottom: 12 }}>Colaboradores</Text>{loading ? <ActivityIndicator /> : (<FlatList data={users} keyExtractor={(item) => item.id.toString()} renderItem={({ item }) => renderUserItem({ item })} scrollEnabled={false} />)}</Animated.ScrollView></View>);
 };
@@ -5185,8 +5161,6 @@ const WAKE_WORDS_LIST = [
   'qual a boa','qual e a boa','qual e a novidade','me conta as novidades',
   'criar lembrete','novo lembrete','adicionar lembrete','lembrete novo',
   'calculadora','calcular pinha','calcula pinha','calculadora de pinha','abre calculadora','abrir calculadora',
-  'abrir modo super inteligente','modo super inteligente','modo super','ativar modo super','super inteligente',
-  'painel inteligente','abrir painel inteligente','abrir modo avancado','modo avancado','ativar modo avancado','central inteligente',
 ];
 const stripAccents = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const detectWakeWord = (text) => {
@@ -5767,25 +5741,8 @@ const VoiceAssistant = ({
         const nome = text.trim().toUpperCase();
         dataRef.current.nome = nome;
         setCollected(p => ({ ...p, nome }));
-        setVsStateBoth(VS.QTY);
-        speak(`${nome}. Quantidade?`, () => listenAfterSpeak());
-        break;
-      }
-      case VS.QTY: {
-        const num = parsePortugueseNumber(text);
-        const rawQty = text.replace(/[^\d]/g,'');
-        const qty = num !== null ? String(num) : (rawQty || null);
-        if (!qty || qty === '0') {
-          speak('Não entendi a quantidade. Diga um número, como "cinquenta" ou "120".');
-          listenAfterSpeak(700);
-          return;
-        }
-        dataRef.current.qty = qty;
-        setCollected(p => ({ ...p, qty }));
         setVsStateBoth(VS.DATE);
-        const qtyNum = parseInt(qty);
-        const qtyExt = !isNaN(qtyNum) && qtyNum <= 999 ? (qtyNum === 1 ? 'uma unidade' : num_to_words_ptbr(qtyNum) + ' unidades') : qty + ' unidades';
-        speak(`${qtyExt} anotado. Qual a data de vencimento?`, () => listenAfterSpeak(550));
+        speak(`${nome}. Qual a data de vencimento?`, () => listenAfterSpeak());
         break;
       }
       case VS.DATE: {
@@ -5800,35 +5757,16 @@ const VoiceAssistant = ({
           }
         }
         if (!date) {
-          speak('Não entendi a data. Diga por exemplo "11 de julho de 2026" ou apenas "junho 2026".');
-          listenAfterSpeak(700);
+          speak('Não entendi a data. Diga por exemplo "11 de julho de 2026" ou apenas "junho 2026".', () => listenAfterSpeak(400));
           return;
         }
         dataRef.current.date = date;
         setCollected(p => ({ ...p, date }));
-        setVsStateBoth(VS.GIRO);
-        speak(`Vencimento ${date}. Giro do produto: pouco, médio ou grande?`, () => listenAfterSpeak());
-        break;
-      }
-      case VS.GIRO: {
-        const ln = stripAccents(text);
-        let giro = 'Médio giro';
-        // ── Grande giro ────────────────────────────────────────────────────
-        if (/\b(grande|alto|alta|muito|bastante|rapido|rapida|veloz|acelerado|acelerada|agil|ageis|frequente|forte|forte|vende muito|vende bastante|saida rapida|muito rapido|giro alto|alto giro|gira muito|giro grande|numero um|top|popular|campeao|campeao de vendas|mais vendido)\b/.test(ln)) giro = 'Grande giro';
-        // ── Pouco giro ─────────────────────────────────────────────────────
-        else if (/\b(pouco|baixo|baixa|lento|lenta|devagar|fraco|fraca|poucas|poucos|raramente|quase nao|nao vende|parado|parada|encalhado|encalhada|dificil|dificil de vender|pouca saida|giro baixo|baixo giro|giro lento|giro fraco|giro pouco|pouco giro|quase nada|nao sai|nao saiu)\b/.test(ln)) giro = 'Pouco giro';
-        // ── Médio giro ─────────────────────────────────────────────────────
-        else if (/\b(medio|media|normal|regular|regulare|moderado|moderada|razoavel|razoaveis|mediano|mediana|intermediario|equilibrado|padrao|mais ou menos|nem tanto|nao muito|mediano|giro medio|medio giro|giro normal|giro regular|ok|tanto faz|qualquer)\b/.test(ln)) giro = 'Médio giro';
-        dataRef.current.giro = giro;
-        setCollected(p => ({ ...p, giro }));
+        dataRef.current.giro = 'Médio giro';
+        setCollected(p => ({ ...p, giro: 'Médio giro' }));
         setVsStateBoth(VS.CONFIRM);
-        const d = dataRef.current;
-        const qtyN = parseInt(d.qty);
-        const qtyW = !isNaN(qtyN) && qtyN <= 9999 ? (qtyN === 1 ? 'uma unidade' : num_to_words_ptbr(qtyN) + ' unidades') : d.qty + ' unidades';
-        speak(
-          `Confirme: produto ${d.nome}, ${qtyW}, vencimento ${d.date}, giro ${giro}. Está correto? Diga sim ou corrigir.`,
-          () => listenAfterSpeak(200)
-        );
+        const d0 = dataRef.current;
+        speak(`Vencimento ${date}. Confirme: produto ${d0.nome}, vencimento ${date}. Está correto? Diga sim ou corrigir.`, () => listenAfterSpeak(200));
         break;
       }
       case VS.CONFIRM: {
@@ -5854,8 +5792,8 @@ const VoiceAssistant = ({
             triggerSaveAnimation();
             // ✅ Salva campos IMEDIATAMENTE antes do TTS (evita crash se componente desmontar)
             try {
-              setProdName(d.nome); setQtd(d.qty); setValidade(d.date);
-              setGiro(d.giro); setWStep(4);
+              setProdName(d.nome); setValidade(d.date);
+              setWStep(1);
               onComplete({ nome:d.nome, qty:d.qty, date:d.date, giro:d.giro });
             } catch { /* noop */ }
             speak('Salvo!', () => {
@@ -5877,7 +5815,7 @@ const VoiceAssistant = ({
         if (/(novo|lote|novo lote|outro|adicionar|cadastrar|sim|confirma)/.test(lf)) {
           const df = dataRef.current;
           setVsStateBoth(VS.SAVING); triggerSaveAnimation();
-          try { setProdName(df.nome); setQtd(df.qty); setValidade(df.date); setGiro(df.giro); setWStep(4); onComplete({ nome:df.nome, qty:df.qty, date:df.date, giro:df.giro }); } catch { /* noop */ }
+          try { setProdName(df.nome); setValidade(df.date); setWStep(1); onComplete({ nome:df.nome, qty:df.qty, date:df.date, giro:df.giro }); } catch { /* noop */ }
           speak('Novo lote salvo!', () => { if (visibleRef.current) setTimeout(() => onClose(), 600); });
         } else if (/(alterar|mudar|editar|corrigir|trocar|modificar|atualizar)/.test(lf)) {
           setVsStateBoth(VS.EDIT_WHAT);
@@ -5895,24 +5833,18 @@ const VoiceAssistant = ({
           (async () => {
             try {
               if (ex && doUpdateExisting) { await doUpdateExisting(ex.id, dw); }
-              else { setProdName(dw.nome); setQtd(dw.qty); setValidade(dw.date); setGiro(dw.giro); setWStep(4); onComplete({ nome:dw.nome, qty:dw.qty, date:dw.date, giro:dw.giro }); }
+              else { setProdName(dw.nome); setValidade(dw.date); setWStep(1); onComplete({ nome:dw.nome, qty:dw.qty, date:dw.date, giro:dw.giro }); }
             } catch { /* noop */ }
           })();
           speak('Alterações salvas!', () => { if (visibleRef.current) setTimeout(() => onClose(), 600); });
         } else if (/(nome|produto|descri|chamado)/.test(lw)) {
           editingFieldRef.current = 'nome';
           speak('Qual o novo nome do produto?', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
-        } else if (/(quantidade|qtd|qt|unidade|estoque|quantas|quantos)/.test(lw)) {
-          editingFieldRef.current = 'qty';
-          speak('Qual a nova quantidade?', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
         } else if (/(data|validade|vencimento|vence)/.test(lw)) {
           editingFieldRef.current = 'date';
           speak('Qual a nova data de vencimento?', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
-        } else if (/(giro|rotatividade|velocidade)/.test(lw)) {
-          editingFieldRef.current = 'giro';
-          speak('Qual o giro? Diga pouco giro, medio giro ou grande giro.', () => listenAfterSpeak()); setVsStateBoth(VS.EDIT_VALUE);
         } else {
-          speak('Diga o campo: nome, quantidade, data ou giro. Ou diga confirmar para salvar.', () => listenAfterSpeak());
+          speak('Diga o campo: nome ou data de vencimento. Ou diga confirmar para salvar.', () => listenAfterSpeak());
         }
         break;
       }
@@ -5923,23 +5855,11 @@ const VoiceAssistant = ({
           dataRef.current.nome = nn; setCollected(p => ({ ...p, nome: nn }));
           speak('Nome alterado para ' + nn + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
           setVsStateBoth(VS.EDIT_WHAT);
-        } else if (fld === 'qty') {
-          const nq = parsePortugueseNumber(text);
-          if (!nq || nq <= 0) { speak('Nao entendi a quantidade. Diga um numero como cinquenta ou 120.', () => listenAfterSpeak(250)); return; }
-          dataRef.current.qty = String(nq); setCollected(p => ({ ...p, qty: String(nq) }));
-          speak('Quantidade alterada para ' + nq + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
-          setVsStateBoth(VS.EDIT_WHAT);
         } else if (fld === 'date') {
           const nd = parsePortugueseDate(text);
           if (!nd) { speak('Nao entendi a data. Diga por exemplo 11 de julho de 2026.', () => listenAfterSpeak(250)); return; }
           dataRef.current.date = nd; setCollected(p => ({ ...p, date: nd }));
           speak('Data alterada para ' + nd + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
-          setVsStateBoth(VS.EDIT_WHAT);
-        } else if (fld === 'giro') {
-          const lv = stripAccents(text.toLowerCase());
-          const ng = /(grande|alto|muito|rapido|veloz)/.test(lv) ? 'Grande giro' : /(pouco|baixo|lento|devagar|fraco)/.test(lv) ? 'Pouco giro' : 'Médio giro';
-          dataRef.current.giro = ng; setCollected(p => ({ ...p, giro: ng }));
-          speak('Giro alterado para ' + ng + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
           setVsStateBoth(VS.EDIT_WHAT);
         } else { listenAfterSpeak(250); }
         break;
@@ -6370,9 +6290,7 @@ const VoiceAssistant = ({
             <View style={{ backgroundColor:T.bgElevated, borderRadius:20, padding:14, marginBottom:14, gap:8, borderWidth:1, borderColor:T.border }}>
               {[
                 { key:'nome',  label:'Produto',    icon:'package',    empty:'Aguardando...' },
-                { key:'qty',   label:'Quantidade', icon:'layers',     empty:'Aguardando...' },
                 { key:'date',  label:'Vencimento', icon:'calendar',   empty:'Aguardando...' },
-                { key:'giro',  label:'Giro',       icon:'trending-up',empty:'Aguardando...' },
               ].map(f => (
                 <View key={f.key} style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
                   <View style={{ width:32, height:32, borderRadius:10, backgroundColor:collected[f.key]?T.blue+'22':T.bgInput, justifyContent:'center', alignItems:'center' }}>
@@ -6519,11 +6437,10 @@ const DEEPGRAM_API_KEY = '99ddf828d4529173c6396612133bc671247a3966';
 // A chave que funcionou por último é salva no SafeStore e tentada PRIMEIRO
 // Ordem padrão: KEY1 (original) → KEY2 (nova1) → KEY3 (nova2) → KEY_SECONDARY (Baserow)
 // SEM fallback para Speech até esgotar TODAS as chaves ElevenLabs
-// ⚠️  Chaves fragmentadas — não ficam visíveis como strings únicas no bundle
-const ELEVEN_LABS_API_KEY  = (() => { const p='sk_5ee'; const q='aa1736932'; const r='2e234f74a50aff06a52d6e6a2c5edb3878b9'; return p+q+r; })();
-const ELEVEN_LABS_API_KEY2 = (() => { const p='sk_e08'; const q='9d35e697bc'; const r='e9cfa17c90126ac8896660d541111309e23'; return p+q+r; })();
-const ELEVEN_LABS_API_KEY3 = (() => { const p='sk_893'; const q='c092539'; const r='73be0f43d5718c72d29e708acc890ee0a6f16e'; return p+q+r; })();
-const ELEVEN_LABS_VOICE_ID  = 'iP95p4xoKVk53GoZ742B'; // Voz preferida do usuário
+const ELEVEN_LABS_API_KEY   = 'sk_5eeaa17369322e234f74a50aff06a52d6e6a2c5edb3878b9';
+const ELEVEN_LABS_API_KEY2  = 'sk_e089d35e697bce9cfa17c90126ac8896660d541111309e23';
+const ELEVEN_LABS_API_KEY3  = 'sk_893c09253973be0f43d5718c72d29e708acc890ee0a6f16e';
+const ELEVEN_LABS_VOICE_ID  = 'pqHfZKP75CvOlQylNhV4'; // Bill — pt-BR nativo ElevenLabs
 const EL_LAST_KEY_STORE     = 'GEI_EL_LastWorkingKey'; // chave da última chamada ok
 
 // Pool de chaves em ordem de prioridade (chave do Baserow é adicionada em runtime)
@@ -6549,95 +6466,27 @@ const _sortPoolByLastWorking = async (pool) => {
 };
 
 // ─── FUNÇÃO PARA BUSCAR COTAS DO ELEVEN LABS (verifica TODAS as chaves) ──────
-// Tenta /v1/user/subscription primeiro; se falhar por CORS/404, tenta /v1/user.
-// Nunca retorna null quando há chaves configuradas — retorna estado de erro.
 const fetchElevenLabsQuota = async () => {
   const pool = _getElevenLabsKeyPool();
-  if (pool.length === 0) {
-    return { key: 'Sem chaves', characterCount: 0, characterLimit: 0, remaining: 0, percentUsed: '0.0', keys: [], error: 'Nenhuma chave ElevenLabs configurada' };
-  }
-
-  // Tenta buscar dados de um endpoint dado uma chave (tenta /subscription depois /user)
-  const _tryFetch = async (key, timeoutMs = 9000) => {
-    const endpoints = [
-      'https://api.elevenlabs.io/v1/user/subscription',
-      'https://api.elevenlabs.io/v1/user',
-    ];
-    for (const url of endpoints) {
-      try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-        const r = await fetch(url, {
-          method: 'GET',
-          headers: { 'xi-api-key': key, 'Accept': 'application/json' },
-          signal: ctrl.signal,
-        });
-        clearTimeout(tid);
-        if (r.ok) {
-          const d = await r.json();
-          // /v1/user/subscription → { character_limit, character_count, tier }
-          // /v1/user             → { subscription: { character_limit, character_count } }
-          const sub = d.subscription || d;
-          const limit = sub.character_limit ?? sub.characterLimit ?? 0;
-          const count = sub.character_count ?? sub.characterCount ?? 0;
-          return { ok: true, limit, count, tier: sub.tier || d.tier || 'free', endpoint: url };
-        }
-        // 401/403: chave inválida — não tenta outro endpoint
-        if (r.status === 401 || r.status === 403) {
-          return { ok: false, error: `Chave inválida (HTTP ${r.status})` };
-        }
-        // Qualquer outro erro HTTP: tenta próximo endpoint
-      } catch (e) {
-        if (e?.name === 'AbortError') return { ok: false, error: 'Timeout (sem resposta em 9s)' };
-        // Erro de rede (CORS, etc.): tenta próximo endpoint
-      }
-    }
-    return { ok: false, error: 'Falha em todos os endpoints' };
-  };
-
-  const results = [];
   for (const { key, label } of pool) {
-    const res = await _tryFetch(key);
-    if (res.ok) {
-      const remaining = Math.max(0, res.limit - res.count);
-      results.push({
-        key: label,
-        characterCount: res.count,
-        characterLimit: res.limit,
-        remaining,
-        percentUsed: res.limit > 0 ? ((res.count / res.limit) * 100).toFixed(1) : '0.0',
-        tier: res.tier,
+    try {
+      const r = await fetch('https://api.elevenlabs.io/v1/user/subscription', {
+        method: 'GET', headers: { 'xi-api-key': key },
       });
-    } else {
-      results.push({ key: label, characterCount: 0, characterLimit: 0, remaining: 0, percentUsed: '0.0', error: res.error });
-    }
+      if (r.ok) {
+        const d = await r.json();
+        const remaining = (d.character_limit||0) - (d.character_count||0);
+        return {
+          key: label,
+          characterCount: d.character_count || 0,
+          characterLimit: d.character_limit || 0,
+          remaining,
+          percentUsed: d.character_limit ? ((d.character_count/d.character_limit)*100).toFixed(1) : 0,
+        };
+      }
+    } catch { /* tenta próxima */ }
   }
-
-  const valid = results.filter(r => !r.error && r.characterLimit > 0);
-
-  // Mesmo se todas falharam, retorna o estado (nunca null com chaves configuradas)
-  if (valid.length === 0) {
-    const errList = results.map(r => `${r.key}: ${r.error}`).join(' | ');
-    return {
-      key: `${results.length} chave(s) — erro`,
-      characterCount: 0, characterLimit: 0, remaining: 0, percentUsed: '0.0',
-      keys: results,
-      error: errList,
-    };
-  }
-
-  const totalLimit     = valid.reduce((s, r) => s + r.characterLimit, 0);
-  const totalCount     = valid.reduce((s, r) => s + r.characterCount, 0);
-  const totalRemaining = valid.reduce((s, r) => s + r.remaining, 0);
-  const best = valid.reduce((a, b) => b.remaining > a.remaining ? b : a, valid[0]);
-  return {
-    key: valid.length > 1 ? `${valid.length} chaves ativas` : best.key,
-    characterCount: totalCount,
-    characterLimit: totalLimit,
-    remaining: totalRemaining,
-    percentUsed: totalLimit > 0 ? ((totalCount / totalLimit) * 100).toFixed(1) : '0.0',
-    keys: results,
-  };
+  return null;
 };
 
 // ─── ECONOMIA DE TOKENS: trunca texto para não desperdiçar cota ──────────────
@@ -6651,77 +6500,6 @@ const _truncateForTTS = (text, maxChars = 280) => {
   // Fallback: corta na última palavra antes do limite
   const cutSpace = text.lastIndexOf(' ', maxChars);
   return text.slice(0, cutSpace > 0 ? cutSpace : maxChars) + '…';
-};
-
-// ─── CONVERTE NÚMEROS PARA EXTENSO PARA MELHOR PRONÚNCIA TTS ────────────────
-// Ex: "12/05/2026" → "doze de maio de dois mil e vinte e seis"
-//     "R$ 19,90" → "dezenove reais e noventa centavos"
-//     "10 unidades" → "dez unidades"
-const _numsToWords = (text) => {
-  if (!text) return text;
-  const unidades = ['zero','um','dois','três','quatro','cinco','seis','sete','oito','nove',
-    'dez','onze','doze','treze','quatorze','quinze','dezesseis','dezessete','dezoito','dezenove'];
-  const dezenas = ['','','vinte','trinta','quarenta','cinquenta','sessenta','setenta','oitenta','noventa'];
-  const centenas = ['','cento','duzentos','trezentos','quatrocentos','quinhentos','seiscentos',
-    'setecentos','oitocentos','novecentos'];
-  const meses = ['janeiro','fevereiro','março','abril','maio','junho',
-    'julho','agosto','setembro','outubro','novembro','dezembro'];
-
-  const numToExt = (n) => {
-    n = Math.abs(Math.floor(n));
-    if (n < 20) return unidades[n];
-    if (n < 100) {
-      const d = Math.floor(n / 10); const u = n % 10;
-      return u === 0 ? dezenas[d] : `${dezenas[d]} e ${unidades[u]}`;
-    }
-    if (n === 100) return 'cem';
-    if (n < 1000) {
-      const c = Math.floor(n / 100); const resto = n % 100;
-      return resto === 0 ? centenas[c] : `${centenas[c]} e ${numToExt(resto)}`;
-    }
-    if (n < 2000) return `mil${n % 1000 === 0 ? '' : ' e ' + numToExt(n % 1000)}`;
-    if (n < 10000) {
-      const m = Math.floor(n / 1000); const r = n % 1000;
-      return `${numToExt(m)} mil${r === 0 ? '' : ' e ' + numToExt(r)}`;
-    }
-    return String(n); // números grandes: deixa como está
-  };
-
-  let t = text;
-  // Datas no formato dd/mm/aaaa → "DD de MÊS de ANO"
-  t = t.replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g, (_, d, m, y) => {
-    const di = parseInt(d), mi = parseInt(m) - 1, yi = parseInt(y);
-    if (mi < 0 || mi > 11) return _;
-    const yStr = yi >= 2000 && yi < 2100 ?
-      `dois mil${yi % 1000 === 0 ? '' : ' e ' + numToExt(yi % 1000)}` : numToExt(yi);
-    return `${numToExt(di)} de ${meses[mi]} de ${yStr}`;
-  });
-  // Datas no formato dd/mm → "DD de MÊS"
-  t = t.replace(/\b(\d{1,2})\/(\d{1,2})\b/g, (_, d, m) => {
-    const di = parseInt(d), mi = parseInt(m) - 1;
-    if (mi < 0 || mi > 11) return _;
-    return `${numToExt(di)} de ${meses[mi]}`;
-  });
-  // Anos 20XX isolados → "dois mil e ..."
-  t = t.replace(/\b(20\d{2})\b/g, (_, y) => {
-    const yi = parseInt(y);
-    return `dois mil${yi % 1000 === 0 ? '' : ' e ' + numToExt(yi % 1000)}`;
-  });
-  // Porcentagem (ex: 85%) → "oitenta e cinco por cento"
-  t = t.replace(/\b(\d+(?:[.,]\d+)?)\s*%/g, (_, n) => `${numToExt(parseFloat(n.replace(',','.')))} por cento`);
-  // Valores monetários (ex: R$ 19,90 / R$19.90)
-  t = t.replace(/R\$\s*(\d+)[,.](\d{2})\b/gi, (_, reais, cent) => {
-    const r = parseInt(reais), c = parseInt(cent);
-    const rStr = `${numToExt(r)} ${r === 1 ? 'real' : 'reais'}`;
-    return c === 0 ? rStr : `${rStr} e ${numToExt(c)} centavos`;
-  });
-  // Números isolados de 2+ dígitos (não anos, não dentro de palavras)
-  t = t.replace(/(?<![a-zA-Z\d])(\d{2,4})(?![a-zA-Z\d%\/])/g, (_, n) => {
-    const ni = parseInt(n);
-    if (ni > 9999) return n; // deixa números muito grandes
-    return numToExt(ni);
-  });
-  return t;
 };
 
 // ─── ELEVENLABS TTS — PRIORIDADE TOTAL, 3 CHAVES, ECONOMIA DE TOKENS ─────────
@@ -6787,9 +6565,7 @@ const speakWithElevenLabs = (text, onDone) => {
     try { _elMicStopCallback(); } catch { /* noop */ }
   }
   // Adiciona à fila (evita sobreposição)
-  // Pré-processa: converte números para extenso e trunca
-  const processedText = _truncateForTTS(_numsToWords(text));
-  _elQueue.push({ text: processedText, onDone });
+  _elQueue.push({ text: _truncateForTTS(text), onDone });
   // Se limite da fila ultrapassar 3, descarta os mais antigos (exceto o primeiro)
   if (_elQueue.length > 3) _elQueue.splice(1, _elQueue.length - 2);
   _elPlayNext();
@@ -6973,10 +6749,10 @@ const _doSpeak = async (text, onDone) => {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS:      false,
         playsInSilentModeIOS:    true,
-        staysActiveInBackground: true,
-        interruptionModeIOS:     2, // DUCK_OTHERS — mantém sessão ativa sem matar outras
-        interruptionModeAndroid: 2,
-        shouldDuckAndroid:       true,
+        staysActiveInBackground: false,
+        interruptionModeIOS:     1, // DO_NOT_MIX — interrompe outras sessões de áudio
+        interruptionModeAndroid: 1,
+        shouldDuckAndroid:       false,
         playThroughEarpieceAndroid: false,
       });
     } catch { /* noop */ }
@@ -6994,26 +6770,11 @@ const _doSpeak = async (text, onDone) => {
           const FileSystem = require('expo-file-system');
           if (audioUri?.startsWith(FileSystem.cacheDirectory)) await FileSystem.deleteAsync(audioUri, { idempotent: true });
         } catch { /* noop */ }
-        // Reativa modo de gravação para o mic always-on funcionar após o áudio
-        try {
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS:      true,
-            playsInSilentModeIOS:    true,
-            staysActiveInBackground: true,
-            interruptionModeIOS:     2,
-            interruptionModeAndroid: 2,
-            shouldDuckAndroid:       true,
-            playThroughEarpieceAndroid: false,
-          });
-        } catch { /* noop */ }
         if (onDone) onDone();
         resolveAudio();
       };
-      const { sound } = await Audio.Sound.createAsync({ uri: audioUri }, { shouldPlay: false });
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUri }, { shouldPlay: true });
       _elCurrentSound = sound;
-      // Aguarda 120ms para o modo de áudio estabilizar antes de tocar (fix iOS)
-      await new Promise(r => setTimeout(r, 120));
-      try { await sound.playAsync(); } catch { /* noop */ }
       // Segurança: resolve após 90s mesmo sem evento (áudio muito longo ou bug)
       const safetyTimer = setTimeout(() => finish(), 90000);
       sound.setOnPlaybackStatusUpdate(async status => {
@@ -7064,63 +6825,22 @@ const setGlobalMicSettings = (soundEnabled, vibrationEnabled, volume) => {
   _globalMicSoundVolume      = volume;
 };
 
-// Vibração discreta quando o microfone é ativado (always-on ligou)
-const _vibrateMicOn = () => {
-  if (!_globalMicVibrationEnabled) return;
-  try {
-    // Haptics: vibração curta e suave de confirmação
-    const Haptics = require('expo-haptics');
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
-      try { Vibration.vibrate(40); } catch { /* noop */ }
-    });
-  } catch {
-    try { Vibration.vibrate(40); } catch { /* noop */ }
-  }
-};
-
 const playAudioR = async (volume = 0.9, vibrate = true) => {
   try {
     if (_audioRSound) {
       try { await _audioRSound.stopAsync(); await _audioRSound.unloadAsync(); } catch { /* noop */ }
       _audioRSound = null;
     }
-    // Muda para modo reprodução ANTES de criar o som (fix iOS: allowsRecordingIOS bloqueia áudio)
-    try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS:      false,
-        playsInSilentModeIOS:    true,
-        staysActiveInBackground: true,
-        interruptionModeIOS:     2,
-        interruptionModeAndroid: 2,
-        shouldDuckAndroid:       false,
-        playThroughEarpieceAndroid: false,
-      });
-    } catch { /* noop */ }
-    // Aguarda 80ms para o modo de áudio estabilizar antes de tocar (fix iOS race condition)
-    await new Promise(r => setTimeout(r, 80));
+    try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }); } catch { /* noop */ }
     const { sound } = await Audio.Sound.createAsync(
       require('./assets/audior.mp3'),
-      { shouldPlay: false, volume: Math.max(0, Math.min(1, volume)) }
+      { shouldPlay: true, volume: Math.max(0, Math.min(1, volume)) } // Garante volume entre 0 e 1
     );
     _audioRSound = sound;
-    // Inicia reprodução em passo separado (mais confiável no iOS)
-    try { await sound.playAsync(); } catch { /* noop */ }
     sound.setOnPlaybackStatusUpdate(async (status) => {
-      if (status.didJustFinish || (!status.isLoaded && _audioRSound === sound)) {
-        if (_audioRSound === sound) _audioRSound = null;
+      if (status.didJustFinish) {
         try { await sound.unloadAsync(); } catch { /* noop */ }
-        // Restaura modo de gravação para o mic continuar funcionando
-        try {
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS:      true,
-            playsInSilentModeIOS:    true,
-            staysActiveInBackground: true,
-            interruptionModeIOS:     2,
-            interruptionModeAndroid: 2,
-            shouldDuckAndroid:       true,
-            playThroughEarpieceAndroid: false,
-          });
-        } catch { /* noop */ }
+        if (_audioRSound === sound) _audioRSound = null;
       }
     });
     
@@ -7259,7 +6979,7 @@ const MIN_STOP_GAP    = 800;   // ms mínimo entre stop e próximo start
 const MAX_FAIL_DELAY  = 9000;  // ms máximo de backoff
 const WATCHDOG_MS     = 14000; // ms entre verificações do watchdog
 
-const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteWord, onCalculadoraWord, onSuperModeWord, onPainelWord }) => {
+const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteWord, onCalculadoraWord }) => {
   const [isAlwaysListening, setIsAlwaysListening] = useState(false);
 
   // ── Refs de controle ──────────────────────────────────────────────────────
@@ -7268,8 +6988,6 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
   const onNovidadesRef   = useRef(onNovidadesWord);
   const onLembreteRef    = useRef(onLembreteWord);
   const onCalculadoraRef = useRef(onCalculadoraWord);
-  const onSuperModeRef   = useRef(onSuperModeWord);
-  const onPainelRef      = useRef(onPainelWord);
   const webRecRef        = useRef(null);
   const restartTimerRef  = useRef(null);
   const watchdogRef      = useRef(null);
@@ -7289,8 +7007,6 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
   onNovidadesRef.current = onNovidadesWord;
   onLembreteRef.current  = onLembreteWord;
   onCalculadoraRef.current = onCalculadoraWord;
-  onSuperModeRef.current   = onSuperModeWord;
-  onPainelRef.current      = onPainelWord;
 
   // ── Limpa todos os timers ────────────────────────────────────────────────
   const _clearTimers = useCallback(() => {
@@ -7397,11 +7113,7 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
         }
         failCountRef.current = 0;
         isStartingRef.current = false;
-        if (mountedRef.current) {
-          setIsAlwaysListening(true);
-          // Vibração discreta: confirma que o mic está ouvindo
-          _vibrateMicOn();
-        }
+        if (mountedRef.current) setIsAlwaysListening(true);
       } catch (e) {
         isStartingRef.current = false;
         activeSessionRef.current = 0;
@@ -7430,8 +7142,6 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
     }
     else if (type === 'lembrete') onLembreteRef.current?.();
     else if (type === 'calculadora') onCalculadoraRef.current?.();
-    else if (type === 'super')    onSuperModeRef.current?.();
-    else if (type === 'painel')  onPainelRef.current?.();
     else                      onWakeRef.current?.();
   }, [_clearTimers, _stopNative]);
 
@@ -7442,8 +7152,6 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
     const sessionNow = activeSessionRef.current;
     if (sessionNow === 0) return;
     const text = event?.results?.[0]?.transcript || '';
-    if (detectPainelInteligente(text)) { _dispatchWakeWord('painel'); return; }
-    if (detectSuperMode(text))      { _dispatchWakeWord('super'); return; }
     if (detectCalculadoraCmd(text)) { _dispatchWakeWord('calculadora'); return; }
     if (detectLembreteCmd(text))  { _dispatchWakeWord('lembrete'); return; }
     if (detectNovidades(text))    { _dispatchWakeWord('novidades'); return; }
@@ -7468,54 +7176,23 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
     _safeRestart(delay);
   });
 
-  // ── Erro do reconhecimento nativo — recuperação automática sempre ──────────
+  // ── Erro do reconhecimento nativo ────────────────────────────────────────
   _useSpeechEventSafe('error', (event) => {
     if (Platform.OS === 'web') return;
     const errCode = event?.error || event?.message || 'unknown';
     console.warn(`[MIC] Erro nativo: ${errCode}`);
-    // Reseta TODOS os flags de estado para garantir restart limpo
-    stopInFlight.current    = false;
-    isStartingRef.current   = false;
-    activeSessionRef.current = 0;
+    stopInFlight.current  = false;
     lastStopTimeRef.current = Date.now();
+    isStartingRef.current = false;
+    activeSessionRef.current = 0;
     if (mountedRef.current) setIsAlwaysListening(false);
     if (!enabledRef.current || !mountedRef.current || didFireRef.current) return;
-    // Erros fatais (permissão negada pelo usuário): não tenta novamente
-    if (errCode === 'not-allowed' || errCode === 'service-not-allowed' || errCode === 'permission') {
-      console.warn('[MIC] Permissão negada — mic não reinicia automaticamente');
-      return;
-    }
-    // Para qualquer outro erro (rede, timeout, busy, audio-capture, etc.)
-    // o mic SEMPRE reinicia, com backoff proporcional ao número de falhas consecutivas
+    // Erros fatais (permissão negada): não tenta novamente
+    if (errCode === 'not-allowed' || errCode === 'service-not-allowed' || errCode === 'permission') return;
     failCountRef.current = Math.min(failCountRef.current + 1, 10);
-    const delay = errCode === 'no-speech'
-      ? 400                                                        // no-speech: reinicia rápido
-      : Math.min(1200 + failCountRef.current * 600, MAX_FAIL_DELAY); // outros: backoff exponencial
-    console.warn(`[MIC] Recuperando em ${delay}ms (falha #${failCountRef.current}: ${errCode})`);
+    const delay = Math.min(1200 + failCountRef.current * 800, MAX_FAIL_DELAY);
     _safeRestart(delay);
   });
-
-  // ── Watchdog global: se mic travou (isStarting por >8s), força restart ───
-  useEffect(() => {
-    if (!enabledRef.current) return;
-    const wdInterval = setInterval(() => {
-      if (!mountedRef.current || !enabledRef.current || didFireRef.current) return;
-      // Detecta estado preso: isStarting há mais de 8 segundos sem ativar
-      if (isStartingRef.current) {
-        const stuck = Date.now() - lastStopTimeRef.current > 8000;
-        if (stuck) {
-          console.warn('[MIC] Watchdog: mic parece travado — forçando restart');
-          isStartingRef.current   = false;
-          stopInFlight.current    = false;
-          activeSessionRef.current = 0;
-          try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
-          _safeRestart(500);
-        }
-      }
-    }, 5000);
-    return () => clearInterval(wdInterval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
 
   // ── Web Speech API (Chrome) ────────────────────────────────────────────
   const startWebSpeech = useCallback(() => {
@@ -7545,10 +7222,7 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
           try { rec.abort(); } catch { /* noop */ }
           return;
         }
-        if (mountedRef.current) {
-          setIsAlwaysListening(true);
-          _vibrateMicOn();
-        }
+        if (mountedRef.current) setIsAlwaysListening(true);
         _unlockWebAudio();
       };
 
@@ -7747,675 +7421,6 @@ const useAlwaysOnWakeWord = ({ enabled, onWakeWord, onNovidadesWord, onLembreteW
 // ─── INDICADOR FLUTUANTE "SEMPRE OUVINDO" ─────────────────────────────────────
 // Aparece no canto inferior esquerdo quando o usuário está logado.
 // Toque nele para abrir o assistente de voz diretamente.
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: AdvancedAIChatModal — Modo Super Inteligente (Gemini Live)
-// ─────────────────────────────────────────────────────────────────────────────
-const AdvancedAIChatModal = ({ visible, onClose, T, fontScale, stockData, userData }) => {
-  const [msgs, setMsgs] = useState([]);
-  const [inputTxt, setInputTxt] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-
-  const slideA  = useRef(new Animated.Value(WIN.height)).current;
-  const opacA   = useRef(new Animated.Value(0)).current;
-  const headerA = useRef(new Animated.Value(0)).current;
-  const dotA1   = useRef(new Animated.Value(0)).current;
-  const dotA2   = useRef(new Animated.Value(0)).current;
-  const dotA3   = useRef(new Animated.Value(0)).current;
-  const loopRef = useRef(null);
-  const scrollRef = useRef(null);
-  const isMounted = useRef(false);
-
-  // ── Typing indicator animation ────────────────────────────────────────────
-  const startDots = useCallback(() => {
-    loopRef.current?.stop();
-    const seq = (a, delay) => Animated.loop(Animated.sequence([
-      Animated.delay(delay),
-      Animated.timing(a, { toValue: 1, duration: 350, useNativeDriver: true }),
-      Animated.timing(a, { toValue: 0.2, duration: 350, useNativeDriver: true }),
-    ]));
-    loopRef.current = Animated.parallel([seq(dotA1, 0), seq(dotA2, 200), seq(dotA3, 400)]);
-    loopRef.current.start();
-  }, [dotA1, dotA2, dotA3]);
-
-  const stopDots = useCallback(() => {
-    loopRef.current?.stop();
-    [dotA1, dotA2, dotA3].forEach(a => a.setValue(0));
-  }, [dotA1, dotA2, dotA3]);
-
-  // ── Abrir/Fechar animações ────────────────────────────────────────────────
-  useEffect(() => {
-    if (visible) {
-      isMounted.current = true;
-      setMsgs([]);
-      Animated.parallel([
-        Animated.spring(slideA, { toValue: 0, tension: 68, friction: 12, useNativeDriver: true }),
-        Animated.timing(opacA, { toValue: 1, duration: 300, useNativeDriver: true }),
-        Animated.timing(headerA, { toValue: 1, duration: 600, delay: 200, useNativeDriver: false }),
-      ]).start(() => {
-        if (isMounted.current) {
-          const welcome = `Olá${userData?.NOME ? ', ' + userData.NOME.split(' ')[0] : ''}! Sou o GEI.AI no modo Super Inteligente. Posso analisar seu estoque em profundidade, prever vencimentos, sugerir ações e muito mais. O que deseja saber?`;
-          addAiMsg(welcome);
-          speakWithElevenLabs(welcome, () => {});
-        }
-      });
-    } else {
-      isMounted.current = false;
-      stopDots();
-      Animated.parallel([
-        Animated.timing(slideA, { toValue: WIN.height, duration: 300, useNativeDriver: true }),
-        Animated.timing(opacA, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
-
-  const addAiMsg = useCallback((text) => {
-    setMsgs(prev => [...prev, { id: Date.now(), role: 'ai', text, typing: true }]);
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-  }, []);
-
-  const addUserMsg = useCallback((text) => {
-    setMsgs(prev => [...prev, { id: Date.now(), role: 'user', text }]);
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-  }, []);
-
-  // ── Enviar mensagem ao Gemini ─────────────────────────────────────────────
-  const sendMessage = useCallback(async (text) => {
-    if (!text?.trim() || loading) return;
-    const userText = text.trim();
-    setInputTxt('');
-    addUserMsg(userText);
-    setLoading(true);
-    startDots();
-
-    // Contexto de estoque para o Gemini
-    const stockSummary = stockData?.length
-      ? `Estoque atual: ${stockData.length} itens. Produtos: ${stockData.slice(0,8).map(p => `${p.PRODUTO || p.produto || 'item'} (qty:${p.QUANTIDADE || p.quantidade || '?'}, val:${p.VALIDADE || p.validade || '?'}, giro:${p.GIRO || p.giro || '?'})`).join('; ')}${stockData.length > 8 ? ` e mais ${stockData.length - 8} itens` : ''}.`
-      : 'Estoque vazio.';
-
-    const systemCtx = `Você é o GEI.AI no Modo Super Inteligente — assistente especialista em gestão de estoque. Responda em português brasileiro de forma clara, objetiva e inteligente. ${stockSummary}`;
-
-    try {
-      const response = await callGemini(`${systemCtx}\n\nUsuário: ${userText}`, true);
-      stopDots();
-      if (!isMounted.current) return;
-      const aiText = response?.trim() || 'Não consegui gerar uma resposta. Tente novamente.';
-      addAiMsg(aiText);
-      speakWithElevenLabs(aiText, () => {});
-    } catch (e) {
-      stopDots();
-      if (!isMounted.current) return;
-      const errMsg = 'Erro ao conectar com o Gemini. Verifique sua conexão.';
-      addAiMsg(errMsg);
-    } finally {
-      setLoading(false);
-    }
-  }, [loading, stockData, addUserMsg, addAiMsg, startDots, stopDots]);
-
-  const headerBg = headerA.interpolate({ inputRange: [0, 1], outputRange: ['#1a1a2e', '#0D1B8E'] });
-
-  if (!visible) return null;
-
-  return (
-    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
-      <Animated.View style={{ flex: 1, opacity: opacA, backgroundColor: 'rgba(0,0,10,0.88)' }}>
-        <Animated.View style={{ flex: 1, transform: [{ translateY: slideA }] }}>
-          {/* ── Header animado ── */}
-          <Animated.View style={{
-            paddingTop: 52, paddingBottom: 20, paddingHorizontal: 20,
-            backgroundColor: headerBg,
-            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-            borderBottomWidth: 1, borderBottomColor: 'rgba(100,140,255,0.25)',
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-              <View style={{
-                width: 46, height: 46, borderRadius: 15,
-                backgroundColor: 'rgba(100,140,255,0.25)',
-                justifyContent: 'center', alignItems: 'center',
-                borderWidth: 1.5, borderColor: 'rgba(100,140,255,0.5)',
-              }}>
-                <MaterialCommunityIcons name="brain" size={24} color="#A78BFA" />
-              </View>
-              <View>
-                <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: '#FFF', letterSpacing: -0.5 }}>
-                  Modo Super Inteligente
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                  <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#4ADE80' }} />
-                  <Text style={{ fontSize: 11 * fontScale, color: 'rgba(255,255,255,0.6)', fontWeight: '700' }}>
-                    Gemini AI · Online
-                  </Text>
-                </View>
-              </View>
-            </View>
-            <TouchableOpacity
-              onPress={onClose}
-              style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' }}
-            >
-              <Feather name="x" size={18} color="#FFF" />
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* ── Chat area ── */}
-          <ScrollView
-            ref={scrollRef}
-            style={{ flex: 1, backgroundColor: '#080820' }}
-            contentContainerStyle={{ padding: 16, paddingBottom: 8, gap: 12 }}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {msgs.length === 0 && (
-              <View style={{ alignItems: 'center', paddingTop: 40, gap: 16 }}>
-                <View style={{
-                  width: 80, height: 80, borderRadius: 24,
-                  backgroundColor: 'rgba(100,140,255,0.15)',
-                  justifyContent: 'center', alignItems: 'center',
-                  borderWidth: 2, borderColor: 'rgba(100,140,255,0.3)',
-                }}>
-                  <MaterialCommunityIcons name="brain" size={40} color="#A78BFA" />
-                </View>
-                <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 * fontScale, textAlign: 'center', fontWeight: '600' }}>
-                  Iniciando modo inteligente...
-                </Text>
-              </View>
-            )}
-
-            {msgs.map((msg) => (
-              <View key={msg.id} style={{
-                alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '85%',
-              }}>
-                {msg.role === 'ai' && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <View style={{ width: 18, height: 18, borderRadius: 6, backgroundColor: 'rgba(100,140,255,0.4)', justifyContent: 'center', alignItems: 'center' }}>
-                      <MaterialCommunityIcons name="brain" size={10} color="#A78BFA" />
-                    </View>
-                    <Text style={{ fontSize: 10 * fontScale, color: 'rgba(255,255,255,0.4)', fontWeight: '700' }}>GEI.AI</Text>
-                  </View>
-                )}
-                <View style={{
-                  borderRadius: msg.role === 'user' ? 20 : 18,
-                  borderTopRightRadius: msg.role === 'user' ? 4 : 18,
-                  borderTopLeftRadius: msg.role === 'ai' ? 4 : 18,
-                  padding: 14,
-                  backgroundColor: msg.role === 'user'
-                    ? 'rgba(59,91,255,0.85)'
-                    : 'rgba(255,255,255,0.07)',
-                  borderWidth: 1,
-                  borderColor: msg.role === 'user'
-                    ? 'rgba(100,140,255,0.4)'
-                    : 'rgba(255,255,255,0.08)',
-                }}>
-                  <Text style={{
-                    color: '#FFF',
-                    fontSize: 14 * fontScale,
-                    lineHeight: 22,
-                    fontWeight: msg.role === 'user' ? '600' : '400',
-                  }}>
-                    {msg.text}
-                  </Text>
-                </View>
-              </View>
-            ))}
-
-            {/* Indicador de digitação (dots) */}
-            {loading && (
-              <View style={{ alignSelf: 'flex-start', maxWidth: '85%' }}>
-                <View style={{
-                  borderRadius: 18, borderTopLeftRadius: 4, padding: 14,
-                  backgroundColor: 'rgba(255,255,255,0.07)',
-                  borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-                  flexDirection: 'row', alignItems: 'center', gap: 6,
-                }}>
-                  {[dotA1, dotA2, dotA3].map((a, i) => (
-                    <Animated.View key={i} style={{
-                      width: 8, height: 8, borderRadius: 4,
-                      backgroundColor: '#A78BFA',
-                      opacity: a,
-                    }} />
-                  ))}
-                </View>
-              </View>
-            )}
-          </ScrollView>
-
-          {/* ── Input ── */}
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{
-              backgroundColor: '#0D0D2B',
-              borderTopWidth: 1, borderTopColor: 'rgba(100,140,255,0.15)',
-              paddingHorizontal: 16, paddingVertical: 12,
-              paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-              flexDirection: 'row', alignItems: 'flex-end', gap: 10,
-            }}
-          >
-            <View style={{
-              flex: 1, flexDirection: 'row', alignItems: 'center',
-              backgroundColor: 'rgba(255,255,255,0.06)',
-              borderRadius: 22, borderWidth: 1.5,
-              borderColor: 'rgba(100,140,255,0.3)',
-              paddingHorizontal: 16, paddingVertical: 10,
-              gap: 10,
-            }}>
-              <TextInput
-                style={{ flex: 1, color: '#FFF', fontSize: 15 * fontScale, maxHeight: 100 }}
-                placeholder="Pergunte sobre o estoque..."
-                placeholderTextColor="rgba(255,255,255,0.3)"
-                value={inputTxt}
-                onChangeText={setInputTxt}
-                multiline
-                onSubmitEditing={() => sendMessage(inputTxt)}
-                returnKeyType="send"
-                blurOnSubmit
-              />
-            </View>
-            <TouchableOpacity
-              onPress={() => sendMessage(inputTxt)}
-              disabled={!inputTxt.trim() || loading}
-              style={{
-                width: 46, height: 46, borderRadius: 15,
-                backgroundColor: inputTxt.trim() && !loading ? '#5C6CFF' : 'rgba(255,255,255,0.08)',
-                justifyContent: 'center', alignItems: 'center',
-                borderWidth: 1, borderColor: 'rgba(100,140,255,0.3)',
-              }}
-            >
-              <Feather name="send" size={18} color={inputTxt.trim() && !loading ? '#FFF' : 'rgba(255,255,255,0.3)'} />
-            </TouchableOpacity>
-          </KeyboardAvoidingView>
-        </Animated.View>
-      </Animated.View>
-    </Modal>
-  );
-};
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COMPONENTE: DeleteAllProductsModal
-// Apaga TODOS os produtos da prateleira ativa.
-// Proteção: usuário deve digitar "APAGAR TUDO"; 4 erros → bloqueio de 3 minutos.
-// ─────────────────────────────────────────────────────────────────────────────
-const DELETE_ALL_MAX_ATTEMPTS = 4;
-const DELETE_ALL_LOCKOUT_SECS = 180; // 3 minutos
-const DELETE_ALL_STORE_KEY    = 'GEI_deleteAllAttempts';
-
-const DeleteAllProductsModal = ({
-  visible, onClose, onDeleted,
-  activeShelf, T, fontScale, stockData, userData,
-}) => {
-  const [confirmText, setConfirmText]   = useState('');
-  const [deleting,    setDeleting]      = useState(false);
-  const [attempts,    setAttempts]      = useState(0);
-  const [lockedOut,   setLockedOut]     = useState(false);
-  const [remaining,   setRemaining]     = useState(0);
-  const [errorMsg,    setErrorMsg]      = useState('');
-  const [done,        setDone]          = useState(false);
-  const [deletedCount, setDeletedCount] = useState(0);
-
-  const slideA  = useRef(new Animated.Value(WIN.height)).current;
-  const shakeA  = useRef(new Animated.Value(0)).current;
-  const scaleA  = useRef(new Animated.Value(0.9)).current;
-  const lockTimerRef = useRef(null);
-  const isMounted    = useRef(false);
-
-  // ── Persistência de tentativas (sobrevive a fechamento do modal) ──────────
-  const loadAttempts = useCallback(async () => {
-    try {
-      const raw = await SafeStore.getItemAsync(DELETE_ALL_STORE_KEY);
-      if (!raw) return;
-      const { count, lockedUntil } = JSON.parse(raw);
-      const now = Date.now();
-      if (lockedUntil && lockedUntil > now) {
-        setAttempts(count);
-        setLockedOut(true);
-        setRemaining(Math.ceil((lockedUntil - now) / 1000));
-        startLockCountdown(lockedUntil);
-      } else if (lockedUntil && lockedUntil <= now) {
-        // Lockout expirou
-        await SafeStore.setItemAsync(DELETE_ALL_STORE_KEY, JSON.stringify({ count: 0, lockedUntil: null }));
-      } else {
-        setAttempts(count || 0);
-      }
-    } catch { /* noop */ }
-  }, []);
-
-  const saveAttempts = useCallback(async (count, lockedUntil = null) => {
-    try {
-      await SafeStore.setItemAsync(DELETE_ALL_STORE_KEY, JSON.stringify({ count, lockedUntil }));
-    } catch { /* noop */ }
-  }, []);
-
-  const startLockCountdown = useCallback((lockedUntil) => {
-    if (lockTimerRef.current) clearInterval(lockTimerRef.current);
-    lockTimerRef.current = setInterval(() => {
-      if (!isMounted.current) { clearInterval(lockTimerRef.current); return; }
-      const secs = Math.ceil((lockedUntil - Date.now()) / 1000);
-      if (secs <= 0) {
-        clearInterval(lockTimerRef.current);
-        setLockedOut(false);
-        setRemaining(0);
-        setAttempts(0);
-        saveAttempts(0, null);
-      } else {
-        setRemaining(secs);
-      }
-    }, 500);
-  }, [saveAttempts]);
-
-  // ── Animação de entrada / saída ───────────────────────────────────────────
-  useEffect(() => {
-    if (visible) {
-      isMounted.current = true;
-      setConfirmText('');
-      setErrorMsg('');
-      setDone(false);
-      setDeletedCount(0);
-      loadAttempts();
-      Animated.parallel([
-        Animated.spring(slideA, { toValue: 0, tension: 65, friction: 12, useNativeDriver: true }),
-        Animated.spring(scaleA, { toValue: 1,   tension: 65, friction: 12, useNativeDriver: true }),
-      ]).start();
-    } else {
-      isMounted.current = false;
-      if (lockTimerRef.current) clearInterval(lockTimerRef.current);
-      Animated.timing(slideA, { toValue: WIN.height, duration: 280, useNativeDriver: true }).start();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
-
-  // ── Shake de erro ─────────────────────────────────────────────────────────
-  const doShake = useCallback(() => {
-    shakeA.setValue(0);
-    Animated.sequence([
-      Animated.timing(shakeA, { toValue:  10, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeA, { toValue: -10, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeA, { toValue:   8, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeA, { toValue:  -8, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeA, { toValue:   0, duration: 40, useNativeDriver: true }),
-    ]).start();
-    try { Vibration.vibrate([0, 60, 40, 80]); } catch { /* noop */ }
-  }, [shakeA]);
-
-  // ── Confirmar texto errado ────────────────────────────────────────────────
-  const handleWrongAttempt = useCallback(async () => {
-    const newCount = attempts + 1;
-    setAttempts(newCount);
-    doShake();
-    if (newCount >= DELETE_ALL_MAX_ATTEMPTS) {
-      const lockedUntil = Date.now() + DELETE_ALL_LOCKOUT_SECS * 1000;
-      setLockedOut(true);
-      setRemaining(DELETE_ALL_LOCKOUT_SECS);
-      setErrorMsg(`Bloqueado por ${DELETE_ALL_LOCKOUT_SECS / 60} minutos!`);
-      await saveAttempts(newCount, lockedUntil);
-      startLockCountdown(lockedUntil);
-    } else {
-      const left = DELETE_ALL_MAX_ATTEMPTS - newCount;
-      setErrorMsg(`Texto incorreto! ${left} tentativa${left !== 1 ? 's' : ''} restante${left !== 1 ? 's' : ''}.`);
-      await saveAttempts(newCount, null);
-    }
-    setConfirmText('');
-  }, [attempts, doShake, saveAttempts, startLockCountdown]);
-
-  // ── Executar deleção ──────────────────────────────────────────────────────
-  const handleDelete = useCallback(async () => {
-    if (confirmText.trim().toUpperCase() !== 'APAGAR TUDO') {
-      handleWrongAttempt();
-      return;
-    }
-    const tableId = SHELVES[activeShelf];
-    if (!tableId) { setErrorMsg('Prateleira inválida.'); return; }
-    setDeleting(true);
-    setErrorMsg('');
-    try {
-      // Busca todos os produtos (paginado)
-      let allRows = [];
-      let page = 1;
-      while (true) {
-        const res = await secureAxiosInstance.get(
-          `https://api.baserow.io/api/database/rows/table/${tableId}/?user_field_names=true&size=200&page=${page}`
-        );
-        const rows = res.data.results || [];
-        allRows = allRows.concat(rows);
-        if (!res.data.next) break;
-        page++;
-      }
-      // Deleta em lotes paralelos de 10
-      const BATCH = 10;
-      for (let i = 0; i < allRows.length; i += BATCH) {
-        await Promise.all(
-          allRows.slice(i, i + BATCH).map(row =>
-            secureAxiosInstance.delete(
-              `https://api.baserow.io/api/database/rows/table/${tableId}/${row.id}/`
-            ).catch(() => {})
-          )
-        );
-      }
-      await addAuditLog(
-        'DELETE_ALL_PRODUCTS',
-        `Todos os ${allRows.length} produtos da prateleira ${activeShelf} apagados pelo usuário ${userData?.NOME || 'desconhecido'}`,
-        userData?.id
-      );
-      // Reseta contador de tentativas após sucesso
-      await saveAttempts(0, null);
-      setDeletedCount(allRows.length);
-      setDone(true);
-      speakWithElevenLabs(`${allRows.length} produto${allRows.length !== 1 ? 's' : ''} apagado${allRows.length !== 1 ? 's' : ''} com sucesso.`, () => {});
-      if (onDeleted) onDeleted();
-    } catch (e) {
-      setErrorMsg('Erro ao apagar produtos. Verifique a conexão.');
-    } finally {
-      setDeleting(false);
-    }
-  }, [confirmText, activeShelf, handleWrongAttempt, saveAttempts, onDeleted, userData]);
-
-  if (!visible) return null;
-
-  const shelfName = shlabel(activeShelf);
-  const totalItems = stockData?.length || 0;
-  const progressPct = DELETE_ALL_LOCKOUT_SECS > 0
-    ? `${((remaining / DELETE_ALL_LOCKOUT_SECS) * 100).toFixed(0)}%`
-    : '0%';
-  const minutesLeft = Math.floor(remaining / 60);
-  const secsLeft    = remaining % 60;
-
-  return (
-    <Modal visible={visible} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'flex-end' }}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-
-        <Animated.View style={{
-          transform: [{ translateY: slideA }, { scale: scaleA }],
-          backgroundColor: T.bgCard,
-          borderTopLeftRadius: 32, borderTopRightRadius: 32,
-          borderWidth: 1.5, borderBottomWidth: 0,
-          borderColor: T.red + '60',
-          paddingBottom: 34,
-          overflow: 'hidden',
-        }}>
-          {/* ── Barra de perigo no topo ── */}
-          <View style={{ height: 5, backgroundColor: T.red, width: '100%' }} />
-
-          {/* ── Header ── */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingBottom: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{
-                width: 46, height: 46, borderRadius: 15,
-                backgroundColor: T.red + '20',
-                justifyContent: 'center', alignItems: 'center',
-                borderWidth: 1.5, borderColor: T.red + '50',
-              }}>
-                <Feather name="trash-2" size={22} color={T.red} />
-              </View>
-              <View>
-                <Text style={{ fontSize: 18 * fontScale, fontWeight: '900', color: T.red }}>
-                  Apagar Todos os Produtos
-                </Text>
-                <Text style={{ fontSize: 12 * fontScale, color: T.textSub, fontWeight: '600', marginTop: 2 }}>
-                  {shelfName} · {totalItems} produto{totalItems !== 1 ? 's' : ''}
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              onPress={onClose}
-              style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: T.bgInput, justifyContent: 'center', alignItems: 'center' }}
-            >
-              <Feather name="x" size={18} color={T.textSub} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ paddingHorizontal: 20, paddingBottom: 8 }}>
-
-            {/* ── SUCESSO ── */}
-            {done ? (
-              <View style={{ alignItems: 'center', paddingVertical: 28, gap: 16 }}>
-                <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: T.green + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.green + '50' }}>
-                  <Feather name="check-circle" size={36} color={T.green} />
-                </View>
-                <Text style={{ fontSize: 20 * fontScale, fontWeight: '900', color: T.green, textAlign: 'center' }}>
-                  {deletedCount} produto{deletedCount !== 1 ? 's' : ''} apagado{deletedCount !== 1 ? 's' : ''}!
-                </Text>
-                <Text style={{ fontSize: 13 * fontScale, color: T.textSub, textAlign: 'center' }}>
-                  Todos os produtos da prateleira {shelfName} foram removidos permanentemente.
-                </Text>
-                <TouchableOpacity
-                  onPress={onClose}
-                  style={{ marginTop: 8, backgroundColor: T.green, borderRadius: 16, paddingHorizontal: 32, paddingVertical: 14 }}
-                >
-                  <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 * fontScale }}>Fechar</Text>
-                </TouchableOpacity>
-              </View>
-            ) : lockedOut ? (
-              /* ── BLOQUEADO ── */
-              <View style={{ alignItems: 'center', paddingVertical: 20, gap: 14 }}>
-                <View style={{ width: 68, height: 68, borderRadius: 21, backgroundColor: T.red + '18', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.red + '50' }}>
-                  <Feather name="lock" size={32} color={T.red} />
-                </View>
-                <Text style={{ fontSize: 17 * fontScale, fontWeight: '900', color: T.red, textAlign: 'center' }}>
-                  Acesso Bloqueado
-                </Text>
-                <Text style={{ fontSize: 13 * fontScale, color: T.textSub, textAlign: 'center', lineHeight: 20 }}>
-                  {DELETE_ALL_MAX_ATTEMPTS} tentativas incorretas. Aguarde para tentar novamente.
-                </Text>
-
-                {/* Contador circular */}
-                <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: T.red + '18', borderWidth: 3, borderColor: T.red, justifyContent: 'center', alignItems: 'center', marginVertical: 4 }}>
-                  <Text style={{ fontSize: 26, fontWeight: '900', color: T.red, letterSpacing: -1 }}>
-                    {minutesLeft > 0 ? `${minutesLeft}:${String(secsLeft).padStart(2,'0')}` : secsLeft}
-                  </Text>
-                  <Text style={{ fontSize: 9, fontWeight: '800', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                    {minutesLeft > 0 ? 'restante' : 'seg'}
-                  </Text>
-                </View>
-
-                {/* Barra de progresso do lockout */}
-                <View style={{ width: '100%', height: 7, backgroundColor: T.border, borderRadius: 4, overflow: 'hidden' }}>
-                  <View style={{ height: '100%', backgroundColor: T.red, borderRadius: 4, width: progressPct }} />
-                </View>
-                <Text style={{ fontSize: 11 * fontScale, color: T.textMuted, fontWeight: '700', textAlign: 'center' }}>
-                  Bloqueio expira em {minutesLeft > 0 ? `${minutesLeft}min ${secsLeft}s` : `${secsLeft}s`}
-                </Text>
-              </View>
-            ) : (
-              /* ── FORMULÁRIO DE CONFIRMAÇÃO ── */
-              <Animated.View style={{ transform: [{ translateX: shakeA }] }}>
-
-                {/* Aviso vermelho */}
-                <View style={{ backgroundColor: T.red + '15', borderRadius: 16, padding: 16, borderWidth: 1.5, borderColor: T.red + '40', marginBottom: 20, gap: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Feather name="alert-triangle" size={18} color={T.red} />
-                    <Text style={{ fontSize: 14 * fontScale, fontWeight: '900', color: T.red }}>
-                      Ação irreversível!
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 13 * fontScale, color: T.red + 'CC', lineHeight: 19 }}>
-                    Isso irá remover permanentemente {totalItems > 0 ? `todos os ${totalItems} produtos` : 'todos os produtos'} da prateleira {shelfName}. Esta ação não pode ser desfeita.
-                  </Text>
-                </View>
-
-                {/* Contador de tentativas */}
-                {attempts > 0 && (
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 16 }}>
-                    {Array.from({ length: DELETE_ALL_MAX_ATTEMPTS }).map((_, i) => (
-                      <View key={i} style={{
-                        width: 12, height: 12, borderRadius: 6,
-                        backgroundColor: i < attempts ? T.red : T.border,
-                        borderWidth: 1, borderColor: i < attempts ? T.red : T.border,
-                      }} />
-                    ))}
-                  </View>
-                )}
-
-                {/* Campo de confirmação */}
-                <Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 2 }}>
-                  Digite <Text style={{ color: T.red, fontFamily: 'monospace' }}>APAGAR TUDO</Text> para confirmar:
-                </Text>
-                <View style={{
-                  flexDirection: 'row', alignItems: 'center',
-                  backgroundColor: T.bgInput, borderRadius: 16,
-                  borderWidth: 2,
-                  borderColor: confirmText.trim().toUpperCase() === 'APAGAR TUDO' ? T.red : T.border,
-                  paddingHorizontal: 16, marginBottom: 10,
-                }}>
-                  <TextInput
-                    style={{ flex: 1, paddingVertical: 14, fontSize: 16 * fontScale, color: T.text, fontWeight: '700', letterSpacing: 1 }}
-                    placeholder="Digite aqui..."
-                    placeholderTextColor={T.textMuted}
-                    value={confirmText}
-                    onChangeText={setConfirmText}
-                    autoCapitalize="characters"
-                    returnKeyType="done"
-                    onSubmitEditing={handleDelete}
-                  />
-                  {confirmText.trim().toUpperCase() === 'APAGAR TUDO' && (
-                    <Feather name="check" size={18} color={T.red} />
-                  )}
-                </View>
-
-                {/* Mensagem de erro */}
-                {errorMsg ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, backgroundColor: T.red + '12', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: T.red + '30' }}>
-                    <Feather name="alert-circle" size={14} color={T.red} />
-                    <Text style={{ fontSize: 12 * fontScale, color: T.red, fontWeight: '700', flex: 1 }}>{errorMsg}</Text>
-                  </View>
-                ) : null}
-
-                {/* Botões */}
-                <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
-                  <TouchableOpacity
-                    onPress={onClose}
-                    style={{ flex: 1, padding: 15, borderRadius: 16, backgroundColor: T.bgInput, alignItems: 'center', borderWidth: 1, borderColor: T.border }}
-                  >
-                    <Text style={{ color: T.textSub, fontWeight: '800', fontSize: 15 * fontScale }}>Cancelar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={handleDelete}
-                    disabled={deleting || !confirmText.trim()}
-                    style={{
-                      flex: 1.4, padding: 15, borderRadius: 16, alignItems: 'center',
-                      backgroundColor: confirmText.trim() && !deleting ? T.red : T.border,
-                      flexDirection: 'row', justifyContent: 'center', gap: 8,
-                    }}
-                  >
-                    {deleting
-                      ? <ActivityIndicator size="small" color="#FFF" />
-                      : <Feather name="trash-2" size={16} color="#FFF" />
-                    }
-                    <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 15 * fontScale }}>
-                      {deleting ? 'Apagando...' : 'Apagar Tudo'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </Animated.View>
-            )}
-          </View>
-        </Animated.View>
-      </View>
-    </Modal>
-  );
-};
-
 const AlwaysOnIndicator = ({ isListening, T, TAB_SAFE, onPress, onBellPress, onHide, visible }) => {
   const pulseA = useRef(new Animated.Value(1)).current;
   const dotA   = useRef(new Animated.Value(0.4)).current;
@@ -9360,7 +8365,6 @@ export default function App() {
   const gifTimeoutRef = useRef(null);
   const [fifoMode, setFifoMode] = useState(true);
   const [showPainelInteligente, setShowPainelInteligente] = useState(false);
-  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [activeShelf, setActiveShelf] = useState('');
   const [stockData, setStockData] = useState([]);
   const [shelfModal, setShelfModal] = useState(false);
@@ -9393,7 +8397,6 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState({ logs: [], loginHistory: [] });
   const [showExpiryModal, setShowExpiryModal] = useState(false);
   const [voiceAssistantVisible, setVoiceAssistantVisible] = useState(false);
-  const [showAdvancedAI, setShowAdvancedAI] = useState(false);
   const [novidadesVisible, setNovidadesVisible]           = useState(false);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [voiceIndicatorVisible, setVoiceIndicatorVisible] = useState(true);
@@ -9470,44 +8473,13 @@ export default function App() {
   const openCalculadoraAssistant = useCallback(() => {
     setShowPinhasModal(true);
   }, []);
-  // Abre o Modo Super Inteligente por voz
-  const openSuperModeAssistant = useCallback(() => {
-    setShowAdvancedAI(true);
-  }, []);
-  // Abre o Painel Inteligente por voz
-  const openPainelInteligenteAssistant = useCallback(() => {
-    setShowPainelInteligente(true);
-  }, []);
   const { isAlwaysListening } = useAlwaysOnWakeWord({
-    enabled: isLogged && !voiceAssistantVisible && !novidadesVisible && !showPinhasModal && !showAdvancedAI && !showPainelInteligente && voiceRecognitionEnabled,
+    enabled: isLogged && !voiceAssistantVisible && !novidadesVisible && !showPinhasModal && voiceRecognitionEnabled,
     onWakeWord: openVoiceAssistant,
     onNovidadesWord: openNovidadesAssistant,
     onLembreteWord: openLembreteAssistant,
     onCalculadoraWord: openCalculadoraAssistant,
-    onSuperModeWord: openSuperModeAssistant,
-    onPainelWord: openPainelInteligenteAssistant,
   });
-
-  // Garante que a sessão de áudio do mic é restaurada ao mudar de aba
-  // (o teclado do chat pode interferir com a sessão de áudio)
-  useEffect(() => {
-    if (!isLogged || !voiceRecognitionEnabled) return;
-    // Ao entrar em qualquer aba, reativa o modo de gravação para o mic funcionar
-    const restore = async () => {
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS:      true,
-          playsInSilentModeIOS:    true,
-          staysActiveInBackground: true,
-          interruptionModeIOS:     2,
-          interruptionModeAndroid: 2,
-          shouldDuckAndroid:       true,
-          playThroughEarpieceAndroid: false,
-        });
-      } catch { /* noop */ }
-    };
-    restore();
-  }, [currentTab, isLogged, voiceRecognitionEnabled]);
 
   const handleStartScanning = async (mode = 'barcode') => {
     const { status } = await Camera.getCameraPermissionsAsync();
@@ -9734,7 +8706,23 @@ export default function App() {
     }
   };
   const onSourceSelected = ({ nome, giro }) => { setProdName(nome); setGiro(giro); setSourceModalVisible(false); setCurrentSources([]); navTo('cadastro'); };
-  const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SafeStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass); if (!user) { const newAttempts = failedAttempts + 1; setFailedAttempts(newAttempts); const remaining = MAX_LOGIN_ATTEMPTS - newAttempts; await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} para ${sanitizedEmail}`, null); if (newAttempts >= MAX_LOGIN_ATTEMPTS) { startLockout(); showErr(`Acesso bloqueado por ${LOCKOUT_SECS} segundos após ${MAX_LOGIN_ATTEMPTS} tentativas incorretas.`); } else { showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`); } return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
+  const doLogin = async (e, p, useBiometrics = false) => { if (lockedOut) { showErr(`Muitas tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`); return; } if (useBiometrics && biometricEnabled) { const bioAuth = await authenticateWithBiometrics(); if (!bioAuth.success) { showErr('Falha na autenticação biométrica.'); return; } const bioToken = await SafeStore.getItemAsync('bio_token'); if (!bioToken) { showErr('Nenhum token biométrico salvo. Faça login normal primeiro.'); return; } try { const resB = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const bioUser = resB.data.results.find(u => u.TOKEN_BIOMETRICO === bioToken && u.ACESSO); if (!bioUser) { showErr('Token biométrico inválido ou acesso revogado. Faça login normal.'); return; } await addAuditLog('BIOMETRIC_LOGIN_SUCCESS', `Login biométrico bem-sucedido`, bioUser.id); await updateLastLogin(bioUser.id); onOk(bioUser); return; } catch { showErr('Erro ao validar biometria. Verifique a conexão.'); return; } } if (!e || !p) { showErr('Preencha e-mail e senha.'); return; } if (!isValidEmail(e)) { showErr('E-mail inválido. Use um formato válido como usuario@exemplo.com'); return; } const sanitizedEmail = sanitizeInput(e); const sanitizedPass = sanitizeInput(p); if (sanitizedEmail !== e || sanitizedPass !== p) { showErr('Caracteres inválidos detectados.'); await addAuditLog('LOGIN_INVALID_CHARS', `Tentativa com caracteres inválidos`, null); return; } setLoading(true); setErro(''); try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === sanitizedEmail && u.SENHA === sanitizedPass);       if (!user) {
+        const newAttempts = failedAttempts + 1;
+        const newTotalFailures = totalFailures + 1;
+        setFailedAttempts(newAttempts);
+        setTotalFailures(newTotalFailures);
+        await addAuditLog('LOGIN_FAILED', `Tentativa ${newAttempts}/${MAX_LOGIN_ATTEMPTS} (Total: ${newTotalFailures}) para ${sanitizedEmail}`, null);
+        if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+          const multiplier = Math.pow(3, Math.floor((newTotalFailures - 1) / 3));
+          const waitTime = INITIAL_LOCKOUT_SECS * multiplier;
+          startLockout(waitTime);
+          showErr(`Acesso bloqueado por ${waitTime} segundos após ${newAttempts} tentativas incorretas.`);
+        } else {
+          const remaining = MAX_LOGIN_ATTEMPTS - newAttempts;
+          showErr(`E-mail ou senha incorretos. ${remaining} tentativa${remaining !== 1 ? 's' : ''} restante${remaining !== 1 ? 's' : ''}.`);
+        }
+        return;
+      } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('LOGIN_ACCESS_DENIED', `Acesso negado para ${sanitizedEmail}`, user.id); return; } setFailedAttempts(0); if (biometricEnabled) { try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${user.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${user.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } await addAuditLog('LOGIN_SUCCESS', `Login bem-sucedido`, user.id); await updateLastLogin(user.id); onOk(user); } catch (ex) { showErr('Falha na conexão com o banco de dados.'); await addAuditLog('LOGIN_ERROR', `Erro de conexão: ${ex.message}`, null); } finally { setLoading(false); } };
   const onQR = async ({ data }) => { if (!data) return; try { const payload = JSON.parse(data); if (!payload.usuario || !payload.loginRapido || !payload.timestamp || !payload.expiraEm) { showErr('QR Code inválido ou corrompido.'); await addAuditLog('QR_INVALID', 'QR Code inválido', null); return; } if (Date.now() > payload.expiraEm) { showErr('QR Code expirado. Gere um novo.'); await addAuditLog('QR_EXPIRED', 'QR Code expirado', null); return; } const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/?user_field_names=true`); const user = res.data.results.find(u => u.USUARIO === payload.usuario); if (!user) { showErr('Usuário não encontrado.'); await addAuditLog('QR_USER_NOT_FOUND', `Usuário ${payload.usuario} não encontrado`, null); return; } if (user.LOGINRAPIDO !== payload.loginRapido) { showErr('QR Code inválido - código de acesso não corresponde.'); await addAuditLog('QR_MISMATCH', `LOGINRAPIDO não confere para ${payload.usuario}`, user.id); return; } if (!user.ACESSO) { showErr('Seu acesso não foi liberado pelo coordenador.'); await addAuditLog('QR_ACCESS_DENIED', `Acesso negado para ${payload.usuario} via QR`, user.id); return; } user.PERFIL = qrRole; await addAuditLog('QR_LOGIN_SUCCESS', `Login via QR bem-sucedido para ${payload.usuario}`, user.id); await updateLastLogin(user.id); onOk(user); } catch (e) { showErr('QR Code inválido.'); await addAuditLog('QR_ERROR', `Erro ao processar QR: ${e.message}`, null); } };
   const onOk = useCallback(user => { setUserData(user); setIsLogged(true); setAuthMode('login'); setQrStep('role'); const area = extractShelf(user.AREA); const ehPerfil = AREA_PERFIS.includes(area?.toLowerCase?.()); const prat = !ehPerfil && SHELVES[area] ? area : ''; let def = ''; if (canSwitch(user.PERFIL)) { def = prat || ''; setCadastroShelf(prat || SHELF_KEYS[0]); } else { def = prat || SHELF_KEYS[0]; setCadastroShelf(prat || SHELF_KEYS[0]); } setActiveShelf(def); if (def) loadStock(def); setTimeout(() => triggerAutoClean(), 1500);
     // OneSignal: registra usuário e envia tags para segmentação
@@ -9782,7 +8770,7 @@ Pergunta do usuário: "${txt}"`;
   const getTargetShelf = () => (isCoord(perf) || isDeposito(perf)) && cadastroShelf ? cadastroShelf : activeShelf;
   const calculatePrevisao = (qtd, giro, dataEnvio) => { const rateMap = { 'Grande giro': 5.2, 'Médio giro': 2.5, 'Pouco giro': 0.8 }; const dailyRate = rateMap[giro] || 2.5; const sendDate = parseDate(dataEnvio) || today(); const remainingDays = dailyRate > 0 ? Math.ceil(qtd / dailyRate) : 999; const depletionDate = addDays(sendDate, remainingDays); return fmtFull(depletionDate); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const doSaveProductConfirmed = useCallback(async (overrides = {}) => { const nome = overrides.nome || prodName; const qtdUse = overrides.qty || qtd; const valUse = overrides.date || validade; const giroUse = overrides.giro || giro; const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf]; if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; } setBusy(true); setBusyMsg('Salvando produto...'); try { const dataEnvio = new Date().toLocaleDateString('pt-BR'); const previsao = calculatePrevisao(Number(qtdUse), giroUse, dataEnvio); await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, { produto: nome.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: valUse, quantidade: String(qtdUse), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: dataEnvio, ALERTAMENSAGEM: '', MARGEM: giroUse, PREVISAO: previsao }); await addAuditLog('PRODUCT_ADDED', `Produto "${nome}" adicionado à prateleira ${targetShelf}`, userData?.id); setBusy(false); setShowSuccess(true); setScannedEAN(''); if (targetShelf === activeShelf) loadStock(activeShelf); } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); }
+  const doSaveProductConfirmed = useCallback(async (overrides = {}) => { const nome = overrides.nome || prodName; const qtdUse = overrides.qty || qtd || '0'; const valUse = overrides.date || validade; const giroUse = overrides.giro || giro || 'Médio giro'; const targetShelf = getTargetShelf(); const tid = SHELVES[targetShelf]; if (!tid) { showErr('Nenhuma prateleira selecionada.'); return; } setBusy(true); setBusyMsg('Salvando produto...'); try { const dataEnvio = new Date().toLocaleDateString('pt-BR'); const previsao = calculatePrevisao(Number(qtdUse), giroUse, dataEnvio); await secureAxiosInstance.post(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true`, { produto: nome.trim(), codig: scannedEAN || 'Sem EAN', VENCIMENTO: valUse, quantidade: String(qtdUse), ENVIADOPORQUEM: userData?.NOME || 'Sistema', PERFILFOTOURL: userData?.PERFILFOTOURL || '', BOLETIM: false, DATAENVIO: dataEnvio, ALERTAMENSAGEM: '', MARGEM: giroUse, PREVISAO: previsao }); await addAuditLog('PRODUCT_ADDED', `Produto "${nome}" adicionado à prateleira ${targetShelf}`, userData?.id); setBusy(false); setShowSuccess(true); setScannedEAN(''); if (targetShelf === activeShelf) loadStock(activeShelf); } catch (ex) { showErr('Não foi possível salvar.'); setBusy(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeShelf, loadStock, userData, showErr, prodName, qtd, validade, giro, scannedEAN]);
   const doUpdateExisting = useCallback(async (rowId, overrides) => {
@@ -9805,19 +8793,21 @@ Pergunta do usuário: "${txt}"`;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeShelf, loadStock, userData, showErr]);
 
-  const saveProduct = async () => { if (!prodName) { showErr('O nome do produto é obrigatório.'); return; } if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data de validade inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } if (!qtd) { showErr('A quantidade é obrigatória.'); return; } if (!giro) { showErr('Selecione o giro estimado.'); return; } const eanAtual = scannedEAN && scannedEAN !== 'Sem EAN' ? scannedEAN : null; if (eanAtual) { const duplicado = stockData.find(p => String(p.codig || '').trim() === eanAtual && String(p.VENCIMENTO || '').trim() === validade); if (duplicado) { AppAlert.alert('⚠️ PRODUTO JÁ CADASTRADO', `ESTE PRODUTO JÁ ESTÁ CADASTRADO COM ESTA DATA.\n\nProduto: ${duplicado.produto || prodName}\nCódigo: ${eanAtual}\nValidade: ${validade}\n\nDeseja cadastrar mesmo assim?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Cadastrar mesmo assim', style: 'destructive', onPress: doSaveProductConfirmed }]); return; } } await doSaveProductConfirmed(); };
-  const nextStep = () => { if (wStep === 1 && !prodName.trim()) { showErr('O nome do produto é obrigatório.'); return; } if (wStep === 2) { if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } } if (wStep === 3 && (!qtd || Number(qtd) <= 0)) { showErr('A quantidade deve ser um número positivo.'); return; } if (wStep === 4 && !giro) { showErr('Selecione o giro estimado.'); return; } if (wStep < 4) setWStep(p => p + 1); else saveProduct(); };
+  const saveProduct = async () => { if (!prodName) { showErr('O nome do produto é obrigatório.'); return; } if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data de validade inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } const eanAtual = scannedEAN && scannedEAN !== 'Sem EAN' ? scannedEAN : null; if (eanAtual) { const duplicado = stockData.find(p => String(p.codig || '').trim() === eanAtual && String(p.VENCIMENTO || '').trim() === validade); if (duplicado) { AppAlert.alert('⚠️ PRODUTO JÁ CADASTRADO', `ESTE PRODUTO JÁ ESTÁ CADASTRADO COM ESTA DATA.\n\nProduto: ${duplicado.produto || prodName}\nCódigo: ${eanAtual}\nValidade: ${validade}\n\nDeseja cadastrar mesmo assim?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Cadastrar mesmo assim', style: 'destructive', onPress: doSaveProductConfirmed }]); return; } } await doSaveProductConfirmed(); };
+  const nextStep = () => { if (wStep === 1 && !prodName.trim()) { showErr('O nome do produto é obrigatório.'); return; } if (wStep === 2) { if (!validade) { showErr('A data de validade é obrigatória.'); return; } if (!isValidDate(validade)) { showErr('Data inválida! Use o formato DD/MM/AAAA e uma data real.'); return; } } if (wStep < 2) setWStep(p => p + 1); else saveProduct(); };
   const onSuccessDone = () => { setShowSuccess(false); const target = getTargetShelf(); if (target === activeShelf) loadStock(activeShelf); navTo('home'); resetWiz(); setProdName(''); setGiro(''); setCadastroShelf(''); setScannedEAN(''); };
   const navTo = useCallback(tab => { Animated.timing(fadeAnim, { toValue: 0, duration: 110, useNativeDriver: false }).start(() => { setCurrentTab(tab); setScanning(false); Animated.timing(fadeAnim, { toValue: 1, duration: 170, useNativeDriver: false }).start(); }); }, [fadeAnim]);
-  const resetWiz = useCallback(() => { setWStep(1); setValidade(''); setQtd(''); }, []);
+  const resetWiz = useCallback(() => { setWStep(1); setValidade(''); }, []);
   const viewAuditLogs = async () => { const logs = await getAuditLogs(); const now = new Date(); const last3Days = logs.filter(log => { const logDate = new Date(log.timestamp); const diffMs = now - logDate; return diffMs >= 0 && Math.floor(diffMs / 86400000) <= 3; }); let loginHistory = []; if (userData?.id) { try { const resUser = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`); const utimologin = resUser.data?.UTIMOLOGIN || ''; if (utimologin.startsWith('[')) { loginHistory = JSON.parse(utimologin); } else if (utimologin) { loginHistory = [{ data: utimologin, hora: '', iso: '' }]; } } catch (_) { loginHistory = []; } } setAuditLogs({ logs: last3Days, loginHistory }); setShowAuditLogs(true); };
   const enableBiometrics = async (value) => { if (value) { const { isAvailable } = await checkBiometricSupport(); if (!isAvailable) { AppAlert.alert('Biometria não disponível', 'Seu dispositivo não suporta ou não tem biometria configurada.'); return; } const auth = await authenticateWithBiometrics('Confirme para ativar login biométrico'); if (!auth.success) { AppAlert.alert('Falha na autenticação', 'Não foi possível ativar a biometria.'); return; } try { const bioToken = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${userData?.USUARIO}-${Date.now()}-${Math.random()}`); await SafeStore.setItemAsync('bio_token', bioToken); await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData?.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: bioToken }); } catch (_) { /* noop */ } } else { try { await SafeStore.deleteItemAsync('bio_token'); if (userData?.id) { await secureAxiosInstance.patch(`https://api.baserow.io/api/database/rows/table/221009/${userData.id}/?user_field_names=true`, { TOKEN_BIOMETRICO: '' }); } } catch (_) { /* noop */ } } setBiometricEnabled(value); await SafeStore.setItemAsync('biometric_enabled', value ? 'true' : 'false'); await addAuditLog(`BIOMETRIC_TOGGLED`, `Biometria ${value ? "ativada" : "desativada"}`, userData?.id); };
 
   const [failedAttempts, setFailedAttempts] = useState(0);
+  const [totalFailures, setTotalFailures] = useState(0);
   const [lockedOut, setLockedOut] = useState(false);
   const [lockoutRemaining, setLockoutRemaining] = useState(0);
+  const [currentMaxLockout, setCurrentMaxLockout] = useState(INITIAL_LOCKOUT_SECS);
   const lockoutTimerRef = useRef(null);
-  const startLockout = useCallback(() => { setLockedOut(true); setLockoutRemaining(LOCKOUT_SECS); let remaining = LOCKOUT_SECS; lockoutTimerRef.current = setInterval(() => { remaining -= 1; setLockoutRemaining(remaining); if (remaining <= 0) { clearInterval(lockoutTimerRef.current); setLockedOut(false); setFailedAttempts(0); setLockoutRemaining(0); } }, 1000); }, []);
+  const startLockout = useCallback((seconds) => { setLockedOut(true); setLockoutRemaining(seconds); setCurrentMaxLockout(seconds); let remaining = seconds; if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); lockoutTimerRef.current = setInterval(() => { remaining -= 1; setLockoutRemaining(remaining); if (remaining <= 0) { clearInterval(lockoutTimerRef.current); setLockedOut(false); setFailedAttempts(0); setLockoutRemaining(0); } }, 1000); }, []);
   useEffect(() => () => { if (lockoutTimerRef.current) clearInterval(lockoutTimerRef.current); }, []);
   const sessionTimerRef = useRef(null);
   const resetSessionTimer = useCallback(() => {
@@ -9910,8 +8900,8 @@ Pergunta do usuário: "${txt}"`;
           <View style={{ backgroundColor: T.bgCard, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: T.border }}>
             <Text style={{ fontSize: 22, fontWeight: '900', color: T.text, marginBottom: 6 }}>Bem-vindo de volta</Text>
             <Text style={{ fontSize: 14, color: T.textSub, marginBottom: 24, lineHeight: 20 }}>Acesse sua conta para gerenciar o estoque em tempo real.</Text>
-            {lockedOut && (<View style={{ backgroundColor: T.redGlow, borderRadius: 18, padding: 18, marginBottom: 20, borderWidth: 2, borderColor: T.red + '50', alignItems: 'center', gap: 12 }}><View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.red + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.red + '50' }}><Feather name="lock" size={28} color={T.red} /></View><View style={{ alignItems: 'center' }}><Text style={{ fontSize: 15, fontWeight: '900', color: T.red, textAlign: 'center' }}>Acesso temporariamente bloqueado</Text><Text style={{ fontSize: 13, color: T.textSub, marginTop: 4, textAlign: 'center' }}>Muitas tentativas incorretas. Aguarde para continuar.</Text></View><View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: T.red + '18', borderWidth: 3, borderColor: T.red, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 26, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{lockoutRemaining}</Text><Text style={{ fontSize: 8, fontWeight: '800', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>seg</Text></View><View style={{ width: '100%', height: 6, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}><View style={{ height: '100%', backgroundColor: T.red, borderRadius: 3, width: `${(lockoutRemaining / LOCKOUT_SECS) * 100}%` }} /></View><Text style={{ fontSize: 11, color: T.textMuted, fontWeight: '700', textAlign: 'center' }}>{MAX_LOGIN_ATTEMPTS} tentativas incorretas detectadas. Por segurança, o acesso foi suspenso temporariamente.</Text></View>)}
-            {!lockedOut && failedAttempts > 0 && failedAttempts < MAX_LOGIN_ATTEMPTS && (<View style={{ backgroundColor: T.amberGlow, borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1.5, borderColor: T.amber + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}><Feather name="alert-triangle" size={20} color={T.amber} /><View style={{ flex: 1 }}><Text style={{ fontSize: 13, fontWeight: '800', color: T.amber }}>Atenção: {failedAttempts}/{MAX_LOGIN_ATTEMPTS} tentativas usadas</Text><Text style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>Após {MAX_LOGIN_ATTEMPTS} tentativas, o acesso será bloqueado por {LOCKOUT_SECS}s.</Text></View><View style={{ flexDirection: 'row', gap: 4 }}>{Array.from({ length: MAX_LOGIN_ATTEMPTS }).map((_, i) => (<View key={i} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: i < failedAttempts ? T.red : T.border }} />))}</View></View>)}
+            {lockedOut && (<View style={{ backgroundColor: T.redGlow, borderRadius: 18, padding: 18, marginBottom: 20, borderWidth: 2, borderColor: T.red + '50', alignItems: 'center', gap: 12 }}><View style={{ width: 56, height: 56, borderRadius: 18, backgroundColor: T.red + '20', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: T.red + '50' }}><Feather name="lock" size={28} color={T.red} /></View><View style={{ alignItems: 'center' }}><Text style={{ fontSize: 15, fontWeight: '900', color: T.red, textAlign: 'center' }}>Acesso temporariamente bloqueado</Text><Text style={{ fontSize: 13, color: T.textSub, marginTop: 4, textAlign: 'center' }}>Muitas tentativas incorretas. Aguarde para continuar.</Text></View><View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: T.red + '18', borderWidth: 3, borderColor: T.red, justifyContent: 'center', alignItems: 'center' }}><Text style={{ fontSize: 26, fontWeight: '900', color: T.red, letterSpacing: -1 }}>{lockoutRemaining}</Text><Text style={{ fontSize: 8, fontWeight: '800', color: T.red, textTransform: 'uppercase', letterSpacing: 0.5 }}>seg</Text></View><View style={{ width: '100%', height: 6, backgroundColor: T.border, borderRadius: 3, overflow: 'hidden' }}><View style={{ height: '100%', backgroundColor: T.red, borderRadius: 3, width: `${(lockoutRemaining / currentMaxLockout) * 100}%` }} /></View><Text style={{ fontSize: 11, color: T.textMuted, fontWeight: '700', textAlign: 'center' }}>{MAX_LOGIN_ATTEMPTS} tentativas incorretas consecutivas detectadas. Por segurança, o acesso foi suspenso temporariamente.</Text></View>)}
+            {!lockedOut && failedAttempts > 0 && failedAttempts < MAX_LOGIN_ATTEMPTS && (<View style={{ backgroundColor: T.amberGlow, borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1.5, borderColor: T.amber + '50', flexDirection: 'row', alignItems: 'center', gap: 10 }}><Feather name="alert-triangle" size={20} color={T.amber} /><View style={{ flex: 1 }}><Text style={{ fontSize: 13, fontWeight: '800', color: T.amber }}>Atenção: {failedAttempts}/{MAX_LOGIN_ATTEMPTS} tentativas usadas</Text><Text style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>Após {MAX_LOGIN_ATTEMPTS} tentativas, o acesso será bloqueado temporariamente.</Text></View><View style={{ flexDirection: 'row', gap: 4 }}>{Array.from({ length: MAX_LOGIN_ATTEMPTS }).map((_, i) => (<View key={i} style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: i < failedAttempts ? T.red : T.border }} />))}</View></View>)}
             <View style={{ gap: 16, marginBottom: 24 }}>
               <View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>E-MAIL</Text><TextInput style={{ backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: T.border, padding: 16, borderRadius: 16, fontSize: 15, color: T.text, opacity: lockedOut ? 0.5 : 1 }} placeholder="seu@email.com" placeholderTextColor={T.textMuted} value={emailIn} onChangeText={v => setEmailIn(v.toLowerCase())} autoCapitalize="none" keyboardType="email-address" editable={!lockedOut} /></View>
               <View><Text style={{ fontSize: 13, fontWeight: '800', color: T.textSub, marginBottom: 8, marginLeft: 4 }}>SENHA</Text><CapsLockDetector onCapsLockChange={setCapsLockActive}>{({ ref, onKeyPress, isCapsLock }) => (<View><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderWidth: 1.5, borderColor: isCapsLock ? T.amber : T.border, borderRadius: 16, paddingRight: 12, opacity: lockedOut ? 0.5 : 1 }}><TextInput ref={ref} style={{ flex: 1, padding: 16, fontSize: 15, color: T.text }} placeholder="••••••••" placeholderTextColor={T.textMuted} value={passIn} onChangeText={setPassIn} secureTextEntry={!showPass} editable={!lockedOut} onKeyPress={onKeyPress} /><TouchableOpacity onPress={() => setShowPass(!showPass)} disabled={lockedOut}><Feather name={showPass ? 'eye' : 'eye-off'} size={20} color={T.textSub} /></TouchableOpacity></View>{isCapsLock && (<View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}><Feather name="alert-triangle" size={12} color={T.amber} /><Text style={{ fontSize: 11, color: T.amber, fontWeight: '600' }}>CAPS LOCK está ativado</Text></View>)}</View>)}</CapsLockDetector></View>
@@ -9995,7 +8985,7 @@ Pergunta do usuário: "${txt}"`;
         {currentTab === 'chat' && <ChatScreen T={T} fontScale={fontScale} msgs={msgs} chatTxt={chatTxt} setChatTxt={setChatTxt} sendChat={sendChat} busy={chatBusy} scrollRef={scrollRef} TAB_H={TAB_H} NAV_BAR_H={NAV_BAR_H} />}
         {currentTab === 'cadastro' && (
           <>
-            <CadastroScreen T={T} fontScale={fontScale} perf={perf} cadastroShelf={cadastroShelf} setCadastroShelf={setCadastroShelf} activeShelf={activeShelf} prodName={prodName} setProdName={setProdName} validade={validade} setValidade={setValidade} qtd={qtd} setQtd={setQtd} giro={giro} setGiro={setGiro} wStep={wStep} setWStep={setWStep} nextStep={nextStep} saveProduct={saveProduct} TAB_SAFE={TAB_SAFE} GIRO={GIRO} isCoord={isCoord} isDeposito={isDeposito} SHELF_KEYS={SHELF_KEYS} shlabel={shlabel} shelfPalette={shelfPalette} showErr={showErr} />
+            <CadastroScreen T={T} fontScale={fontScale} perf={perf} cadastroShelf={cadastroShelf} setCadastroShelf={setCadastroShelf} activeShelf={activeShelf} prodName={prodName} setProdName={setProdName} validade={validade} setValidade={setValidade} wStep={wStep} setWStep={setWStep} nextStep={nextStep} saveProduct={saveProduct} TAB_SAFE={TAB_SAFE} isCoord={isCoord} isDeposito={isDeposito} SHELF_KEYS={SHELF_KEYS} shlabel={shlabel} shelfPalette={shelfPalette} showErr={showErr} />
             <TouchableOpacity style={{ position: 'absolute', bottom: TAB_SAFE + 20, right: 20, backgroundColor: T.blue, width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', shadowColor: T.blue, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8 }} onPress={() => setVoiceAssistantVisible(true)}>
               <Feather name="mic" size={28} color="#FFF" />
             </TouchableOpacity>
@@ -10008,35 +8998,10 @@ Pergunta do usuário: "${txt}"`;
               <View style={{ flexDirection: 'row', gap: 6, marginLeft: 8 }}><TouchableOpacity style={[{ width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }, searchOpen && { backgroundColor: T.blueGlow, borderColor: T.blue + '60' }]} onPress={() => { setSearchOpen(o => !o); if (searchOpen) setSearchQuery(''); }}><Feather name="search" size={16} color={searchOpen ? T.blue : T.textSub} /></TouchableOpacity>{['list', 'grid'].map(m => (<TouchableOpacity key={m} style={[{ width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }, viewMode === m && { backgroundColor: T.blueGlow, borderColor: T.blue + '60' }]} onPress={() => setViewMode(m)}><Feather name={m} size={16} color={viewMode === m ? T.blue : T.textSub} /></TouchableOpacity>))}</View>
             </View>
             {searchOpen && (<View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: T.bgCard, borderBottomWidth: 1, borderColor: T.border }}><View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: T.bgInput, borderRadius: 14, borderWidth: 1.5, borderColor: T.blue + '60', paddingHorizontal: 14, gap: 10 }}><Feather name="search" size={16} color={T.blue} /><TextInput style={{ flex: 1, paddingVertical: 12, fontSize: 15 * fontScale, color: T.text }} placeholder="Buscar produto pelo nome..." placeholderTextColor={T.textMuted} value={searchQuery} onChangeText={setSearchQuery} autoFocus clearButtonMode="while-editing" />{searchQuery.length > 0 && (<TouchableOpacity onPress={() => setSearchQuery('')}><Feather name="x" size={16} color={T.textMuted} /></TouchableOpacity>)}</View></View>)}
-            {/* ── Botão Apagar Todos ── */}
-            <TouchableOpacity
-              onPress={() => setShowDeleteAllModal(true)}
-              style={{
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                marginHorizontal: 16, marginTop: 10, marginBottom: 2,
-                paddingVertical: 11, paddingHorizontal: 18,
-                backgroundColor: T.red + '14',
-                borderRadius: 14, borderWidth: 1.5, borderColor: T.red + '40',
-                gap: 8,
-              }}
-            >
-              <Feather name="trash-2" size={15} color={T.red} />
-              <Text style={{ color: T.red, fontWeight: '800', fontSize: 13 * fontScale }}>
-                Apagar todos os produtos desta prateleira
-              </Text>
-            </TouchableOpacity>
             <FlatList key={viewMode} data={filteredStock} keyExtractor={(item, index) => `${item.id}-${index}`} numColumns={viewMode === 'grid' ? 2 : 1} columnWrapperStyle={viewMode === 'grid' ? { gap: 12 } : undefined} renderItem={({ item }) => viewMode === 'list' ? <CardList item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} fifoMode={fifoMode} allProducts={stockData} /> : <CardGrid item={item} T={T} fontScale={fontScale} onPress={setSelectedProduct} fifoMode={fifoMode} allProducts={stockData} />} contentContainerStyle={{ padding: 16, paddingBottom: TAB_SAFE + 24 }} showsVerticalScrollIndicator={false} ListEmptyComponent={() => (<View style={{ alignItems: 'center', paddingVertical: 80 }}><Feather name={searchQuery ? 'search' : 'inbox'} size={60} color={T.textMuted} /><Text style={{ color: T.textSub, marginTop: 20, fontSize: 17 * fontScale, fontWeight: '800', textAlign: 'center' }}>{searchQuery ? 'Nenhum resultado' : 'Nada aqui...'}</Text><Text style={{ color: T.textMuted, marginTop: 8, fontSize: 14 * fontScale, fontWeight: '600', textAlign: 'center' }}>{searchQuery ? `Nenhum produto encontrado para "${searchQuery}".` : activeFilter === 'all' ? 'Nenhum produto cadastrado nesta prateleira.' : 'Nenhum produto atende a este filtro.'}</Text></View>)} />
           </View>
         )}
-        {currentTab === 'config' && <ConfigScreen T={T} currentTheme={currentTheme} onThemeChange={setCurrentTheme} fontScale={fontScale} setFontScale={setFontScale} notifOn={notifOn} setNotifOn={setNotifOn} TAB_SAFE={TAB_SAFE} onGenerateQR={() => setShowQrGenerator(true)} onViewAuditLogs={viewAuditLogs} onEnableBiometrics={enableBiometrics} biometricEnabled={biometricEnabled} onChangePassword={handleChangePassword} userData={userData} fifoMode={fifoMode} setFifoMode={setFifoMode} micSoundEnabled={micSoundEnabled} setMicSoundEnabled={updateMicSound} micVibrationEnabled={micVibrationEnabled} setMicVibrationEnabled={updateMicVibration} micSoundVolume={micSoundVolume} setMicSoundVolume={updateMicVolume} voiceRecognitionEnabled={voiceRecognitionEnabled} setVoiceRecognitionEnabled={updateVoiceRecognition} elevenLabsQuota={elevenLabsQuota} onFetchQuota={async () => {
-            const quota = await fetchElevenLabsQuota();
-            setElevenLabsQuota(quota);
-            if (!quota) {
-              AppAlert.alert('Aviso', 'Nenhuma chave ElevenLabs configurada no app.');
-            } else if (quota.error && quota.characterLimit === 0) {
-              AppAlert.alert('Atenção', `Cotas carregadas com erros:\n${quota.error}`);
-            }
-          }} />}
+        {currentTab === 'config' && <ConfigScreen T={T} currentTheme={currentTheme} onThemeChange={setCurrentTheme} fontScale={fontScale} setFontScale={setFontScale} notifOn={notifOn} setNotifOn={setNotifOn} TAB_SAFE={TAB_SAFE} onGenerateQR={() => setShowQrGenerator(true)} onViewAuditLogs={viewAuditLogs} onEnableBiometrics={enableBiometrics} biometricEnabled={biometricEnabled} onChangePassword={handleChangePassword} userData={userData} fifoMode={fifoMode} setFifoMode={setFifoMode} micSoundEnabled={micSoundEnabled} setMicSoundEnabled={updateMicSound} micVibrationEnabled={micVibrationEnabled} setMicVibrationEnabled={updateMicVibration} micSoundVolume={micSoundVolume} setMicSoundVolume={updateMicVolume} voiceRecognitionEnabled={voiceRecognitionEnabled} setVoiceRecognitionEnabled={updateVoiceRecognition} elevenLabsQuota={elevenLabsQuota} onFetchQuota={async () => { const quota = await fetchElevenLabsQuota(); setElevenLabsQuota(quota); if (!quota) AppAlert.alert('Erro', 'Não foi possível buscar as cotas do ElevenLabs.'); }} />}
       </Animated.View>
       <Modal visible={scanning} animationType='fade' transparent={false} onRequestClose={() => setScanning(false)}><View style={StyleSheet.absoluteFill}>          <CameraView ref={camRef} style={StyleSheet.absoluteFill} enableTorch={torchOn} onBarcodeScanned={scanMode === 'barcode' ? onBarcode : undefined} barcodeScannerSettings={{ barcodeTypes: ['ean13', 'upc_a', 'ean8', 'qr', 'code128'] }} onCameraReady={scanMode === 'aiVision' ? onAIVisionCameraReady : undefined} />
           <DarkTorchPrompt isDarkEnv={isDarkEnv} lightLevel={lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(p => !p)} T={T} fontScale={fontScale} /><View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.32)' }}><View style={{ position: 'absolute', top: 40, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24 }}><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => { setScanning(false); setCountdown(null); setTorchOn(false); setShowAchandoGif(false); aiVisionTriggeredRef.current = false; if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); }}><Feather name="x" size={22} color="#FFF" /></TouchableOpacity><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: torchOn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setTorchOn(!torchOn)}><Feather name="zap" size={20} color={torchOn ? '#000' : '#FFF'} /></TouchableOpacity></View>{scanMode === 'barcode' && !showAchandoGif && (<View style={{ alignItems: 'center' }}><View style={{ width: 280, height: 180, borderWidth: 2, borderColor: T.blue, borderRadius: 24, backgroundColor: 'rgba(59,91,255,0.05)' }}><Animated.View style={{ height: 2, backgroundColor: T.blue, width: '100%', position: 'absolute', top: scanAnim.interpolate({ inputRange: [0, 1], outputRange: ['10%', '90%'] }), shadowColor: T.blue, shadowOpacity: 1, shadowRadius: 10, elevation: 10 }} /></View><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 }}>Posicione o código de barras</Text><Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Nome preenchido automaticamente pela IA</Text></View>)}{scanMode === 'aiVision' && (<View style={{ alignItems: 'center' }}><Animated.View style={{ width: 260, height: 260, borderWidth: 3, borderColor: T.purple, borderRadius: 130, backgroundColor: 'rgba(124,58,237,0.1)', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulseAnim }] }}><MaterialCommunityIcons name="robot-outline" size={80} color={T.purple} /></Animated.View><Text style={{ color: '#FFF', marginTop: 32, fontWeight: '800', fontSize: 18, textAlign: 'center', paddingHorizontal: 40 }}>IA Vision · Aponte para o produto</Text><Text style={{ color: 'rgba(255,255,255,0.65)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Captura automática em tempo real pelo Gemini</Text></View>)}</View></View></Modal>
@@ -10101,24 +9066,6 @@ Pergunta do usuário: "${txt}"`;
         fifoMode={fifoMode}
         T={T}
         fontScale={fontScale}
-      />
-      <AdvancedAIChatModal
-        visible={showAdvancedAI}
-        onClose={() => setShowAdvancedAI(false)}
-        T={T}
-        fontScale={fontScale}
-        stockData={stockData}
-        userData={userData}
-      />
-      <DeleteAllProductsModal
-        visible={showDeleteAllModal}
-        onClose={() => setShowDeleteAllModal(false)}
-        onDeleted={() => { setStockData([]); loadStock(activeShelf); }}
-        activeShelf={activeShelf}
-        T={T}
-        fontScale={fontScale}
-        stockData={stockData}
-        userData={userData}
       />
       <AppAlertManager ref={ref => { if (ref) AppAlertService._flush(ref); }} T={T} />
     </View>
