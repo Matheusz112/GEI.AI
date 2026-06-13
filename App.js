@@ -653,12 +653,13 @@ const SHELVES = {
 };
 const SHELF_KEYS = Object.keys(SHELVES);
 const SHELF_LABEL = {
-  bebida: 'Bebidas', macarrao: 'Macarrão/Leite', pesado: 'Pesado',
+  bebida: 'Bebidas', macarrao: 'Mercearia/Grãos', pesado: 'Pesado',
   frios: 'Frios', biscoito: 'Biscoito',
 };
 const SHELF_ALIAS = {
   bebida: 'bebida', bebidas: 'bebida', macarrao: 'macarrao', 'macarrão': 'macarrao',
-  'macarrao/leite': 'macarrao', 'macarrão/leite': 'macarrao',
+  mercearia: 'macarrao', 'mercearia/graos': 'macarrao', 'mercearia/grãos': 'macarrao',
+  graos: 'macarrao', 'grãos': 'macarrao', 'macarrao/leite': 'macarrao', 'macarrão/leite': 'macarrao',
   pesado: 'pesado', frios: 'frios', frio: 'frios', biscoito: 'biscoito', biscoitos: 'biscoito',
 };
 const AREA_PERFIS = ['deposito', 'coordenador', 'repositor'];
@@ -751,6 +752,83 @@ const isValidDate = (dateStr) => {
   const daysInMonth = new Date(y, m, 0).getDate();
   if (d < 1 || d > daysInMonth) return false;
   return true;
+};
+
+// ─── SMARTCORRECTDATE — Correção inteligente de data (fuzzy) ──────────────
+// Recebe uma string DD/MM/AAAA (possivelmente errada) e devolve a versão
+// mais plausível, aplicando heurísticas:
+//   • Ano 20xx < 2020  → +10   (ex: 2016 → 2026, 2017 → 2027)
+//   • Ano 19xx >= 2000 se +100 fica plausível → +100 (ex: 1926 → 2026)
+//   • Mês > 12 e dia <= 12     → troca dia ↔ mês (DD/MM invertido)
+//   • Dia > último dia do mês  → clamp ao último dia válido
+//   • Resultado no passado distante (>60 dias atrás) → tenta +1 ano no ano
+const smartCorrectDate = (dateStr) => {
+  if (!dateStr) return dateStr;
+  const curYear = new Date().getFullYear();
+  const parts = String(dateStr).trim().split('/');
+  if (parts.length !== 3) return dateStr;
+
+  let d = parseInt(parts[0], 10);
+  let m = parseInt(parts[1], 10);
+  let y = parseInt(parts[2], 10);
+  if (isNaN(d) || isNaN(m) || isNaN(y)) return dateStr;
+
+  // ── 1. Corrigir ano ──────────────────────────────────────────────────────
+  // 2 dígitos (ex: 26 → 2026)
+  if (y >= 0 && y <= 99) y = 2000 + y;
+  // 4 dígitos mas pré-2020: reconhecedor de voz ouviu "dezesseis" = 2016 → 2026
+  if (y >= 2000 && y < 2020) y = y + 10;
+  // 19xx que somado 100 dá 20xx plausível (ex: 1926 → 2026)
+  if (y >= 1920 && y < 2000) {
+    const candidate = y + 100;
+    if (candidate >= curYear && candidate <= curYear + 15) y = candidate;
+    else y = curYear; // fallback ao ano atual se ainda inválido
+  }
+  // Ano > 2099 ou < 2020: força ano atual
+  if (y < 2020 || y > 2099) y = curYear;
+
+  // ── 2. Corrigir mês/dia invertidos ───────────────────────────────────────
+  // Se mês > 12 mas dia <= 12: claramente invertido
+  if (m > 12 && d >= 1 && d <= 12) { const tmp = m; m = d; d = tmp; }
+  // Se mês ainda > 12: não tem como corrigir, usa mês 1
+  if (m < 1 || m > 12) m = 1;
+
+  // ── 3. Clamp do dia ao último dia do mês ─────────────────────────────────
+  const maxDay = new Date(y, m, 0).getDate();
+  if (d < 1) d = 1;
+  if (d > maxDay) d = maxDay;
+
+  // ── 4. Se a data resultante é muito no passado (>= 365 dias atrás) ────────
+  //    e o mesmo dia/mês no ano atual ou próximo ainda é futuro → corrige ano
+  const resultDate = new Date(y, m - 1, d);
+  const todayMs = new Date(); todayMs.setHours(0,0,0,0);
+  const diffDaysResult = Math.floor((todayMs - resultDate) / 86400000);
+  if (diffDaysResult >= 365) {
+    // Tenta ano atual
+    const candidateThis = new Date(curYear, m - 1, d);
+    if (candidateThis >= todayMs) y = curYear;
+    else y = curYear + 1; // se já passou este ano, usa próximo
+  }
+
+  // ── 5. PATCH: se o MES da validade ja venceu (ou e este mes), empurra
+  //    para o proximo mes com dia valido — evita cadastrar produto ja vencido
+  //    quando o usuario falou so "validade 15" e a IA assumiu o mes atual.
+  {
+    let finalDate = new Date(y, m - 1, d);
+    let guard = 0;
+    while (finalDate < todayMs && guard < 36) {
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+      const maxD = new Date(y, m, 0).getDate();
+      const dd = Math.min(d, maxD);
+      finalDate = new Date(y, m - 1, dd);
+      d = dd;
+      guard += 1;
+    }
+  }
+
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d)}/${pad(m)}/${y}`;
 };
 
 // ─── HELPERS DE API ────────────────────────────────────────────────────────
@@ -896,6 +974,127 @@ const callGEIOptimized = async (prompt, useCache = true) => {
     return await callGroqOptimized(prompt, null, useCache);
   }
 };
+
+// ─── OPENROUTER — IA EXTRA (modelos GRATUITOS) ─────────────────────────────
+// Token hardcoded a pedido do usuario. Pesquisa apenas modelos *:free.
+const OPENROUTER_TOKEN = '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';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+// Lista priorizada de modelos free do OpenRouter (ordem = ordem de fallback).
+const OPENROUTER_FREE_MODELS = [
+  'deepseek/deepseek-chat-v3.1:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemini-2.0-flash-exp:free',
+  'qwen/qwen-2.5-72b-instruct:free',
+  'mistralai/mistral-small-3.1-24b-instruct:free',
+  'nvidia/llama-3.1-nemotron-70b-instruct:free',
+];
+
+const callOpenRouterOptimized = async (prompt, systemPrompt = null, useCache = true, opts = {}) => {
+  const fullPrompt = (systemPrompt || '') + '\n' + prompt;
+  const cacheKey = 'openrouter_' + (await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, fullPrompt));
+  if (useCache) {
+    const cached = await iaCache.get(cacheKey);
+    if (cached) return cached;
+  }
+  const messages = systemPrompt
+    ? [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
+    : [{ role: 'user', content: prompt }];
+  let lastError = null;
+  for (const model of OPENROUTER_FREE_MODELS) {
+    try {
+      const res = await fetchWithTimeout(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + OPENROUTER_TOKEN,
+          'HTTP-Referer': 'https://gei-app.lovable.app',
+          'X-Title': 'GEI Estoque IA',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: opts.temperature ?? 0.4,
+          max_tokens: opts.max_tokens ?? 700,
+        })
+      }, 18000);
+      if (!res.ok) {
+        const t = await res.text().catch(()=>'');
+        lastError = new Error('OpenRouter ' + model + ' ' + res.status + ': ' + t.slice(0,200));
+        // 429 / 402 → tenta proximo modelo free
+        if (res.status === 429 || res.status === 402 || res.status === 503) continue;
+        // Outros erros tambem caem para o proximo
+        continue;
+      }
+      const json = await res.json();
+      const txt = json?.choices?.[0]?.message?.content;
+      if (txt) {
+        const out = String(txt).trim();
+        if (useCache) await iaCache.set(cacheKey, out);
+        return out;
+      }
+    } catch (e) {
+      lastError = e;
+      continue;
+    }
+  }
+  throw lastError || new Error('Todos os modelos free do OpenRouter falharam');
+};
+
+// ─── IA INTELIGENTE DE CADASTRO ────────────────────────────────────────────
+// Gera prompts "pensados" pela IA: ela pergunta marca/embalagem/EAN, verifica
+// se o produto existe e enriquece com sugestoes do mercado.
+const callSmartCadastroIA = async (userText, contexto = {}) => {
+  const system = `Voce e a GEI.IA, especialista BRASILEIRA em produtos de supermercado.
+Pense em VOZ ALTA, em etapas curtas, como se estivesse digitando prompts inteligentes para voce mesma.
+Cada etapa = UMA frase de ate 90 caracteres, comecando com um emoji.
+Use marcas reais do Brasil (Nestle, Sadia, Perdigao, Tirol, Italac, Piracanjuba, Coca-Cola, Ype, Bombril, etc).
+Cheque consistencia: leite/refrigerante = ml ou L (NUNCA g/kg); arroz/feijao/acucar = kg ou g (NUNCA ml).
+Se detectar incoerencia (ex: "leite 1kg" ou "arroz 1 litro") gere etapa "⚠️ Incoerencia: corrigindo para Xml/Xg".
+Tente DEDUZIR um EAN-13 plausivel consultando seu conhecimento de Bluesoft Cosmos / OpenFoodFacts / GS1 Brasil.
+Se nao tiver certeza do EAN, deixe ean:"" e precisaEAN:true e pergunte "Voce tem o codigo de barras?".
+
+Etapas obrigatorias na ordem (gere 5 a 7 frases):
+1. 🔍 Confirmando produto (nome + tipo) que entendi
+2. 🏷️ Buscando marca/embalagem real no mercado BR
+3. ⚖️ Validando gramatura/volume (ml,L,g,kg) — corrige se inconsistente
+4. 🇧🇷 Tentando localizar EAN-13 brasileiro (prefixo 789/790)
+5. 📦 Sugerindo categoria e giro (Grande/Medio/Pouco)
+6. ❓ Pergunta para o usuario (EAN, marca ou validade) se faltar info
+7. ✅ Resumo final pronto para cadastro
+
+Responda APENAS JSON valido, sem markdown:
+{"steps":["frase1","frase2",...],
+ "produto":{"nome":"NOME COMPLETO COM MARCA E GRAMATURA","marca":"...","categoria":"...","gramatura":"500g|1L|...","unidade":"g|kg|ml|L","ean":"7891234567890 ou \"\"","precisaEAN":true,"giro":"Medio giro","validade":""},
+ "incoerencias":["..."],
+ "pergunta":"pergunta curta ou null",
+ "promptInterno":"prompt que voce mesma usaria para refinar este produto"}`;
+  const prompt = 'Pedido do usuario: "' + userText + '"\n' +
+    'Data de hoje: ' + new Date().toLocaleDateString('pt-BR') + '\n' +
+    'Contexto:\n' + JSON.stringify(contexto || {}, null, 2);
+  try { return await callOpenRouterOptimized(prompt, system, true, { temperature: 0.55, max_tokens: 1100 }); }
+  catch (e1) {
+    console.warn('[SmartCadastro] OpenRouter falhou:', e1.message);
+    try { return await callGroqOptimized(prompt, system, true); }
+    catch (e2) {
+      console.warn('[SmartCadastro] Groq falhou:', e2.message);
+      return await callGeminiOptimized(system + '\n' + prompt, true);
+    }
+  }
+};
+
+// PATCH: parser tolerante para JSON da SmartCadastro
+const parseSmartCadastroJSON = (raw) => {
+  if (!raw) return null;
+  let s = String(raw).trim();
+  // remove cercas markdown
+  s = s.replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();
+  // pega primeiro { ... } balanceado
+  const i = s.indexOf('{');
+  const j = s.lastIndexOf('}');
+  if (i >= 0 && j > i) s = s.slice(i, j + 1);
+  try { return JSON.parse(s); } catch { return null; }
+};
+
 const fetchIAWithConsensusOptimized = async (ean, nomeBase = "", categoriaBase = "") => {
   const cacheKey = `product_${ean}_${await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nomeBase + categoriaBase)}`;
   const cache = await getAICache();
@@ -2129,7 +2328,7 @@ const ConfigScreen = ({ T, currentTheme, onThemeChange, fontScale, setFontScale,
   );
 };
 
-const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, sendChatVoice, busy, scrollRef, TAB_H, NAV_BAR_H, onVoiceMode, jarvisRecording, jarvisProcessing, jarvisBusy }) => {
+const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, sendChatVoice, busy, scrollRef, TAB_H, NAV_BAR_H, onVoiceMode, jarvisRecording, jarvisProcessing, jarvisBusy, onProgressDone, activeShelf, pinnedShelf, setPinnedShelf, shlabel, SHELF_KEYS, SHELVES, onUiAction }) => {
   const keyboardAnim = useRef(new Animated.Value(0)).current;
   const [typingDots, setTypingDots] = useState(0);
   const inputRef = useRef(null);
@@ -2271,8 +2470,27 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, sendCha
   }
 
   // ── MODO TEXTO (padrão) ───────────────────────────────────────────────────
+  const _pinAllowed = !!(activeShelf && SHELVES && SHELVES[activeShelf]);
   return (
     <Animated.View style={{ flex: 1, backgroundColor: T.bg, paddingBottom: keyboardAnim }}>
+      {/* ── HEADER: prateleira atual + botão Fixar ───────────────────────── */}
+      {_pinAllowed && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 10, borderBottomWidth: 1, borderColor: T.border, backgroundColor: T.bgCard }}>
+          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: pinnedShelf ? T.amberGlow : T.tealGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: (pinnedShelf ? T.amber : T.teal) + '50' }}>
+            <Feather name={pinnedShelf ? 'lock' : 'layers'} size={15} color={pinnedShelf ? T.amber : T.teal} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 10 * fontScale, fontWeight: '900', color: T.textMuted, letterSpacing: 0.6 }}>{pinnedShelf ? 'PRATELEIRA FIXADA' : 'PRATELEIRA ATIVA'}</Text>
+            <Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.text }} numberOfLines={1}>{shlabel ? shlabel(pinnedShelf || activeShelf) : (pinnedShelf || activeShelf)}</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setPinnedShelf && setPinnedShelf(pinnedShelf ? null : activeShelf)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: pinnedShelf ? T.amber : T.bgInput, borderWidth: 1.5, borderColor: pinnedShelf ? T.amber : T.border }}>
+            <Feather name={pinnedShelf ? 'unlock' : 'lock'} size={13} color={pinnedShelf ? '#FFF' : T.textSub} />
+            <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: pinnedShelf ? '#FFF' : T.textSub }}>{pinnedShelf ? 'Liberar' : 'Fixar aqui'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <ScrollView ref={scrollRef} style={{ flex: 1, paddingHorizontal: 16 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={{ paddingTop: 16, paddingBottom: TAB_H + NAV_BAR_H + 20 }} showsVerticalScrollIndicator={false}>
         {msgs.length === 0 && (
           <View style={{ alignItems: 'center', paddingTop: 40, paddingBottom: 20 }}>
@@ -2284,19 +2502,122 @@ const ChatScreen = ({ T, fontScale, msgs, chatTxt, setChatTxt, sendChat, sendCha
           </View>
         )}
         {msgs.map((m) => (
-          <View key={m.id} style={[{ marginBottom: 12 }, m.isAi ? { alignSelf: 'flex-start', maxWidth: '88%' } : { alignSelf: 'flex-end', maxWidth: '80%' }]}>
+          <View key={m.id} style={[{ marginBottom: 12 }, m.system ? { alignSelf: 'center', width: '90%' } : m.isAi ? { alignSelf: 'flex-start', maxWidth: '88%' } : { alignSelf: 'flex-end', maxWidth: '80%' }]}>
+            {m.system ? (
+              <View style={{ backgroundColor: T.bgInput, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 16, borderWidth: 1, borderColor: T.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <Feather name="info" size={14} color={T.textSub} />
+                <Text style={{ fontSize: 12 * fontScale, color: T.textSub, fontWeight: '700', textAlign: 'center' }}>{m.text}</Text>
+              </View>
+            ) : m.progress ? (
+              <JarvisProgressBubble
+                title={m.progressTitle}
+                steps={m.progressSteps}
+                onDone={() => onProgressDone && onProgressDone(m.id)}
+                T={T}
+                fontScale={fontScale}
+              />
+            ) : (<>
+            {(() => {
+              const isSuccess = m.isAi && typeof m.text === 'string' && m.text.trim().startsWith('✅');
+              return (<>
             {m.isAi && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 6 }}>
-                <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: T.tealGlow, borderWidth: 1, borderColor: T.teal + '40', justifyContent: 'center', alignItems: 'center' }}>
-                  <MaterialCommunityIcons name="robot-outline" size={14} color={T.teal} />
+                <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: m.thinking ? T.amberGlow : isSuccess ? (T.greenGlow || T.tealGlow) : m.autoFix ? (T.purpleGlow || T.tealGlow) : T.tealGlow, borderWidth: 1, borderColor: m.thinking ? T.amber + '60' : isSuccess ? (T.green || T.teal) + '60' : m.autoFix ? (T.purple || T.teal) + '60' : T.teal + '40', justifyContent: 'center', alignItems: 'center' }}>
+                  {m.thinking
+                    ? <MaterialCommunityIcons name="cog-outline" size={14} color={T.amber} />
+                    : isSuccess
+                      ? <Feather name="check-circle" size={14} color={T.green || T.teal} />
+                    : m.autoFix
+                      ? <MaterialCommunityIcons name="auto-fix" size={14} color={T.purple || T.teal} />
+                      : <MaterialCommunityIcons name="robot-outline" size={14} color={T.teal} />
+                  }
                 </View>
-                <Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: T.teal }}>GEI Assistant</Text>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '800', color: m.thinking ? T.amber : isSuccess ? (T.green || T.teal) : m.autoFix ? (T.purple || T.teal) : T.teal }}>
+                  {m.thinking ? 'Corrigindo automaticamente...' : isSuccess ? 'Cadastro confirmado' : m.autoFix ? 'Correcao automatica aplicada' : 'GEI Assistant'}
+                </Text>
+                {m.thinking && <ActivityIndicator size="small" color={T.amber} style={{ marginLeft: 2 }} />}
               </View>
             )}
             {m.isAi
-              ? <View style={{ backgroundColor: T.bgCard, borderRadius: 18, borderBottomLeftRadius: 4, padding: 14, borderWidth: 1, borderColor: T.border }}><Text style={{ fontSize: 14 * fontScale, lineHeight: 22 * fontScale, color: T.text, fontWeight: '500' }}>{m.text}</Text></View>
+              ? <View style={{
+                  backgroundColor: m.thinking ? T.amberGlow : isSuccess ? (T.greenGlow || T.tealGlow) : m.autoFix ? (T.purpleGlow || T.tealGlow) : T.bgCard,
+                  borderRadius: 18, borderBottomLeftRadius: 4,
+                  padding: 14,
+                  borderWidth: m.thinking ? 1.5 : (isSuccess || m.autoFix) ? 1.5 : 1,
+                  borderColor: m.thinking ? T.amber + '50' : isSuccess ? (T.green || T.teal) + '50' : m.autoFix ? (T.purple || T.teal) + '50' : T.border,
+                }}>
+                  <Text style={{ fontSize: 14 * fontScale, lineHeight: 22 * fontScale, color: m.thinking ? T.amber : isSuccess ? (T.green || T.teal) : m.autoFix ? (T.purple || T.teal) : T.text, fontWeight: m.thinking ? '600' : '500', fontFamily: m.thinking ? Platform.OS === 'ios' ? 'Menlo' : 'monospace' : undefined }}>
+                    {m.text}
+                  </Text>
+                  {m.thinking && (
+                    <View style={{ flexDirection: 'row', gap: 3, marginTop: 10 }}>
+                      {[0,1,2,3].map(i => (
+                        <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: T.amber, opacity: 0.2 + (i * 0.2) }} />
+                      ))}
+                    </View>
+                  )}
+                </View>
               : <View style={{ backgroundColor: T.blue, borderRadius: 18, borderBottomRightRadius: 4, paddingHorizontal: 18, paddingVertical: 14, shadowColor: T.blue, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 }}><Text style={{ fontSize: 14 * fontScale, lineHeight: 22 * fontScale, color: '#FFF', fontWeight: '500' }}>{m.text}</Text></View>
             }
+              </>);
+            })()}
+            {m.isAi && Array.isArray(m.uiParts) && m.uiParts.length > 0 && (
+              <View style={{ marginTop: 10, gap: 8 }}>
+                {m.uiParts.map((up, idx) => {
+                  if (up.kind === 'choice') {
+                    return (
+                      <View key={idx} style={{ backgroundColor: T.bgCard, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: T.border }}>
+                        {up.data?.question ? <Text style={{ fontSize: 12 * fontScale, fontWeight: '800', color: T.textSub, marginBottom: 8 }}>{up.data.question}</Text> : null}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                          {(up.data?.options || []).map((opt, oi) => (
+                            <TouchableOpacity key={oi} onPress={() => onUiAction && onUiAction(opt.action, opt.value)} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: T.blueGlow, borderWidth: 1, borderColor: T.blue + '50' }}>
+                              <Text style={{ fontSize: 12 * fontScale, fontWeight: '800', color: T.blue }}>{opt.label}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    );
+                  }
+                  if (up.kind === 'table') {
+                    const cols = up.data?.columns || [];
+                    const rows = up.data?.rows || [];
+                    return (
+                      <View key={idx} style={{ backgroundColor: T.bgCard, borderRadius: 16, padding: 10, borderWidth: 1, borderColor: T.border }}>
+                        {up.data?.title ? <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.text, marginBottom: 8 }}>{up.data.title}</Text> : null}
+                        <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: T.border, paddingBottom: 6, marginBottom: 4 }}>
+                          {cols.map((c, ci) => <Text key={ci} style={{ flex: 1, fontSize: 11 * fontScale, fontWeight: '900', color: T.textMuted, textTransform: 'uppercase' }}>{c}</Text>)}
+                        </View>
+                        {rows.map((r, ri) => (
+                          <View key={ri} style={{ flexDirection: 'row', paddingVertical: 6, borderBottomWidth: ri < rows.length - 1 ? 1 : 0, borderColor: T.border + '60' }}>
+                            {r.map((cell, ci) => <Text key={ci} style={{ flex: 1, fontSize: 12 * fontScale, color: T.text, fontWeight: '600' }} numberOfLines={2}>{String(cell)}</Text>)}
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  }
+                  if (up.kind === 'list') {
+                    return (
+                      <View key={idx} style={{ backgroundColor: T.bgCard, borderRadius: 16, padding: 10, borderWidth: 1, borderColor: T.border, gap: 6 }}>
+                        {up.data?.title ? <Text style={{ fontSize: 12 * fontScale, fontWeight: '900', color: T.text, marginBottom: 4 }}>{up.data.title}</Text> : null}
+                        {(up.data?.items || []).map((it, ii) => (
+                          <View key={ii} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 }}>
+                            <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: T.tealGlow, justifyContent: 'center', alignItems: 'center' }}>
+                              <Feather name={it.icon || 'circle'} size={14} color={T.teal} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.text }} numberOfLines={1}>{it.title}</Text>
+                              {it.subtitle ? <Text style={{ fontSize: 11 * fontScale, color: T.textSub, fontWeight: '600' }} numberOfLines={1}>{it.subtitle}</Text> : null}
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    );
+                  }
+                  return null;
+                })}
+              </View>
+            )}
+            </>)}
           </View>
         ))}
         {busy && (
@@ -2372,6 +2693,76 @@ const CadastroScreen = ({ T, fontScale, perf, cadastroShelf, setCadastroShelf, a
         </ScrollView>
       </Animated.View>
     </KeyboardAvoidingView>
+  );
+};
+
+// ─── JARVIS PROGRESS BUBBLE — análise "inteligente" inline no chat ──────────
+// Em vez de um Modal fullscreen (que fica escondido se o usuario sair da aba
+// de chat), esta versão renderiza como uma bolha de mensagem dentro da
+// própria lista de mensagens — sempre visível enquanto a IA "trabalha".
+const JarvisProgressBubble = ({ steps, title, onDone, T, fontScale, autoCloseMs = 650 }) => {
+  const [stepIdx, setStepIdx] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const progAnim = useRef(new Animated.Value(0)).current;
+  const spinAnim = useRef(new Animated.Value(0)).current;
+  const timersRef = useRef([]);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  const STEPS = steps && steps.length ? steps : ['Analisando dados...', 'Verificando inconsistencias...', 'Aplicando correcoes...', 'Concluido.'];
+
+  useEffect(() => {
+    setStepIdx(0);
+    setProgress(0);
+    progAnim.setValue(0);
+
+    const spin = Animated.loop(Animated.timing(spinAnim, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }));
+    spin.start();
+
+    const totalSteps = STEPS.length;
+    const stepDuration = Math.max(420, Math.floor(1400 / totalSteps));
+    timersRef.current = [];
+    for (let i = 0; i < totalSteps; i++) {
+      const t = setTimeout(() => {
+        setStepIdx(i);
+        const target = Math.round(((i + 1) / totalSteps) * 100);
+        setProgress(target);
+        Animated.timing(progAnim, { toValue: target, duration: stepDuration - 80, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+      }, i * stepDuration);
+      timersRef.current.push(t);
+    }
+    const doneTimer = setTimeout(() => {
+      spin.stop();
+      if (onDoneRef.current) onDoneRef.current();
+    }, totalSteps * stepDuration + autoCloseMs);
+    timersRef.current.push(doneTimer);
+
+    return () => { timersRef.current.forEach(clearTimeout); spin.stop(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const spinDeg = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const widthInterp = progAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] });
+
+  return (
+    <View style={{
+      backgroundColor: T.tealGlow, borderRadius: 18, borderBottomLeftRadius: 4,
+      padding: 14, borderWidth: 1.5, borderColor: T.teal + '50',
+    }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <Animated.View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: T.bgCard, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: T.teal + '50', transform: [{ rotate: spinDeg }] }}>
+          <MaterialCommunityIcons name="robot-outline" size={16} color={T.teal} />
+        </Animated.View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 13 * fontScale, fontWeight: '900', color: T.teal }}>{title || 'GEI Assistant analisando'}</Text>
+          <Text style={{ fontSize: 12 * fontScale, color: T.text, fontWeight: '700', marginTop: 2 }}>{STEPS[stepIdx]}</Text>
+        </View>
+        <Text style={{ fontSize: 11 * fontScale, color: T.teal, fontWeight: '900' }}>{progress}%</Text>
+      </View>
+      <View style={{ width: '100%', height: 6, borderRadius: 4, backgroundColor: T.bgInput, overflow: 'hidden', borderWidth: 1, borderColor: T.border }}>
+        <Animated.View style={{ height: '100%', borderRadius: 4, backgroundColor: T.teal, width: widthInterp }} />
+      </View>
+    </View>
   );
 };
 
@@ -5591,7 +5982,6 @@ const WAKE_WORDS_LIST = [
   'qual a boa','qual e a boa','qual e a novidade','me conta as novidades',
   'criar lembrete','novo lembrete','adicionar lembrete','lembrete novo',
   'calculadora','calcular pinha','calcula pinha','calculadora de pinha','abre calculadora','abrir calculadora',
-  
 ];
 const stripAccents = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const detectWakeWord = (text) => {
@@ -6198,13 +6588,8 @@ const VoiceAssistant = ({
       case VS.DATE: {
         let date = parsePortugueseDate(text);
         if (date) {
-          // ✅ Garantia extra: se o ano parsed ficou < 2020, corrige +10
-          // Ex: parsePortugueseDate retornou "31/05/2016" → força "31/05/2026"
-          const parts = date.split('/');
-          if (parts.length === 3) {
-            let y = parseInt(parts[2]);
-            if (y >= 2000 && y < 2020) { y += 10; date = `${parts[0]}/${parts[1]}/${y}`; }
-          }
+          // ✅ Correção inteligente centralizada: corrige ano, mês/dia invertidos, clamp
+          date = smartCorrectDate(date);
         }
         if (!date) {
           speak('Não entendi a data. Diga por exemplo "11 de julho de 2026" ou apenas "junho 2026".', () => listenAfterSpeak(400));
@@ -6306,7 +6691,8 @@ const VoiceAssistant = ({
           speak('Nome alterado para ' + nn + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
           setVsStateBoth(VS.EDIT_WHAT);
         } else if (fld === 'date') {
-          const nd = parsePortugueseDate(text);
+          let nd = parsePortugueseDate(text);
+          if (nd) nd = smartCorrectDate(nd);
           if (!nd) { speak('Nao entendi a data. Diga por exemplo 11 de julho de 2026.', () => listenAfterSpeak(250)); return; }
           dataRef.current.date = nd; setCollected(p => ({ ...p, date: nd }));
           speak('Data alterada para ' + nd + '. Quer alterar mais alguma coisa ou confirmar?', () => listenAfterSpeak());
@@ -7005,8 +7391,51 @@ const _elPlayNext = async () => {
 let _elMicStopCallback = null;
 const registerMicStopForEL = (cb) => { _elMicStopCallback = cb; };
 
+// ─── FLAG GLOBAL: JARVIS em processamento ────────────────────────────────────
+// Quando true, bloqueia qualquer fala de "nao entendi" — evita spam durante análise
+let _jarvisProcessing = false;
+const setJarvisProcessingFlag = (v) => { _jarvisProcessing = v; };
+
+// ─── BLOQUEADOR DE FRASES REPETITIVAS (cooldown 30s) ────────────────────────
+// Evita que "Não entendi" e similares sejam faladas em loop contínuo.
+// Chave = frase normalizada; valor = timestamp da última vez que foi falada.
+const _spokenCooldownMap = new Map();
+const _COOLDOWN_MS = 30_000; // 30 segundos
+const _COOLDOWN_PHRASES = [
+  /n[aã]o entend/i,
+  /n[aã]o conseg/i,
+  /n[aã]o ouv/i,
+  /pode repetir/i,
+  /repita por favor/i,
+  /n[aã]o captei/i,
+  /n[aã]o peguei/i,
+  /desculpe, n[aã]o/i,
+  /tente novamente/i,
+  /nao entend/i,
+];
+const _isCooldownPhrase = (text) => _COOLDOWN_PHRASES.some(re => re.test(text));
+
 const speakWithElevenLabs = (text, onDone) => {
   if (!text?.trim()) { if (onDone) setTimeout(onDone, 30); return; }
+
+  // ── Cooldown: bloqueia frases de "não entendi" repetidas em < 30s ──────────
+  if (_isCooldownPhrase(text)) {
+    // Bloqueia completamente enquanto JARVIS processa
+    if (_jarvisProcessing) {
+      if (onDone) setTimeout(onDone, 30);
+      return;
+    }
+    const key = text.trim().toLowerCase().slice(0, 60);
+    const last = _spokenCooldownMap.get(key) || 0;
+    const now  = Date.now();
+    if (now - last < _COOLDOWN_MS) {
+      // Ainda no cooldown — ignora a fala mas executa o callback para não travar o fluxo
+      if (onDone) setTimeout(onDone, 30);
+      return;
+    }
+    _spokenCooldownMap.set(key, now);
+  }
+
   // Cancela qualquer fala nativa em curso
   try { Speech.stop(); } catch { /* noop */ }
   // PARA O MICROFONE ALWAYS-ON ANTES DE FALAR
@@ -8769,7 +9198,7 @@ const JarvisCentralModal = ({
   visible, onClose, T, fontScale, initialTab,
   // chat / jarvis
   msgs, chatTxt, setChatTxt, sendChat, sendChatVoice, chatBusy, scrollRef, TAB_H, NAV_BAR_H,
-  setJarvisVoiceMode, jarvisVoiceMode, jarvisRecording, jarvisProcessing,
+  setJarvisVoiceMode, jarvisVoiceMode, jarvisRecording, jarvisProcessing, onProgressDone,
   // novidades
   stockData, userData,
   // painel inteligente
@@ -8858,6 +9287,7 @@ const JarvisCentralModal = ({
                 sendChat={sendChat} sendChatVoice={sendChatVoice} busy={chatBusy} scrollRef={scrollRef}
                 TAB_H={TAB_H} NAV_BAR_H={NAV_BAR_H} onVoiceMode={setJarvisVoiceMode}
                 jarvisRecording={jarvisRecording} jarvisProcessing={jarvisProcessing} jarvisBusy={chatBusy}
+                onProgressDone={onProgressDone}
               />
             )}
             {activeTab === 'novidades' && (
@@ -8959,7 +9389,12 @@ export default function App() {
   const [fifoMode, setFifoMode] = useState(true);
   const [showPainelInteligente, setShowPainelInteligente] = useState(false);
   const [activeShelf, setActiveShelf] = useState('');
+  // ── PRATELEIRA FIXADA: quando setada, IA cadastra TUDO aqui (sem deduzir) ──
+  const [pinnedShelf, setPinnedShelf] = useState(null);
   const [stockData, setStockData] = useState([]);
+  const [estoqueBuilding, setEstoqueBuilding] = useState({ visible: false, produto: '', shelf: '', validade: '' }); // PATCH: overlay 'montando estoque'
+  // PATCH: estado do modal "IA pensando" — digita prompts inteligentes ao vivo
+  const [smartCadastro, setSmartCadastro] = useState({ visible: false, steps: [], typedSteps: [], produto: null, pergunta: '', promptInterno: '', incoerencias: [], done: false });
   const [shelfModal, setShelfModal] = useState(false);
   const [currentTab, setCurrentTab] = useState('home');
   const [scanMode, setScanMode] = useState('barcode');
@@ -8967,14 +9402,105 @@ export default function App() {
   const [countdown, setCountdown] = useState(null);
   const [busy, setBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
+
+  // ─── "Modal" de progresso "audacioso" do GEI, agora INLINE no chat ────────
+  // Em vez de um overlay fullscreen (que fica invisível se o usuário sair da
+  // aba de chat), injeta uma mensagem especial (progress: true) na lista de
+  // mensagens. Essa mensagem some sozinha quando a análise termina.
+  const showJarvisProgress = useCallback((title, steps, onDone) => {
+    const id = 'progress-' + Date.now();
+    setMsgs(p => [...p, { id, isAi: true, progress: true, progressTitle: title, progressSteps: steps, _onDone: onDone }]);
+    return id;
+  }, []);
+  const closeJarvisProgress = useCallback((id) => {
+    setMsgs(p => {
+      const found = p.find(m => m.id === id);
+      const cb = found && found._onDone;
+      const next = p.filter(m => m.id !== id);
+      if (typeof cb === 'function') setTimeout(cb, 0);
+      return next;
+    });
+  }, []);
+
+  // ─── IA "audaciosa": detecta possíveis erros do usuário (ex: data inválida,
+  // ano passado, formato estranho) e anuncia uma "correção automática" que o
+  // usuário pode simplesmente ignorar — reforça a sensação de proatividade.
+  const maybeAudaciousCorrection = useCallback((userTxt) => {
+    const dateMatch = userTxt.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
+    if (!dateMatch) return false;
+    let [, dd, mm, yy] = dateMatch;
+    if (yy.length === 2) yy = '20' + yy;
+    const inputted = `${dd.padStart(2,'0')}/${mm.padStart(2,'0')}/${yy}`;
+    const valid = isValidDate(inputted);
+    const yearNum = parseInt(yy, 10);
+    const nowYear = new Date().getFullYear();
+    // Heurística: data inválida OU ano muito no passado (provável digitação errada)
+    if (valid && yearNum >= nowYear) return false;
+
+    let corrected = inputted;
+    if (!valid) {
+      // corrige dia/mes invertidos ou fora do range, mantendo o ano atual minimo
+      let d = Math.min(Math.max(parseInt(dd,10) || 1, 1), 28);
+      let m = Math.min(Math.max(parseInt(mm,10) || 1, 1), 12);
+      let y = yearNum < nowYear ? nowYear : yearNum;
+      corrected = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
+    } else if (yearNum < nowYear) {
+      corrected = `${dd.padStart(2,'0')}/${mm.padStart(2,'0')}/${nowYear}`;
+    }
+
+    showJarvisProgress(
+      'GEI Assistant analisando',
+      ['Lendo sua mensagem...', 'Detectando inconsistencia na data...', 'Gerando novo protocolo de data...', 'Corrigindo automaticamente...'],
+      () => {
+        const note = `Notei que a data "${inputted}" informada parece incorreta. Preparei um novo protocolo de data (${corrected}) e ja corrigi automaticamente no seu pedido. Voce pode ignorar esta mensagem se preferir manter o valor original.`;
+        setMsgs(p => [...p, { id: Date.now(), text: note, isAi: true, autoFix: true }]);
+      }
+    );
+    return true;
+  }, [showJarvisProgress]);
+
+  // ─── AUTO-PROMPT: a IA "digita" um novo prompt no campo de texto e, apos
+  // alguns segundos, envia automaticamente (como se o usuario apertasse
+  // Enter). Usado para auto-correcao: se o ultimo pedido falhou ou foi
+  // ambiguo, a IA sugere/corrige e ja dispara o reenvio sozinha.
+  const autoPromptTimerRef = useRef(null);
+  const jarvisAutoPrompt = useCallback((text, delayMs = 3000) => {
+    if (autoPromptTimerRef.current) clearTimeout(autoPromptTimerRef.current);
+    setChatTxt(text);
+    autoPromptTimerRef.current = setTimeout(() => {
+      autoPromptTimerRef.current = null;
+      // dispara o envio automaticamente, como se o usuario tivesse apertado Enter
+      sendChatRef.current && sendChatRef.current();
+    }, delayMs);
+  }, []);
+  // referencia sempre atualizada para sendChat (evita closures presas)
+  const sendChatRef = useRef(null);
+  useEffect(() => () => { if (autoPromptTimerRef.current) clearTimeout(autoPromptTimerRef.current); }, []);
+
+  // ─── Auto-correcao de prateleira: se a IA nao reconheceu a categoria do
+  // produto (ex: "arroz" caiu em macarrao mas usuario queria outra coisa),
+  // ela monta um novo prompt mais especifico, mostra o progresso e reenvia
+  // automaticamente apos 3s — o usuario pode digitar antes para cancelar.
+  const jarvisSuggestRetry = useCallback((originalTxt, hint) => {
+    showJarvisProgress(
+      'GEI Assistant corrigindo',
+      ['Revisando sua solicitacao...', 'Reclassificando produto na prateleira correta...', 'Montando novo prompt...', 'Reenviando automaticamente...'],
+      () => {
+        const note = `Notei que "${originalTxt}" pode ter sido mal interpretado. Preparei um novo prompt (${hint}) e vou reenviar automaticamente em 3 segundos. Voce pode ignorar esta mensagem ou digitar algo novo para cancelar.`;
+        setMsgs(p => [...p, { id: Date.now(), text: note, isAi: true, autoFix: true }]);
+        jarvisAutoPrompt(hint, 3000);
+      }
+    );
+  }, [showJarvisProgress, jarvisAutoPrompt]);
   // ── JARVIS global voice state ──────────────────────────────────────────────
   const [jarvisVoiceMode, setJarvisVoiceMode] = useState(false);
   const [jarvisRecording, setJarvisRecording] = useState(false);
   const [jarvisProcessing, setJarvisProcessing] = useState(false);
   const jarvisLiveRef = useRef(false);
   const jarvisLoopTimer = useRef(null);
-  const jarvisRecRef = useRef(null);
   const jarvisFailCountRef = useRef(0);
+  const jarvisNagCountRef = useRef(0);
+  const jarvisLastAddedRef = useRef(null); // ultimo produto cadastrado automaticamente pela IA
   const jarvisWaveAnims = useRef([...Array(5)].map(() => new Animated.Value(0.3))).current;
   const [jarvisConfirmModal, setJarvisConfirmModal] = useState(null); // { nome, validade, prateleira }
   const jarvisConfirmModalRef = useRef(null);
@@ -8999,6 +9525,10 @@ export default function App() {
       if (shelf === activeShelf) loadStock(activeShelf);
       const ok = 'Perfeito. ' + nome + ' cadastrado com validade ' + validade + '.';
       setMsgs(p => [...p, { id: Date.now(), text: ok, isAi: true }]);
+      // ── Fecha o painel e exibe o overlay de sucesso ──────────────────────
+      setShowPainelInteligente(false);
+      setJarvisVoiceMode(false);
+      setTimeout(() => setShowSuccess(true), 320); // aguarda animação de saída do modal
       speakWithElevenLabs(ok, () => { if (jarvisLiveRef.liveOn && !jarvisLiveRef.current) { jarvisLiveRef.current = true; jarvisRecordChunk(); } });
     } catch { speakWithElevenLabs('Erro ao salvar. Tente novamente.', () => {}); }
   };
@@ -9294,7 +9824,7 @@ export default function App() {
   }, [stockData, activeFilter, searchQuery]);
   const counts = useMemo(() => { const base = stockData.filter(i => String(i.produto || '').trim() || (String(i.codig || '').trim() && String(i.codig || '') !== 'Sem EAN')); return { all: base.length, ok: base.filter(i => vencStatus(i.VENCIMENTO).status === 'ok').length, warning30: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning30').length, warning: base.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').length, expired: base.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').length }; }, [stockData]);
   const triggerAutoClean = useCallback(async () => { setCleanToast({ cleaning: true }); try { const deleted = await runAutoClean(); if (deleted.length > 0 && activeShelf) loadStock(activeShelf); setCleanToast({ cleaning: false, deleted }); await addAuditLog('AUTO_CLEAN', `${deleted.length} produtos removidos`, userData?.id); } catch (_) { setCleanToast({ cleaning: false, deleted: [] }); } }, [activeShelf, userData, loadStock]);
-  const loadStock = useCallback(async shelf => { const tid = SHELVES[shelf]; if (!tid) return; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true&size=200`); const products = res.data.results || []; setStockData(sortProductsByDate(products)); agendarTercaSemanal(products).catch(()=>{}); verificarTercaHoje(products).catch(()=>{}); } catch (ex) { showErr('Erro ao carregar dados da prateleira.'); } }, [showErr]);
+  const loadStock = useCallback(async shelf => { const tid = SHELVES[shelf]; if (!tid) return; try { const res = await secureAxiosInstance.get(`https://api.baserow.io/api/database/rows/table/${tid}/?user_field_names=true&size=200`); const products = res.data.results || []; setStockData(prev => { /* PATCH: preserva itens otimistas (temp-*) e itens recentes ainda nao indexados pelo Baserow */ const serverIds = new Set(products.map(p => p.id)); const localOnly = (prev || []).filter(p => String(p.id || '').startsWith('temp-') || !serverIds.has(p.id)); /* mantem apenas itens locais com menos de 30s para nao acumular fantasmas */ const now = Date.now(); const fresh = localOnly.filter(p => !p._localTs || (now - p._localTs) < 30000); return sortProductsByDate([...fresh, ...products]); }); agendarTercaSemanal(products).catch(()=>{}); verificarTercaHoje(products).catch(()=>{}); } catch (ex) { showErr('Erro ao carregar dados da prateleira.'); } }, [showErr]);
 
   // ── Auto-ativa FIFO quando detecta ≥4 produtos com mesmo nome OU ≥2 com mesmo EAN ──
   React.useEffect(() => {
@@ -9351,7 +9881,24 @@ export default function App() {
     // OneSignal: registra usuário e envia tags para segmentação
     oneSignalLogin(user.id);
     oneSignalSetTags({ perfil: user.PERFIL || '', area: user.AREA || '', nome: user.NOME || '', usuario: user.USUARIO || '' }); }, [loadStock, triggerAutoClean]);
-  const switchShelf = async shelf => { setActiveShelf(shelf); setCadastroShelf(shelf); await loadStock(shelf); setShelfModal(false); };
+  const switchShelf = async shelf => { 
+    setActiveShelf(shelf); 
+    setCadastroShelf(shelf); 
+    await loadStock(shelf); 
+    setShelfModal(false); 
+    
+    // Atualiza o chat informando a mudança de prateleira para o usuário e para a IA
+    const label = shlabel(shelf);
+    const msg = `Setor alterado para: ${label}. Estoque carregado com sucesso.`;
+    setMsgs(p => [...p, { id: Date.now(), text: msg, isAi: true, system: true }]);
+    
+    // Injeta contexto no histórico do JARVIS para que ele saiba onde está agora
+    jarvisHistoryRef.current = [
+      ...jarvisHistoryRef.current.slice(-20), 
+      { role: 'user', parts: [{ text: `[SISTEMA] O usuário alterou a prateleira ativa para: ${label} (${shelf}).` }] },
+      { role: 'model', parts: [{ text: `Entendido. Agora estamos operando na prateleira ${label}.` }] }
+    ];
+  };
   const startScan = async mode => {
     try {
       const { status } = await Camera.getCameraPermissionsAsync();
@@ -9374,21 +9921,6 @@ export default function App() {
 
 
   // ── JARVIS Global Voice Loop — funciona em qualquer tela ───────────────────
-  const jarvisTranscribe = async (uri) => {
-    const fd = new FormData();
-    fd.append('audio', { uri, type: 'audio/m4a', name: 'a.m4a' });
-    const r = await fetch(
-      'https://api.deepgram.com/v1/listen?language=pt-BR&model=nova-2&smart_format=true&punctuate=true&filler_words=false',
-      { method: 'POST', headers: { 'Authorization': 'Token ' + DEEPGRAM_API_KEY }, body: fd }
-    );
-    if (!r.ok) {
-      console.warn('[JARVIS] Deepgram HTTP', r.status, await r.text().catch(() => ''));
-      return '';
-    }
-    const j = await r.json();
-    return (j?.results?.channels?.[0]?.alternatives?.[0]?.transcript) || '';
-  };
-
   const jarvisWaveStart = (anims) => {
     anims.forEach((a, i) => {
       Animated.loop(Animated.sequence([
@@ -9402,159 +9934,117 @@ export default function App() {
     anims.forEach(a => { a.stopAnimation(); Animated.timing(a, { toValue: 0.3, duration: 150, useNativeDriver: true }).start(); });
   };
 
-  const jarvisRecordChunk = async () => {
-    if (!jarvisLiveRef.current) return;
-    try {
-      // Configura modo de áudio para gravar
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldRouteThroughEarpieceAndroid: false,
-        interruptionModeIOS: 1,
-        interruptionModeAndroid: 1,
-      });
+  // ── JARVIS: handlers do reconhecimento nativo (ExpoSpeechRecognitionModule) ──
+  const jarvisNativeResultRef = useRef('');
+  const jarvisNativeGotResultRef = useRef(false);
 
-      // Pequena pausa para o hardware do mic estabilizar
-      await new Promise(r => setTimeout(r, 200));
+  const onJarvisNativeStart = useCallback(() => {
+    setJarvisRecording(true);
+    jarvisWaveStart(jarvisWaveAnims);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      // ── VAD por metering: detecta fim de fala por silêncio (3s) ─────────
-      const SILENCE_MS       = 3000;   // 3s de silêncio = parou de falar
-      const MIN_RECORD_MS    = 1200;   // não para antes de 1.2s (evita cortar inicio)
-      const MAX_RECORD_MS    = 30000;  // proteção: 30s máximo
-      const NO_SPEECH_MS     = 8000;   // se nada vier em 8s, encerra e tenta transcrever mesmo assim
-      const SPEECH_THRESHOLD = -45;    // dB acima disso = fala (mais sensível)
-      const POLL_MS          = 120;
+  const onJarvisNativeResult = useCallback((event) => {
+    const raw = event?.results?.[0]?.transcript || '';
+    if (raw && raw.trim()) {
+      jarvisNativeResultRef.current = raw.trim();
+      jarvisNativeGotResultRef.current = true;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-      const opts = JSON.parse(JSON.stringify(Audio.RecordingOptionsPresets.HIGH_QUALITY));
-      opts.isMeteringEnabled = true;
-      if (opts.android) opts.android.isMeteringEnabled = true;
-      if (opts.ios)     opts.ios.isMeteringEnabled = true;
+  const onJarvisNativeEnd = useCallback(() => {
+    setJarvisRecording(false);
+    jarvisWaveStop(jarvisWaveAnims);
+    if (!jarvisLiveRef.current) return; // cancelado
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(opts);
-      jarvisRecRef.current = recording;
+    const text = jarvisNativeResultRef.current;
+    jarvisNativeResultRef.current = '';
+    const got = jarvisNativeGotResultRef.current;
+    jarvisNativeGotResultRef.current = false;
 
-      let lastSoundAt    = 0;
-      let speechStarted  = false;
-      let stopRequested  = false;
-      let meterSeen      = false;  // dispositivo reporta metering?
-      let meterFallback  = false;  // sem metering -> janela fixa
-      let peakMeter      = -160;   // pico de volume registrado
-      const FIXED_WINDOW_MS = 8000; // fallback: grava 8s e transcreve
-      const recordStart  = Date.now();
-
-      recording.setProgressUpdateInterval(POLL_MS);
-      recording.setOnRecordingStatusUpdate((status) => {
-        if (!status || !status.isRecording) return;
-        const m = typeof status.metering === 'number' ? status.metering : null;
-        if (m !== null && m > -160) {
-          meterSeen = true;
-          if (m > peakMeter) peakMeter = m;
-        }
-        if (m !== null && m > SPEECH_THRESHOLD) {
-          lastSoundAt = Date.now();
-          if (!speechStarted) speechStarted = true;
-        }
-      });
-
-      await recording.startAsync();
-      setJarvisRecording(true);
-      jarvisWaveStart(jarvisWaveAnims);
-
-      // Loop de monitoramento (VAD)
-      const stopReason = await new Promise((resolve) => {
-        const tick = () => {
-          if (stopRequested) return;
-          if (!jarvisLiveRef.current) { stopRequested = true; return resolve('cancel'); }
-          const now     = Date.now();
-          const elapsed = now - recordStart;
-          if (elapsed >= MAX_RECORD_MS)                      { stopRequested = true; return resolve('max'); }
-          // Alguns aparelhos (principalmente Android) nao reportam metering.
-          // Se apos 1.5s nenhum valor chegou, usa janela fixa de gravacao.
-          if (!meterSeen && !meterFallback && elapsed >= 1500) {
-            meterFallback = true;
-            console.warn('[JARVIS] Metering indisponivel - usando janela fixa de ' + FIXED_WINDOW_MS + 'ms');
-          }
-          if (meterFallback) {
-            if (elapsed >= FIXED_WINDOW_MS) { stopRequested = true; return resolve('fixed'); }
-          } else {
-            // Só para por silêncio depois do tempo mínimo (evita cortar começo da frase)
-            if (elapsed >= MIN_RECORD_MS) {
-              if (!speechStarted && elapsed >= NO_SPEECH_MS) { stopRequested = true; return resolve('nospeech'); }
-              if (speechStarted && lastSoundAt && (now - lastSoundAt) >= SILENCE_MS) {
-                stopRequested = true; return resolve('silence');
-              }
-            }
-          }
-          jarvisLoopTimer.current = setTimeout(tick, POLL_MS);
-        };
-        jarvisLoopTimer.current = setTimeout(tick, POLL_MS);
-      });
-
-      // Para a gravação
-      try { recording.setOnRecordingStatusUpdate(null); } catch {}
-      try { await recording.stopAndUnloadAsync(); } catch {}
-      const uri = recording.getURI();
-      const totalElapsed = Date.now() - recordStart;
-      jarvisRecRef.current = null;
-      jarvisWaveStop(jarvisWaveAnims);
-      setJarvisRecording(false);
-
-      console.log('[JARVIS] stop=' + stopReason + ' dur=' + totalElapsed + 'ms peak=' + peakMeter + 'dB speech=' + speechStarted);
-
-      if (!jarvisLiveRef.current) return; // cancelado pelo usuário
-
-      // Só descarta se for muito curto OU se nada de audio foi captado mesmo
-      const tooShort = totalElapsed < 800;
-      const totalSilence = meterSeen && peakMeter < -55 && !speechStarted;
-      if (tooShort || totalSilence) {
-        if (jarvisLiveRef.current) jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 150);
-        return;
-      }
-
-      setJarvisProcessing(true);
-      let text = '';
-      try { text = await jarvisTranscribe(uri); } catch (e) { console.warn('[JARVIS] Transcricao falhou:', e); }
-      setJarvisProcessing(false);
-      console.log('[JARVIS] transcricao="' + (text || '') + '"');
-
-      if (text && text.trim().length > 0) {
-        jarvisFailCountRef.current = 0;
-        const clean = text.trim();
-        // 1) MOSTRA o que foi falado no chat IMEDIATAMENTE
-        setMsgs(p => [...p, { id: Date.now(), text: clean, isAi: false }]);
-        // 2) Pausa o loop enquanto o GEI responde (sendChatVoice religa o mic ao final)
-        jarvisLiveRef.current = false;
-        await sendChatVoice(clean, true); // true = texto ja exibido no chat
+    if (got && text) {
+      jarvisFailCountRef.current = 0;
+      const clean = text.trim();
+      setMsgs(p => [...p, { id: Date.now(), text: clean, isAi: false }]);
+      jarvisLiveRef.current = false;
+      sendChatVoice(clean, true).then(() => {
         if (jarvisLiveRef.liveOn && !jarvisLiveRef.current) {
           jarvisLiveRef.current = true;
           jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 300);
         }
-      } else {
-        // Nao entendeu — apos 2 falhas seguidas, avisa o usuario em vez de ficar mudo
-        jarvisFailCountRef.current = (jarvisFailCountRef.current || 0) + 1;
-        if (jarvisFailCountRef.current >= 2) {
-          jarvisFailCountRef.current = 0;
-          const oops = 'Nao consegui entender. Pode repetir, por favor?';
-          setMsgs(p => [...p, { id: Date.now(), text: oops, isAi: true }]);
+      });
+    } else {
+      // Nao entendeu — apos 2 falhas seguidas, avisa o usuario em vez de ficar mudo
+      jarvisFailCountRef.current = (jarvisFailCountRef.current || 0) + 1;
+      jarvisNagCountRef.current = (jarvisNagCountRef.current || 0);
+      if (jarvisFailCountRef.current >= 2) {
+        jarvisFailCountRef.current = 0;
+        jarvisNagCountRef.current += 1;
+        // Apos varias falhas consecutivas, para de repetir a mesma mensagem
+        // em loop e desliga o microfone — evita o "loop infinito" no chat.
+        if (jarvisNagCountRef.current >= 2) {
+          jarvisNagCountRef.current = 0;
+          const giveUp = 'Vou pausar o microfone por aqui. Pode digitar sua solicitacao no chat quando quiser.';
+          setMsgs(p => [...p, { id: Date.now(), text: giveUp, isAi: true }]);
           jarvisLiveRef.current = false;
-          await new Promise(res => speakWithElevenLabs(oops, res));
+          jarvisLiveRef.liveOn = false;
+          speakWithElevenLabs(giveUp, () => {});
+          return;
+        }
+        const oops = 'Nao consegui entender. Pode repetir, por favor?';
+        setMsgs(p => [...p, { id: Date.now(), text: oops, isAi: true }]);
+        jarvisLiveRef.current = false;
+        speakWithElevenLabs(oops, () => {
           if (jarvisLiveRef.liveOn) {
             jarvisLiveRef.current = true;
             jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 300);
           }
-        } else if (jarvisLiveRef.current) {
-          jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 200);
-        }
+        });
+      } else if (jarvisLiveRef.current) {
+        jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 200);
       }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onJarvisNativeError = useCallback((event) => {
+    setJarvisRecording(false);
+    jarvisWaveStop(jarvisWaveAnims);
+    const code = event?.error || '';
+    console.warn('[JARVIS] erro reconhecimento nativo:', code);
+    jarvisNativeResultRef.current = '';
+    jarvisNativeGotResultRef.current = false;
+    if (!jarvisLiveRef.current) return;
+    if (['no-speech', 'no-match'].includes(code)) {
+      jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 200);
+    } else {
+      jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 1000);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const jarvisRecordChunk = async () => {
+    if (!jarvisLiveRef.current) return;
+    try {
+      try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
+      await new Promise(r => setTimeout(r, 150));
+
+      const ok = await requestMicPermission();
+      if (!ok) {
+        AppAlert.alert('Microfone', 'Preciso de permissão para ouvir seus comandos.');
+        setJarvisVoiceMode(false);
+        return;
+      }
+      if (!jarvisLiveRef.current) return;
+
+      jarvisNativeResultRef.current = '';
+      jarvisNativeGotResultRef.current = false;
+      await ExpoSpeechRecognitionModule.start({ lang: 'pt-BR', interimResults: true, continuous: false });
     } catch (err) {
-      console.error('[JARVIS] Erro no ciclo de gravação:', err);
-      try { if (jarvisRecRef.current) await jarvisRecRef.current.stopAndUnloadAsync(); } catch {}
-      jarvisRecRef.current = null;
-      jarvisWaveStop(jarvisWaveAnims);
+      console.error('[JARVIS] Erro ao iniciar reconhecimento:', err);
       setJarvisRecording(false);
-      setJarvisProcessing(false);
+      jarvisWaveStop(jarvisWaveAnims);
       if (jarvisLiveRef.current) jarvisLoopTimer.current = setTimeout(jarvisRecordChunk, 1000);
     }
   };
@@ -9612,10 +10102,9 @@ export default function App() {
     jarvisLiveRef.liveOn = false;
     jarvisLiveRef.current = false;
     if (jarvisLoopTimer.current) clearTimeout(jarvisLoopTimer.current);
-    if (jarvisRecRef.current) { try { await jarvisRecRef.current.stopAndUnloadAsync(); } catch {} jarvisRecRef.current = null; }
+    try { ExpoSpeechRecognitionModule.stop(); } catch { /* noop */ }
     jarvisWaveStop(jarvisWaveAnims);
     setJarvisRecording(false); setJarvisProcessing(false);
-    Audio.setAudioModeAsync({ allowsRecordingIOS: false }).catch(() => {});
   };
 
   // Sincroniza jarvisVoiceMode com o loop
@@ -9628,51 +10117,375 @@ export default function App() {
     // ── GEI JARVIS — Chat inteligente multi-turn com function calling ──────────
   const jarvisHistoryRef = useRef([]);   // histórico Gemini multi-turn
 
+  // ── Helper: prateleiras que o operador atual pode usar ─────────────────────
+  const _getAllowedShelves = () => {
+    const perfil = userData?.PERFIL || '';
+    if (isCoord(perfil) || isDeposito(perfil)) return SHELF_KEYS; // acesso total
+    // Repositor: só a prateleira da sua AREA
+    const area = extractShelf(userData?.AREA || '');
+    return area && SHELVES[area] ? [area] : (activeShelf ? [activeShelf] : SHELF_KEYS.slice(0, 1));
+  };
+
+  // ── Helper: detecta prateleira correta pelo nome do produto no estoque ──────
+  const _detectShelfByProduct = (nomeRaw) => {
+    if (!nomeRaw) return null;
+    const n = nomeRaw.toLowerCase();
+    // Primeiro verifica se já existe no estoque com nome similar
+    const existing = stockData.find(p => {
+      const pn = (p.produto || '').toLowerCase();
+      // Match por primeiras palavras relevantes (ignora artigos)
+      const words = n.split(/\s+/).filter(w => w.length > 2);
+      return words.length > 0 && words.some(w => pn.includes(w));
+    });
+    if (existing) {
+      // Descobre a prateleira desse produto
+      for (const k of SHELF_KEYS) {
+        const shelfData = stockData.filter(p => {
+          // Não temos campo de prateleira no item, mas activeShelf é a carregada
+          // Usamos heurística de categoria pelo nome
+          return (p.produto || '').toLowerCase() === (existing.produto || '').toLowerCase();
+        });
+        if (shelfData.length > 0) break;
+      }
+    }
+    // Heurística por categoria do produto
+    const catMap = [
+      { shelf: 'bebida',   words: ['coca','pepsi','guarana','fanta','sprite','soda','refrigerante','suco','agua','cerveja','energetico','isoton','limonada','cha','mate'] },
+      { shelf: 'frios',    words: ['leite','iogurte','queijo','requeijao','manteiga','margarina','presunto','mortadela','salsicha','frios','laticinios','creme','nata','coalhada'] },
+      { shelf: 'biscoito', words: ['biscoito','bolacha','wafer','recheado','rosquinha','cream','cracker','cookie','chocolate','barra','amendoim','bala','chiclete','pirulito','doce','confeito','brigadeiro'] },
+      { shelf: 'macarrao', words: ['macarrao','massa','espaguete','talharim','parafuso','farinha','arroz','feijao','lentilha','grao','caldo','tempero','azeite','oleo','vinagre','molho','extrato'] },
+      { shelf: 'pesado',   words: ['detergente','sabao','amaciante','desinfetante','agua sanitaria','multiuso','esponja','vassoura','papel','fralda','absorvente','sabonete','shampoo','condicionador','creme dental','pasta','escova','desodorante','perfume','alcool','produto de limpeza'] },
+    ];
+    for (const { shelf, words } of catMap) {
+      if (words.some(w => n.includes(w))) return shelf;
+    }
+
+  // ── Helper: SCORE de cada prateleira para um nome (qtde de palavras-chave) ──
+  const _scoreShelves = (nomeRaw) => {
+    const n = String(nomeRaw || '').toLowerCase();
+    const cat = {
+      bebida:   ['coca','pepsi','guarana','fanta','sprite','soda','refrigerante','suco','agua','cerveja','energetico','isoton','limonada','cha','mate','vinho','whisky','gin','vodka','rum','licor'],
+      frios:    ['leite','iogurte','queijo','requeijao','manteiga','margarina','presunto','mortadela','salsicha','frios','laticinios','creme','nata','coalhada','linguiça','linguica'],
+      biscoito: ['biscoito','bolacha','wafer','recheado','rosquinha','cream','cracker','cookie','chocolate','barra','amendoim','bala','chiclete','pirulito','doce','confeito','brigadeiro','snack','salgadinho'],
+      macarrao: ['macarrao','massa','espaguete','talharim','parafuso','farinha','arroz','feijao','lentilha','grao','caldo','tempero','azeite','oleo','vinagre','molho','extrato','sal','acucar','cafe','achocolatado','aveia'],
+      pesado:   ['detergente','sabao','amaciante','desinfetante','agua sanitaria','multiuso','esponja','vassoura','papel','fralda','absorvente','sabonete','shampoo','condicionador','creme dental','pasta','escova','desodorante','perfume','alcool','produto de limpeza','rodo','pano'],
+    };
+    const scores = {};
+    for (const k of SHELF_KEYS) scores[k] = 0;
+    for (const [shelf, words] of Object.entries(cat)) {
+      for (const w of words) if (n.includes(w)) scores[shelf] = (scores[shelf] || 0) + 1;
+    }
+    return scores;
+  };
+
+  // ── Helper: resolve a MELHOR prateleira respeitando pinnedShelf + permissões ─
+  // Nunca recusa — sempre devolve uma chave válida dentre as permitidas.
+  const _smartResolveShelf = (nomeUso, requested) => {
+    const allowed = _getAllowedShelves();
+    if (!allowed.length) return activeShelf;
+
+    // 1) FIXADO pelo operador (botão "Fixar prateleira atual" no chat)
+    if (pinnedShelf && SHELVES[pinnedShelf] && allowed.includes(pinnedShelf)) {
+      return pinnedShelf;
+    }
+    // 2) Sugestão explícita da IA, se permitida
+    if (requested && SHELVES[requested] && allowed.includes(requested)) {
+      return requested;
+    }
+    // 3) Detecção semântica (heurística forte por palavra-chave)
+    const detected = _detectShelfByProduct(nomeUso);
+    if (detected && allowed.includes(detected)) return detected;
+
+    // 4) MELHOR pontuação dentre as PERMITIDAS
+    const scores = _scoreShelves(nomeUso);
+    let best = null, bestScore = -1;
+    for (const k of allowed) {
+      if ((scores[k] || 0) > bestScore) { best = k; bestScore = scores[k] || 0; }
+    }
+    if (best && bestScore > 0) return best;
+
+    // 5) Prateleira ativa, se permitida
+    if (activeShelf && allowed.includes(activeShelf)) return activeShelf;
+
+    // 6) Primeira permitida (último recurso)
+    return allowed[0];
+  };
+
+    return null;
+  };
+
   const JARVIS_SYSTEM = () => {
     const now = new Date().toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
-    const sample = stockData.slice(0, 15).map(s => {
+    const perfil = userData?.PERFIL || 'N/A';
+    const userArea = extractShelf(userData?.AREA || '');
+    const allowedShelves = _getAllowedShelves();
+    const isFullAccess = isCoord(perfil) || isDeposito(perfil);
+
+    const sample = stockData.slice(0, 20).map(s => {
       const m = buildDepletionMetrics(s, fifoMode, stockData, s.codig);
       return s.produto + ' | val:' + s.VENCIMENTO + ' | ' + m.remainingQty + 'un | ruptura:' + m.remainingDays + 'd';
     }).join('\n');
     const warn  = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'warning').map(i => i.produto + '(' + i.VENCIMENTO + ')').join(', ');
     const exp   = stockData.filter(i => vencStatus(i.VENCIMENTO).status === 'expired').map(i => i.produto + '(' + i.VENCIMENTO + ')').join(', ');
-    return 'Voce e o GEI, assistente de inteligencia artificial de gestao de estoque de supermercado. '
-      + 'Personalidade: confiante, preciso, proativo. Fala como o JARVIS do Homem de Ferro — direto, inteligente, levemente sofisticado mas acessivel. '
-      + 'Conhece profundamente o estoque, antecipa problemas, sugere acoes sem ser pedido quando ve algo critico. '
-      + 'Para voz: respostas curtas e naturais (2-3 frases max). Para texto: pode ser mais detalhado. '
-      + 'Nunca usa listas com asteriscos ou markdown cru. Quando necessario, usa estrutura em texto corrido.\n\n'
-      + '=== CONTEXTO ATUAL ===\n'
-      + 'Data: ' + now + '\n'
-      + 'Operador: ' + ((userData && userData.NOME) || 'Repositor') + ' | Perfil: ' + ((userData && userData.PERFIL) || 'N/A') + '\n'
-      + 'Prateleira ativa: ' + shlabel(activeShelf) + ' (' + activeShelf + ')\n'
-      + 'Prateleiras: ' + SHELF_KEYS.map(k => shlabel(k) + '=' + k).join(', ') + '\n'
-      + 'Total itens no estoque: ' + stockData.length + '\n'
+
+    // Monta lista de marcas/produtos existentes para o sistema reconhecer
+    const brandSample = [...new Set(stockData.slice(0, 40).map(s => (s.produto || '').split(' ').slice(0,3).join(' ')))].slice(0, 20).join(', ');
+
+    return 'Voce e o GEI, assistente de IA de gestao de estoque de supermercado. '
+      + 'Personalidade: JARVIS do Homem de Ferro — preciso, direto, sofisticado e proativo. Zero titubear. '
+      + 'NUNCA diga "nao entendi", "pode repetir", "nao consegui". Se algo for ambiguo, deduza pelo contexto e aja. '
+      + 'Para voz: max 2 frases. Para texto: objetivo, sem listas com asteriscos.\n\n'
+      + '=== OPERADOR ===\n'
+      + 'Nome: ' + (userData?.NOME || 'N/A') + '\n'
+      + 'Perfil: ' + perfil + '\n'
+      + 'Area/Setor: ' + (userArea ? shlabel(userArea) : 'N/A') + '\n'
+      + 'Acesso: ' + (isFullAccess ? 'TOTAL — pode cadastrar em qualquer prateleira' : 'RESTRITO — somente prateleira: ' + allowedShelves.map(k => shlabel(k) + '(' + k + ')').join(', ')) + '\n\n'
+      + '=== PRATELEIRAS ===\n'
+      + SHELF_KEYS.map(k => {
+          const allowed = allowedShelves.includes(k);
+          return shlabel(k) + '=' + k + (allowed ? ' [PERMITIDA]' : ' [SEM PERMISSAO]');
+        }).join(', ') + '\n'
+      + 'Prateleira ativa agora: ' + shlabel(activeShelf) + ' (' + activeShelf + ')\n\n'
+      + '=== ESTOQUE ===\n'
+      + 'Total: ' + stockData.length + ' itens\n'
       + 'Vencendo em 7 dias: ' + (warn || 'nenhum') + '\n'
       + 'Ja vencidos: ' + (exp || 'nenhum') + '\n'
-      + 'Estoque detalhado:\n' + (sample || 'vazio') + '\n\n'
-      + '=== FUNCOES DISPONIVEIS ===\n'
-      + 'Voce pode executar acoes reais. Quando o usuario pedir para cadastrar/adicionar produto, retorne EXATAMENTE ao final:\n'
-      + '<<<FN:cadastrar_produto>>>{"nome":"NOME EM MAIUSCULO","validade":"DD/MM/AAAA","prateleira":"chave"}<<<END>>>\n'
-      + 'Quando pedir para ver estoque de uma prateleira especifica, retorne:\n'
+      + 'Marcas presentes no estoque: ' + (brandSample || 'nenhuma ainda') + '\n'
+      + 'Detalhes:\n' + (sample || 'vazio') + '\n\n'
+      + '=== REGRAS DE CADASTRO ===\n'
+      + '1. PERMISSAO: O operador SO pode cadastrar nas prateleiras marcadas como [PERMITIDA]. '
+      + (pinnedShelf ? `IMPORTANTE: o operador FIXOU a prateleira ${shlabel(pinnedShelf)} (${pinnedShelf}) — TODO cadastro deve usar essa chave, ignore a categoria do produto. ` : '')
+      + (isFullAccess
+          ? 'Este operador tem acesso total. '
+          : 'NUNCA use prateleira [SEM PERMISSAO]. Se nenhuma prateleira permitida combinar com o produto, escolha a MAIS PROXIMA dentre as permitidas (jamais recuse) — o sistema fara o ajuste final automaticamente. ')
+      + '\n'
+      + '2. NOME DO PRODUTO: Sempre monte o nome mais completo possivel: MARCA + TIPO + VOLUME/PESO + DESCRICAO. '
+      + 'Exemplos: "coca" -> "COCA-COLA 600ML", "leite ninho" -> "LEITE NINHO PO INSTANTANEO 400G", "detergente ype" -> "DETERGENTE YPE NEUTRO 500ML". '
+      + 'Se o produto ja existe no estoque com nome similar, use exatamente o mesmo nome (veja "Marcas presentes no estoque" acima). '
+      + 'Nunca use nome generico como "PRODUTO" ou deixe sem marca se o usuario mencionou.\n'
+      + '3. PRATELEIRA AUTOMATICA: Deduza a prateleira certa pelo tipo de produto (use sempre este consenso): '
+      + 'bebida=tudo que for liquido para beber (refrigerante/suco/agua/cerveja/energetico/cha/isotonico), '
+      + 'frios=laticinios e embutidos (leite/iogurte/queijo/requeijao/manteiga/presunto/mortadela), '
+      + 'biscoito=guloseimas (biscoito/bolacha/chocolate/doce/bala/snack), '
+      + 'macarrao=mercearia/graos secos e temperos (arroz/feijao/macarrao/massa/farinha/azeite/oleo/tempero/molho/extrato/lentilha), '
+      + 'pesado=limpeza/higiene (detergente/sabao/papel/fralda/sabonete/shampoo). '
+      + 'Se nao tiver certeza, use a prateleira ativa (' + activeShelf + '). NUNCA responda que nao entendeu — se a categoria for ambigua, escolha a mais provavel e siga em frente.\n'
+      + '4. VALIDADE: Extraia do que o usuario disse. '
+      + 'Ano < 2020 -> corrija somando 10 (2016->2026). Sem ano -> use ' + new Date().getFullYear() + '. Sem validade -> pergunte. NUNCA invente.\n\n'
+      + '=== FUNCOES ===\n'
+      + 'Cadastrar produto (ja salva e confirma automaticamente, sem perguntar):\n'
+      + '<<<FN:cadastrar_produto>>>{"nome":"NOME COMPLETO","validade":"DD/MM/AAAA","prateleira":"chave"}<<<END>>>\n'
+      + 'Remover produto (remove o ultimo cadastrado pela IA, ou busca por nome):\n'
+      + '<<<FN:remover_produto>>>{"nome":"NOME OU VAZIO PARA ULTIMO CADASTRADO"}<<<END>>>\n'
+      + 'Use remover_produto sempre que o usuario disser "remove", "tira", "apaga", "errado", "nao e esse" apos um cadastro.\n'
+      + 'Consultar prateleira:\n'
       + '<<<FN:consultar_prateleira>>>{"prateleira":"chave"}<<<END>>>\n'
-      + 'Regras de extracao: nome em MAIUSCULO com marca e volume. Validade: "dezembro 2025"->01/12/2025, "marco 26"->01/03/2026. '
-      + 'Prateleira: bebida(refrigerante/suco/agua/cerveja), frios(laticinios/iogurte/queijo/presunto), biscoito(salgadinho/chocolate/doce), macarrao(massa/leite/farinha/arroz/feijao), pesado(limpeza/higiene/detergente). '
-      + 'Se faltar validade, pergunte antes de emitir o bloco. NUNCA invente validade.';
+      + '\n=== UI DINAMICA NO CHAT ===\n'
+      + 'Voce pode renderizar componentes interativos no chat usando blocos UI. Use APENAS quando agregar valor (ex: pedir confirmacao com botoes, mostrar tabela comparativa).\n'
+      + 'Botoes de escolha:\n'
+      + '<<<UI:choice>>>{"question":"Texto curto","options":[{"label":"Bebidas","action":"set_shelf","value":"bebida"},{"label":"Cancelar","action":"noop"}]}<<<END>>>\n'
+      + 'Acoes suportadas: set_shelf (troca prateleira ativa e fixa), pin_shelf (fixa a atual), unpin_shelf (libera), retry (reenvia ultima msg), noop.\n'
+      + 'Tabela:\n'
+      + '<<<UI:table>>>{"title":"Comparativo","columns":["Produto","Validade"],"rows":[["Coca 2L","15/03/26"]]}<<<END>>>\n'
+      + 'Lista de cards:\n'
+      + '<<<UI:list>>>{"title":"Sugestoes","items":[{"icon":"package","title":"X","subtitle":"Y"}]}<<<END>>>\n\n'
+      + 'REGRA FINAL: Se faltar algum dado essencial (validade), pergunte UMA vez, direto. Nada mais.\n'
+      + 'REGRA DE OURO — EXECUCAO: NUNCA diga "vou cadastrar", "irei cadastrar", "cadastrarei" sem emitir IMEDIATAMENTE, na MESMA resposta, o bloco <<<FN:cadastrar_produto>>>...<<<END>>>. Declarar a intencao sem o bloco e considerado falha. Se voce ja decidiu o nome, a validade e a prateleira, emita o bloco JA, sem confirmacoes extras.';
   };
 
   const jarvisExecuteFn = async (name, args) => {
     if (name === 'cadastrar_produto') {
-      if (!args.nome || !args.validade || !isValidDate(args.validade)) {
-        return 'Dados invalidos. Preciso do nome e da data de validade no formato DD/MM/AAAA.';
+      if (!args.nome || !args.validade) {
+        return 'Preciso da data de validade para cadastrar. Qual a validade do produto?';
       }
-      const shelf = args.prateleira || activeShelf;
-      // Mostra modal de confirmação visual na tela atual
-      setJarvisConfirmModal({ nome: args.nome.trim(), validade: args.validade, prateleira: shelf });
-      return 'Confirme o produto na tela.';
+
+      // ── 1. Corrigir nome — enriquece se genérico ───────────────────────────
+      let nomeUso = String(args.nome).trim().toUpperCase();
+      // Se IA devolveu nome muito curto (< 4 chars) ou genérico, tenta melhorar
+      if (nomeUso.length < 4 || nomeUso === 'PRODUTO') {
+        nomeUso = 'PRODUTO SEM NOME';
+      }
+
+      // ── 2. Corrigir data ────────────────────────────────────────────────────
+      const validadeBruta = String(args.validade).trim();
+      let validadeCorrigida = validadeBruta;
+      if (!isValidDate(validadeBruta)) {
+        const parsed = parsePortugueseDate(validadeBruta);
+        if (parsed) validadeCorrigida = parsed;
+      }
+      validadeCorrigida = smartCorrectDate(validadeCorrigida);
+      if (!isValidDate(validadeCorrigida)) {
+        return 'Nao consegui interpretar a data. Informe no formato DD/MM/AAAA.';
+      }
+
+      // ── 3. Resolver prateleira (NUNCA recusa — pin > IA > heurística > score) ─
+      //   Regra: se o operador clicou em "Fixar prateleira atual" no chat,
+      //   todo produto vai para essa prateleira. Caso contrário, a IA tenta
+      //   deduzir a mais adequada DENTRE as permitidas.
+      let shelf = _smartResolveShelf(nomeUso, args.prateleira);
+      const allowed = _getAllowedShelves();
+      if (!SHELVES[shelf]) shelf = allowed[0];
+      if (!SHELVES[shelf]) return 'Nenhuma prateleira disponivel. Verifique com o Coordenador.';
+
+      // ── 3.5. PATCH: IA inteligente pensa em etapas e enriquece o nome
+      //    (marca real, gramatura, EAN-13 BR, ml/g consistente). Nao bloqueia
+      //    o cadastro se falhar — apenas melhora o nome quando possivel.
+      let smartPergunta = '';
+      let smartIncoerencias = [];
+      try {
+        const rawSmart = await callSmartCadastroIA(args.nome, {
+          prateleira: shelf, validade: validadeCorrigida,
+          nomeOriginal: args.nome, perfil: userData?.PERFIL || ''
+        });
+        const parsed = parseSmartCadastroJSON(rawSmart);
+        if (parsed && parsed.produto && parsed.produto.nome) {
+          const enriched = String(parsed.produto.nome).trim().toUpperCase();
+          if (enriched.length >= 4 && enriched !== 'PRODUTO SEM NOME') nomeUso = enriched;
+          smartPergunta = parsed.pergunta && parsed.pergunta !== 'null' ? String(parsed.pergunta) : '';
+          smartIncoerencias = Array.isArray(parsed.incoerencias) ? parsed.incoerencias : [];
+        }
+        // Mostra o modal "IA pensando" com efeito de digitacao
+        if (parsed && Array.isArray(parsed.steps) && parsed.steps.length) {
+          setSmartCadastro({
+            visible: true, steps: parsed.steps, typedSteps: [],
+            produto: parsed.produto || null, pergunta: smartPergunta,
+            promptInterno: parsed.promptInterno || '',
+            incoerencias: smartIncoerencias, done: false
+          });
+          // Digita uma etapa por vez (700ms cada)
+          parsed.steps.forEach((step, idx) => {
+            setTimeout(() => setSmartCadastro(s => ({ ...s, typedSteps: [...s.typedSteps, step], done: idx === parsed.steps.length - 1 })), 700 * (idx + 1));
+          });
+          // Auto-fecha 2.5s apos a ultima etapa
+          setTimeout(() => setSmartCadastro(s => ({ ...s, visible: false })), 700 * (parsed.steps.length + 1) + 2500);
+        }
+      } catch (eSmart) { console.warn('[SmartCadastro] enriquecimento falhou:', eSmart?.message); }
+
+      //    O usuario pode pedir para "remover" depois caso o produto detectado
+      //    esteja errado — sem precisar confirmar manualmente cada cadastro.
+      const tid = SHELVES[shelf];
+      if (!tid) return 'Prateleira invalida. Verifique com o Coordenador.';
+      try {
+        // Otimização: Criamos o objeto do produto para atualização instantânea na UI
+        const dataEnvio = new Date().toLocaleDateString('pt-BR');
+        const previsao = calculatePrevisao(0, 'Medio giro', dataEnvio);
+        
+        // Dados formatados para o Baserow (garantindo que tipos batam)
+        const baserowData = { 
+          produto: nomeUso, 
+          codig: 'Sem EAN', 
+          VENCIMENTO: validadeCorrigida, 
+          quantidade: '0',
+          ENVIADOPORQUEM: (userData && userData.NOME) || 'GEI', 
+          PERFILFOTOURL: (userData && userData.PERFILFOTOURL) || '',
+          BOLETIM: false, 
+          DATAENVIO: dataEnvio, 
+          ALERTAMENSAGEM: '', 
+          MARGEM: 'Medio giro',
+          PREVISAO: previsao 
+        };
+
+        const tempId = 'temp-' + Date.now();
+        const newProd = { ...baserowData, id: tempId, _localTs: Date.now(), _justAdded: true };
+
+        // Se a IA cadastrou em uma prateleira diferente da ativa, avisa e troca automaticamente
+        let shelfChangedMsg = '';
+        if (shelf !== activeShelf) {
+          shelfChangedMsg = `\n\n🔄 Alterando visão para ${shlabel(shelf)}...`;
+          setActiveShelf(shelf);
+          setCadastroShelf(shelf);
+          await loadStock(shelf); // Carrega o estoque da nova prateleira antes de inserir
+        }
+
+        // Atualização otimista: Garante que o estado seja atualizado IMEDIATAMENTE
+        setStockData(prev => sortProductsByDate([newProd, ...prev]));
+
+        // Transparência: Log do que está sendo enviado
+        console.log(`[JARVIS] Enviando para Baserow na tabela ${tid}:`, baserowData);
+
+        const resp = await secureAxiosInstance.post(
+          'https://api.baserow.io/api/database/rows/table/' + tid + '/?user_field_names=true',
+          baserowData
+        );
+        
+        await addAuditLog('JARVIS_ADD_AUTO', nomeUso + ' via GEI JARVIS (auto-confirmado)', userData && userData.id);
+        
+        // Atualiza o ID real no estado local e força re-render se necessário
+        if (resp?.data?.id) {
+          setStockData(prev => {
+            const updated = prev.map(p => p.id === tempId ? { ...p, id: resp.data.id } : p);
+            return sortProductsByDate(updated);
+          });
+          // Força recarregamento do estoque para garantir sincronia total com o servidor
+          setTimeout(() => loadStock(shelf), 800);
+        }
+
+        // guarda o ultimo produto cadastrado pela IA para permitir "remover" rapido
+        jarvisLastAddedRef.current = { id: resp?.data?.id || tempId, produto: nomeUso, shelf, validade: validadeCorrigida };
+        // PATCH: forca a aparicao IMEDIATA do produto no painel Estoque com animacao de "montagem"
+        try {
+          setActiveFilter('all');
+          setEstoqueBuilding({ visible: true, produto: nomeUso, shelf, validade: validadeCorrigida });
+          navTo('estoque');
+          // Auto-fecha o overlay apos 2.6s (tempo da animacao)
+          setTimeout(() => setEstoqueBuilding(s => ({ ...(s||{}), visible: false })), 2600);
+        } catch (eUI) { console.warn('[JARVIS] UI refresh falhou:', eUI?.message); }
+        
+        const extras = [];
+        if (smartIncoerencias && smartIncoerencias.length) extras.push('⚠️ ' + smartIncoerencias.join(' · '));
+        if (smartPergunta) extras.push('❓ ' + smartPergunta);
+        const extrasMsg = extras.length ? ('\n\n' + extras.join('\n')) : '';
+        return `✅ Pronto. ${nomeUso} cadastrado em ${shlabel(shelf)} com validade ${validadeCorrigida} — ja confirmado automaticamente.${shelfChangedMsg}${extrasMsg}\nSe nao for o produto certo, so dizer "remove" e eu apago.`;
+      } catch {
+        return 'Erro ao salvar o produto. Tente novamente.';
+      }
     }
+
+    if (name === 'remover_produto') {
+      // Remove o ultimo produto cadastrado automaticamente pela IA, ou busca
+      // por nome no estoque atual e remove o primeiro que combinar.
+      const alvo = (args && args.nome ? String(args.nome).trim().toLowerCase() : '');
+      let target = null;
+      let targetShelf = activeShelf;
+
+      if (!alvo && jarvisLastAddedRef.current) {
+        target = jarvisLastAddedRef.current;
+        targetShelf = target.shelf || activeShelf;
+      } else if (alvo) {
+        // tenta achar no estoque carregado (prateleira ativa)
+        const found = stockData.find(p => (p.produto || '').toLowerCase().includes(alvo));
+        if (found) { target = { id: found.id, produto: found.produto }; targetShelf = activeShelf; }
+        else if (jarvisLastAddedRef.current && (jarvisLastAddedRef.current.produto || '').toLowerCase().includes(alvo)) {
+          target = jarvisLastAddedRef.current;
+          targetShelf = target.shelf || activeShelf;
+        }
+      }
+
+      if (!target || !target.id) {
+        return 'Nao encontrei o produto para remover. Diga o nome exato ou peca para remover o ultimo cadastrado.';
+      }
+
+      const tid = SHELVES[targetShelf];
+      if (!tid) return 'Prateleira invalida para remocao.';
+
+      try {
+        await secureAxiosInstance.delete(`https://api.baserow.io/api/database/rows/table/${tid}/${target.id}/`);
+        await addAuditLog('JARVIS_REMOVE', `Produto "${target.produto}" removido via GEI JARVIS`, userData && userData.id);
+        if (jarvisLastAddedRef.current && jarvisLastAddedRef.current.id === target.id) jarvisLastAddedRef.current = null;
+        if (targetShelf === activeShelf) {
+          setStockData(prev => sortProductsByDate(prev.filter(p => p.id !== target.id)));
+        }
+        return `Removido. ${target.produto} foi excluido de ${shlabel(targetShelf)}.`;
+      } catch {
+        return 'Erro ao remover o produto. Tente novamente.';
+      }
+    }
+
     if (name === 'consultar_prateleira') {
-      const shelf = (args && args.prateleira) || activeShelf;
-      const itens = stockData.filter(s => true).slice(0, 20).map(s => {
+      const reqShelf = (args && args.prateleira) || activeShelf;
+      const allowed = _getAllowedShelves();
+      const shelf = allowed.includes(reqShelf) ? reqShelf : (allowed[0] || activeShelf);
+      const itens = stockData.slice(0, 20).map(s => {
         const m = buildDepletionMetrics(s, fifoMode, stockData, s.codig);
         return s.produto + '(' + m.remainingQty + 'un, val:' + s.VENCIMENTO + ')';
       }).join(', ');
@@ -9681,19 +10494,32 @@ export default function App() {
     return 'Funcao desconhecida';
   };
 
-  const callJarvis = async (userText, isVoice) => {
-    const sysText = JARVIS_SYSTEM() + (isVoice ? ' MODO VOZ: maximo 2 frases curtas, zero markdown.' : '');
-    const maxTok = isVoice ? 200 : 800;
+  // ── Detecta se a IA está explicando que vai corrigir a data (sem cadastrar) ─
+  const _javisIsDateCorrection = (text) => {
+    if (!text) return false;
+    const t = text.toLowerCase();
+    // Contém intenção de corrigir/ajustar data MAS não emitiu o bloco de função
+    const hasCorrectIntent = (
+      /corri(gir|gindo|jo|gi)\s*(a\s*)?(data|validade|ano)/.test(t) ||
+      /ajust(ar|ando|o|ei)\s*(a\s*)?(data|validade|ano)/.test(t) ||
+      /vou\s*(usar|utilizar|considerar|adotar)\s*20[2-9]\d/.test(t) ||
+      /improvav(el|ável)\s*(para|num|em)\s*produto/.test(t) ||
+      /ano\s*20\d\d\s*(é|e)\s*improvav/.test(t) ||
+      /usando\s*20[2-9]\d/.test(t) ||
+      /(2016|2017|2018|2019)\s*(é|e)\s*improvav/.test(t) ||
+      /primeiro.*corrigi|corrigi.*data|antes.*corrigi/.test(t)
+    );
+    const hasFnBlock = /<<<FN:/.test(text);
+    return hasCorrectIntent && !hasFnBlock;
+  };
 
-    jarvisHistoryRef.current = [...jarvisHistoryRef.current, { role: 'user', parts: [{ text: userText }] }];
-    if (jarvisHistoryRef.current.length > 40) jarvisHistoryRef.current = jarvisHistoryRef.current.slice(-30);
-
+  // ── Motor de chamada à IA (raw, sem histórico) ────────────────────────────
+  const _callAIRaw = async (sysText, history, maxTok) => {
     let raw = '';
-
     const tryGemini = async (model) => {
       const body = {
         system_instruction: { parts: [{ text: sysText }] },
-        contents: jarvisHistoryRef.current,
+        contents: history,
         generationConfig: { temperature: 0.7, maxOutputTokens: maxTok }
       };
       const r = await fetchWithTimeout(
@@ -9703,16 +10529,15 @@ export default function App() {
       );
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
-      const t = (d && d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts && d.candidates[0].content.parts[0] && d.candidates[0].content.parts[0].text) || '';
+      const t = (d?.candidates?.[0]?.content?.parts?.[0]?.text) || '';
       if (!t.trim()) throw new Error('empty response');
       return t;
     };
-
     const tryGroq = async (model) => {
       if (!GROQ_API_KEY) throw new Error('no key');
       const messages = [{ role: 'system', content: sysText }];
-      jarvisHistoryRef.current.slice(-10).forEach(m => {
-        messages.push({ role: m.role === 'model' ? 'assistant' : 'user', content: (m.parts && m.parts[0] && m.parts[0].text) || (m.content || '') });
+      history.slice(-10).forEach(m => {
+        messages.push({ role: m.role === 'model' ? 'assistant' : 'user', content: (m.parts?.[0]?.text) || (m.content || '') });
       });
       const r = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -9721,36 +10546,179 @@ export default function App() {
       }, 7000);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
-      const t = (d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '';
+      const t = (d?.choices?.[0]?.message?.content) || '';
       if (!t.trim()) throw new Error('empty');
       return t;
     };
-
     const providers = [
       { name: 'Gemini 2.0 Flash', fn: () => tryGemini('gemini-2.0-flash') },
-      { name: 'Gemini 1.5 Flash', fn: () => tryGemini('gemini-1.5-flash') },
-      { name: 'Gemini 2.0 Lite',  fn: () => tryGemini('gemini-2.0-flash-lite') },
       { name: 'Groq LLaMA 3.3',   fn: () => tryGroq('llama-3.3-70b-versatile') },
-      { name: 'Groq Mixtral',     fn: () => tryGroq('mixtral-8x7b-32768') },
+      { name: 'Gemini 2.0 Lite',  fn: () => tryGemini('gemini-2.0-flash-lite') },
+      { name: 'Gemini 1.5 Flash', fn: () => tryGemini('gemini-1.5-flash') },
       { name: 'Groq LLaMA 3',     fn: () => tryGroq('llama3-8b-8192') },
+      { name: 'Groq Mixtral',     fn: () => tryGroq('mixtral-8x7b-32768') },
     ];
-
     for (const p of providers) {
-      try {
-        raw = await p.fn();
-        if (raw && raw.trim()) { console.log('[JARVIS] respondeu via', p.name); break; }
-      } catch (e) { console.warn('[JARVIS]', p.name, 'falhou:', e.message); }
+      try { raw = await p.fn(); if (raw?.trim()) { console.log('[JARVIS] respondeu via', p.name); break; } }
+      catch (e) { console.warn('[JARVIS]', p.name, 'falhou:', e.message); }
+    }
+    return raw;
+  };
+
+  // ── Typewriter: exibe msg com ID fixo, vai atualizando char a char ────────
+  const _typewriterMsg = (msgId, finalText, onDone) => {
+    let i = 0;
+    const step = () => {
+      i += Math.floor(Math.random() * 3) + 2; // 2-4 chars por tick
+      const slice = finalText.slice(0, i);
+      setMsgs(p => p.map(m => m.id === msgId ? { ...m, text: slice } : m));
+      if (i < finalText.length) setTimeout(step, 28);
+      else { setMsgs(p => p.map(m => m.id === msgId ? { ...m, text: finalText, thinking: false } : m)); if (onDone) onDone(); }
+    };
+    step();
+  };
+
+  const callJarvis = async (userText, isVoice) => {
+    const sysText = JARVIS_SYSTEM() + (isVoice ? ' MODO VOZ: maximo 2 frases curtas, zero markdown.' : '');
+    const maxTok = isVoice ? 200 : 800;
+
+    jarvisHistoryRef.current = [...jarvisHistoryRef.current, { role: 'user', parts: [{ text: userText }] }];
+    if (jarvisHistoryRef.current.length > 40) jarvisHistoryRef.current = jarvisHistoryRef.current.slice(-30);
+
+    // Transparência: Mostra o que a IA está analisando antes de chamar a API
+    const initialThinkId = Date.now() + 777;
+    setMsgs(p => [...p, { id: initialThinkId, text: '🧠 Analisando sua solicitação...', isAi: true, thinking: true }]);
+
+    let raw = await _callAIRaw(sysText, jarvisHistoryRef.current, maxTok);
+    
+    // Remove o "pensando" inicial
+    setMsgs(p => p.filter(m => m.id !== initialThinkId));
+
+    if (!raw?.trim()) raw = 'Sem conexao com a IA no momento. Tente novamente em instantes.';
+
+    // ── AUTO-CORREÇÃO: IA explicou que ia corrigir mas não cadastrou ──────────
+    // Injeta bolha de "pensando" com typewriter e dispara prompt automático.
+    if (_javisIsDateCorrection(raw)) {
+      console.log('[JARVIS] Detectou intenção de correção de data — disparando auto-fix.');
+
+      // 1. Mostra bolha animada de "corrigindo automaticamente"
+      const thinkId = Date.now() + 500;
+      const thinkSteps = [
+        '🔍 Analisando data informada...',
+        '🔍 Analisando data informada...\n⚙️ Detectado ano improvável para produto de mercado.',
+        '🔍 Analisando data informada...\n⚙️ Detectado ano improvável para produto de mercado.\n🛠️ Aplicando correção automática...',
+        '🔍 Analisando data informada...\n⚙️ Detectado ano improvável para produto de mercado.\n🛠️ Aplicando correção automática...\n✅ Confirmando cadastro...',
+      ];
+      setMsgs(p => [...p, { id: thinkId, text: thinkSteps[0], isAi: true, thinking: true }]);
+
+      // Anima os steps do typewriter com delays
+      let stepIdx = 0;
+      const animateSteps = () => new Promise(res => {
+        const next = () => {
+          stepIdx++;
+          if (stepIdx >= thinkSteps.length) { res(); return; }
+          setMsgs(p => p.map(m => m.id === thinkId ? { ...m, text: thinkSteps[stepIdx] } : m));
+          setTimeout(next, 600 + Math.random() * 300);
+        };
+        setTimeout(next, 700);
+      });
+
+      // 2. Enquanto anima, dispara o prompt de auto-correção em paralelo
+      const autoFixPrompt =
+        '[SISTEMA — AÇÃO AUTOMÁTICA] ' +
+        'O usuário pediu para cadastrar um produto mas a data continha um ano inválido (ex: 2016 em vez de 2026). ' +
+        'Aplique a correção de ano automaticamente (ano < 2020 → soma 10) e cadastre o produto AGORA. ' +
+        'Não explique, não pergunte. Apenas emita o bloco de função com a data corrigida. ' +
+        'Resposta permitida: apenas o bloco <<<FN:cadastrar_produto>>>...<<<END>>> e uma frase curtíssima de confirmação.';
+      
+      // Transparência: Mostra o prompt de correção que a IA está gerando
+      const promptLogId = Date.now() + 888;
+      setMsgs(p => [...p, { id: promptLogId, text: `🛠️ Sistema gerando prompt de auto-correção...`, isAi: true, system: true }]);
+      setTimeout(() => {
+        setMsgs(p => p.map(m => m.id === promptLogId ? { ...m, text: `🛠️ Prompt enviado: "${autoFixPrompt.slice(0, 80)}..."` } : m));
+      }, 1500);
+
+      const autoHistory = [
+        ...jarvisHistoryRef.current,
+        { role: 'model', parts: [{ text: raw }] },
+        { role: 'user', parts: [{ text: autoFixPrompt }] },
+      ];
+      const autoSys = JARVIS_SYSTEM() +
+        ' MODO AUTO-CORREÇÃO: a data foi detectada como inválida pelo sistema. ' +
+        'Corrija o ano automaticamente e emita o bloco <<<FN:cadastrar_produto>>> imediatamente. ' +
+        'Sem perguntas, sem explicações longas.';
+
+      const [autoRaw] = await Promise.all([
+        _callAIRaw(autoSys, autoHistory, 400),
+        animateSteps(),
+      ]);
+
+      // 3. Remove bolha de pensamento
+      setMsgs(p => p.filter(m => m.id !== thinkId));
+
+      // 4. Processa a resposta de auto-correção
+      const fixedFnMatch = autoRaw?.match(/<<<FN:(\w+)>>>([\s\S]*?)<<<END>>>/);
+      let fixedReply = (autoRaw || '').replace(/<<<FN:\w+>>>[\s\S]*?<<<END>>>/g, '').trim();
+
+      if (fixedFnMatch) {
+        try {
+          const result = await jarvisExecuteFn(fixedFnMatch[1], JSON.parse(fixedFnMatch[2].trim()));
+          if (result) fixedReply = String(result);
+        } catch (e) { console.warn('[JARVIS] auto-fix fn error:', e.message); }
+      }
+
+      const finalReply = fixedReply || 'Produto cadastrado com data corrigida.';
+      jarvisHistoryRef.current = [...autoHistory, { role: 'model', parts: [{ text: finalReply }] }];
+      return finalReply;
     }
 
-    if (!raw || !raw.trim()) raw = 'Sem conexao com a IA no momento. Tente novamente em instantes.';
-
-    const fnMatch = raw.match(/<<<FN:(\w+)>>>([\s\S]*?)<<<END>>>/);
+    // ── Fluxo normal ─────────────────────────────────────────────────────────
+    let fnMatch = raw.match(/<<<FN:(\w+)>>>([\s\S]*?)<<<END>>>/);
     let reply = raw.replace(/<<<FN:\w+>>>[\s\S]*?<<<END>>>/g, '').trim();
+
+    // ── AUTO-PROMPT: IA declarou intencao de cadastrar mas NAO emitiu o bloco FN.
+    //    Ex.: "Vou cadastrar o Sukita na prateleira Bebidas. Validade 13/06/2026."
+    //    Reenviamos um prompt curto exigindo somente o bloco <<<FN:cadastrar_produto>>>.
+    if (!fnMatch) {
+      const low = (raw || '').toLowerCase();
+      const intentRe = /(vou cadastrar|irei cadastrar|cadastrarei|cadastrando|vou registrar|registrarei|vou adicionar|adicionarei|vou inserir|inserirei|vou colocar)/;
+      const hasProductHints = /(validade|prateleira|vencimento|venc\.)/i.test(raw);
+      if (intentRe.test(low) && hasProductHints) {
+        console.log('[JARVIS] Intencao de cadastro sem bloco FN — disparando auto-prompt.');
+        const forceId = Date.now() + 909;
+        setMsgs(p => [...p, { id: forceId, text: '⚙️ Executando cadastro automaticamente...', isAi: true, system: true, thinking: true }]);
+        const forcePrompt =
+          '[SISTEMA — ACAO OBRIGATORIA] Voce acabou de declarar que ira cadastrar o produto, ' +
+          'mas NAO emitiu o bloco de funcao. Emita AGORA, como UNICA resposta, apenas o bloco ' +
+          '<<<FN:cadastrar_produto>>>{"nome":"...","validade":"DD/MM/AAAA","prateleira":"chave"}<<<END>>> ' +
+          'usando exatamente os dados da sua ultima mensagem (nome, validade e prateleira ja escolhida). ' +
+          'Sem texto antes ou depois, sem perguntas, sem explicacoes.';
+        const forceHistory = [
+          ...jarvisHistoryRef.current,
+          { role: 'model', parts: [{ text: raw }] },
+          { role: 'user', parts: [{ text: forcePrompt }] },
+        ];
+        try {
+          const forceRaw = await _callAIRaw(JARVIS_SYSTEM(), forceHistory, 300);
+          setMsgs(p => p.filter(m => m.id !== forceId));
+          const forcedFn = forceRaw && forceRaw.match(/<<<FN:(\w+)>>>([\s\S]*?)<<<END>>>/);
+          if (forcedFn) {
+            fnMatch = forcedFn;
+            const forcedClean = forceRaw.replace(/<<<FN:\w+>>>[\s\S]*?<<<END>>>/g, '').trim();
+            if (forcedClean) reply = (reply ? reply + '\n' : '') + forcedClean;
+            jarvisHistoryRef.current = forceHistory;
+          }
+        } catch (e) {
+          setMsgs(p => p.filter(m => m.id !== forceId));
+          console.warn('[JARVIS] auto-prompt falhou:', e.message);
+        }
+      }
+    }
 
     if (fnMatch) {
       try {
         const result = await jarvisExecuteFn(fnMatch[1], JSON.parse(fnMatch[2].trim()));
-        if (result && !reply) reply = String(result);
+        if (result) reply = String(result);
       } catch (e) { console.warn('[JARVIS] fn call error:', e.message); }
     }
 
@@ -9759,20 +10727,74 @@ export default function App() {
     return finalReply;
   };
 
+
+  // ── Extrai blocos <<<UI:KIND>>>{json}<<<END>>> da resposta da IA ───────────
+  const _extractUiParts = (text) => {
+    const parts = [];
+    const re = /<<<UI:(\w+)>>>([\s\S]*?)<<<END>>>/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      try { parts.push({ kind: m[1], data: JSON.parse(m[2].trim()) }); }
+      catch (e) { console.warn('[UI] parse fail', m[1], e.message); }
+    }
+    const clean = text.replace(/<<<UI:\w+>>>[\s\S]*?<<<END>>>/g, '').trim();
+    return { clean, parts };
+  };
+
+  // ── Handler central das acoes disparadas pelos botoes UI da IA ─────────────
+  const onChatUiAction = (action, value) => {
+    if (action === 'set_shelf' && value && SHELVES[value]) {
+      setActiveShelf(value); loadStock && loadStock(value);
+      setPinnedShelf(value);
+      setMsgs(p => [...p, { id: Date.now(), text: `📌 Prateleira fixada: ${shlabel(value)}. Tudo sera cadastrado aqui.`, isAi: true, system: true }]);
+    } else if (action === 'pin_shelf') {
+      if (activeShelf) {
+        setPinnedShelf(activeShelf);
+        setMsgs(p => [...p, { id: Date.now(), text: `📌 Prateleira ${shlabel(activeShelf)} fixada.`, isAi: true, system: true }]);
+      }
+    } else if (action === 'unpin_shelf') {
+      setPinnedShelf(null);
+      setMsgs(p => [...p, { id: Date.now(), text: '🔓 Prateleira liberada — IA volta a deduzir automaticamente.', isAi: true, system: true }]);
+    } else if (action === 'retry') {
+      if (value) { setChatTxt(value); setTimeout(() => sendChatRef.current && sendChatRef.current(), 100); }
+    }
+  };
+
   // sendChat — modo texto: usa JARVIS
   const sendChat = async () => {
     if (!chatTxt.trim() || chatBusy) return;
     const txt = chatTxt.trim();
     setChatTxt('');
     setMsgs(p => [...p, { id: Date.now(), text: txt, isAi: false }]);
+    // IA audaciosa: se detectar algo "errado" na mensagem (ex: data), mostra
+    // o modal de progresso e injeta uma mensagem de correção automática.
+    maybeAudaciousCorrection(txt);
     setChatBusy(true);
+    setJarvisProcessingFlag(true);
     try {
-      const reply = await callJarvis(txt, false);
-      setMsgs(p => [...p, { id: Date.now() + 1, text: reply, isAi: true }]);
+      const replyRaw = await callJarvis(txt, false);
+      const { clean: reply, parts: uiParts } = _extractUiParts(replyRaw || '');
+      setMsgs(p => [...p, { id: Date.now() + 1, text: reply, isAi: true, uiParts: uiParts.length ? uiParts : undefined }]);
+      // Se a resposta indicar que a IA nao entendeu / ficou ambigua, ela mesma
+      // monta um prompt mais especifico e reenvia automaticamente apos 3s.
+      const lowerReply = (reply || '').toLowerCase();
+      const isConfused = lowerReply.includes('nao consegui entender')
+        || lowerReply.includes('não consegui entender')
+        || lowerReply.includes('pode repetir')
+        || lowerReply.includes('nao entendi')
+        || lowerReply.includes('não entendi');
+      if (isConfused) {
+        const detected = _detectShelfByProduct(txt);
+        const hint = detected
+          ? `${txt} (categoria: ${shlabel(detected)})`
+          : `${txt} — cadastrar na prateleira ${shlabel(activeShelf)}`;
+        jarvisSuggestRetry(txt, hint);
+      }
     } catch (ex) {
       setMsgs(p => [...p, { id: Date.now() + 1, text: 'Falha na conexao com GEI. Verifique sua internet.', isAi: true }]);
-    } finally { setChatBusy(false); }
+    } finally { setChatBusy(false); setJarvisProcessingFlag(false); }
   };
+  useEffect(() => { sendChatRef.current = sendChat; });
 
   // sendChatVoice — modo voz: usa JARVIS + ElevenLabs fala resposta
   // IMPORTANTE: esta função sempre AGUARDA a fala terminar e NUNCA reinicia
@@ -9809,6 +10831,10 @@ export default function App() {
           if (shelf === activeShelf) loadStock(activeShelf);
           const ok = 'Perfeito. ' + nome + ' cadastrado com validade ' + validade + '.';
           setMsgs(p => [...p, { id: Date.now(), text: ok, isAi: true }]);
+          // ── Fecha painel e exibe overlay de sucesso ──────────────────────
+          setShowPainelInteligente(false);
+          setJarvisVoiceMode(false);
+          setTimeout(() => setShowSuccess(true), 320);
           await new Promise(res => speakWithElevenLabs(ok, res));
         } catch {
           await new Promise(res => speakWithElevenLabs('Erro ao salvar. Tente novamente.', res));
@@ -9828,6 +10854,7 @@ export default function App() {
     }
 
     setChatBusy(true);
+    setJarvisProcessingFlag(true);
     try {
       const reply = await callJarvis(clean, true);
       setMsgs(p => [...p, { id: Date.now() + 1, text: reply, isAi: true }]);
@@ -9851,7 +10878,8 @@ export default function App() {
         jarvisLiveRef.current = true;
         setTimeout(jarvisRecordChunk, 500);
       }
-    } finally { 
+    } finally {
+      setJarvisProcessingFlag(false);
       setChatBusy(false); 
     }
   };
@@ -9900,7 +10928,7 @@ export default function App() {
     if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current);
     sessionTimerRef.current = setTimeout(() => {
       if (isLogged) {
-        AppAlert.alert('Sessão expirada', 'Sua sessão expirou por inatividade. Faça login novamente.', [{ text: 'OK', onPress: () => { addAuditLog('SESSION_TIMEOUT', 'Sessão expirada por inatividade', userData?.id); oneSignalLogout(); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); } }]);
+        AppAlert.alert('Sessão expirada', 'Sua sessão expirou por inatividade. Faça login novamente.', [{ text: 'OK', onPress: () => { addAuditLog('SESSION_TIMEOUT', 'Sessão expirada por inatividade', userData?.id); oneSignalLogout(); setIsLogged(false); setUserData(null); setEmailIn(''); setPassIn(''); setStockData([]); setActiveShelf(''); setCadastroShelf(''); setPinnedShelf(null); } }]);
       }
     }, SESSION_TIMEOUT_MS);
   }, [isLogged, userData]);
@@ -10068,7 +11096,7 @@ export default function App() {
             </TouchableOpacity>
           </ScrollView>
         )}
-        {currentTab === 'chat' && <ChatScreen T={T} fontScale={fontScale} msgs={msgs} chatTxt={chatTxt} setChatTxt={setChatTxt} sendChat={sendChat} sendChatVoice={sendChatVoice} busy={chatBusy} scrollRef={scrollRef} TAB_H={TAB_H} NAV_BAR_H={NAV_BAR_H} onVoiceMode={setJarvisVoiceMode} jarvisRecording={jarvisRecording} jarvisProcessing={jarvisProcessing} jarvisBusy={chatBusy} />}
+        {currentTab === 'chat' && <ChatScreen T={T} fontScale={fontScale} msgs={msgs} chatTxt={chatTxt} setChatTxt={setChatTxt} sendChat={sendChat} sendChatVoice={sendChatVoice} busy={chatBusy} scrollRef={scrollRef} TAB_H={TAB_H} NAV_BAR_H={NAV_BAR_H} onVoiceMode={setJarvisVoiceMode} jarvisRecording={jarvisRecording} jarvisProcessing={jarvisProcessing} jarvisBusy={chatBusy} onProgressDone={closeJarvisProgress} activeShelf={activeShelf} pinnedShelf={pinnedShelf} setPinnedShelf={setPinnedShelf} shlabel={shlabel} SHELF_KEYS={SHELF_KEYS} SHELVES={SHELVES} onUiAction={onChatUiAction} />}
         {currentTab === 'cadastro' && (
           <>
             <CadastroScreen T={T} fontScale={fontScale} perf={perf} cadastroShelf={cadastroShelf} setCadastroShelf={setCadastroShelf} activeShelf={activeShelf} prodName={prodName} setProdName={setProdName} validade={validade} setValidade={setValidade} wStep={wStep} setWStep={setWStep} nextStep={nextStep} saveProduct={saveProduct} TAB_SAFE={TAB_SAFE} isCoord={isCoord} isDeposito={isDeposito} SHELF_KEYS={SHELF_KEYS} shlabel={shlabel} shelfPalette={shelfPalette} showErr={showErr} />
@@ -10079,6 +11107,32 @@ export default function App() {
         )}
         {currentTab === 'estoque' && (
           <View style={{ flex: 1 }}>
+            {/* PATCH: Overlay animado "Montando estoque" forcado apos cadastro IA */}
+            {estoqueBuilding.visible && (
+              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999, backgroundColor: T.bg + 'F0', justifyContent: 'center', alignItems: 'center', padding: 24 }} pointerEvents="auto">
+                <View style={{ width: '100%', maxWidth: 380, backgroundColor: T.bgCard, borderRadius: 28, padding: 24, borderWidth: 2, borderColor: T.blue + '60', shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 30, elevation: 20 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                    <ActivityIndicator size="small" color={T.blue} />
+                    <Text style={{ flex: 1, fontSize: 12 * fontScale, fontWeight: '900', color: T.blue, letterSpacing: 1.2, textTransform: 'uppercase' }}>Montando Estoque...</Text>
+                  </View>
+                  {/* Skeleton de 3 cards "construindo" */}
+                  {[0,1,2].map(i => (
+                    <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, marginBottom: 10, backgroundColor: T.bgInput, borderRadius: 14, borderWidth: 1, borderColor: T.border, opacity: i === 0 ? 1 : 0.45 - (i*0.1) }}>
+                      <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: i === 0 ? T.blueGlow : T.border, justifyContent: 'center', alignItems: 'center' }}>
+                        {i === 0 ? <Feather name="check" size={20} color={T.blue} /> : <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: T.borderMid }} />}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13 * fontScale, fontWeight: '900', color: i === 0 ? T.text : T.textMuted }} numberOfLines={1}>{i === 0 ? (estoqueBuilding.produto || 'Produto') : ' '}</Text>
+                        <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 3 }}>{i === 0 ? ('Validade ' + (estoqueBuilding.validade || '—') + ' · ' + shlabel(estoqueBuilding.shelf || activeShelf)) : ' '}</Text>
+                      </View>
+                    </View>
+                  ))}
+                  <View style={{ marginTop: 6, padding: 12, borderRadius: 12, backgroundColor: T.greenGlow, borderWidth: 1, borderColor: T.green + '50' }}>
+                    <Text style={{ fontSize: 12 * fontScale, fontWeight: '800', color: T.green, textAlign: 'center' }}>✅ Produto adicionado pela IA · sincronizando...</Text>
+                  </View>
+                </View>
+              </View>
+            )}
             <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: T.border, gap: 8, backgroundColor: T.bgCard }}>
               <FlatList horizontal showsHorizontalScrollIndicator={false} data={FILTERS} keyExtractor={f => f.key} style={{ flex: 1 }} contentContainerStyle={{ gap: 8 }} renderItem={({ item: f }) => { const on = activeFilter === f.key; const fc2 = fcol[f.colorKey]; const cnt = counts[f.key]; return (<TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border }, on && { backgroundColor: fc2 + '18', borderColor: fc2 + '60' }]} onPress={() => setActiveFilter(f.key)}><Feather name={f.icon} size={13} color={on ? fc2 : T.textSub} /><Text style={[{ fontSize: 13 * fontScale, fontWeight: '700', color: T.textSub }, on && { color: fc2, fontWeight: '800' }]}>{f.label}</Text>{cnt > 0 && <View style={{ width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', backgroundColor: on ? fc2 : T.borderMid }}><Text style={{ fontSize: 10, fontWeight: '900', color: on ? '#FFF' : T.textSub }}>{cnt}</Text></View>}</TouchableOpacity>); }} />
               <View style={{ flexDirection: 'row', gap: 6, marginLeft: 8 }}><TouchableOpacity style={[{ width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }, searchOpen && { backgroundColor: T.blueGlow, borderColor: T.blue + '60' }]} onPress={() => { setSearchOpen(o => !o); if (searchOpen) setSearchQuery(''); }}><Feather name="search" size={16} color={searchOpen ? T.blue : T.textSub} /></TouchableOpacity>{['list', 'grid'].map(m => (<TouchableOpacity key={m} style={[{ width: 36, height: 36, borderRadius: 10, backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.border, justifyContent: 'center', alignItems: 'center' }, viewMode === m && { backgroundColor: T.blueGlow, borderColor: T.blue + '60' }]} onPress={() => setViewMode(m)}><Feather name={m} size={16} color={viewMode === m ? T.blue : T.textSub} /></TouchableOpacity>))}</View>
@@ -10092,6 +11146,51 @@ export default function App() {
       <Modal visible={scanning} animationType='fade' transparent={false} onRequestClose={() => setScanning(false)}><View style={StyleSheet.absoluteFill}>          <CameraView ref={camRef} style={StyleSheet.absoluteFill} enableTorch={torchOn} onBarcodeScanned={scanMode === 'barcode' ? onBarcode : undefined} barcodeScannerSettings={{ barcodeTypes: ['ean13', 'upc_a', 'ean8', 'qr', 'code128'] }} onCameraReady={scanMode === 'aiVision' ? onAIVisionCameraReady : undefined} />
           <DarkTorchPrompt isDarkEnv={isDarkEnv} lightLevel={lightLevel} torchOn={torchOn} onToggleTorch={() => setTorchOn(p => !p)} T={T} fontScale={fontScale} /><View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.32)' }}><View style={{ position: 'absolute', top: 40, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24 }}><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => { setScanning(false); setCountdown(null); setTorchOn(false); setShowAchandoGif(false); aiVisionTriggeredRef.current = false; if (gifTimeoutRef.current) clearTimeout(gifTimeoutRef.current); }}><Feather name="x" size={22} color="#FFF" /></TouchableOpacity><TouchableOpacity style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: torchOn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setTorchOn(!torchOn)}><Feather name="zap" size={20} color={torchOn ? '#000' : '#FFF'} /></TouchableOpacity></View>{scanMode === 'barcode' && !showAchandoGif && (<View style={{ alignItems: 'center' }}><View style={{ width: 280, height: 180, borderWidth: 2, borderColor: T.blue, borderRadius: 24, backgroundColor: 'rgba(59,91,255,0.05)' }}><Animated.View style={{ height: 2, backgroundColor: T.blue, width: '100%', position: 'absolute', top: scanAnim.interpolate({ inputRange: [0, 1], outputRange: ['10%', '90%'] }), shadowColor: T.blue, shadowOpacity: 1, shadowRadius: 10, elevation: 10 }} /></View><Text style={{ color: '#FFF', marginTop: 24, fontWeight: '800', fontSize: 16, textShadowColor: 'rgba(0,0,0,0.8)', textShadowRadius: 4 }}>Posicione o código de barras</Text><Text style={{ color: 'rgba(255,255,255,0.6)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Nome preenchido automaticamente pela IA</Text></View>)}{scanMode === 'aiVision' && (<View style={{ alignItems: 'center' }}><Animated.View style={{ width: 260, height: 260, borderWidth: 3, borderColor: T.purple, borderRadius: 130, backgroundColor: 'rgba(124,58,237,0.1)', alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulseAnim }] }}><MaterialCommunityIcons name="robot-outline" size={80} color={T.purple} /></Animated.View><Text style={{ color: '#FFF', marginTop: 32, fontWeight: '800', fontSize: 18, textAlign: 'center', paddingHorizontal: 40 }}>IA Vision · Aponte para o produto</Text><Text style={{ color: 'rgba(255,255,255,0.65)', marginTop: 8, fontWeight: '600', fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>Captura automática em tempo real pelo Gemini</Text></View>)}</View></View></Modal>
       {showAchandoGif && (<View style={StyleSheet.absoluteFill}><View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' }}><View style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 30, padding: 25, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' }}><Image source={AchandoGif} style={{ width: 180, height: 180 }} resizeMode="contain" /></View><Text style={{ marginTop: 35, color: '#FFF', fontSize: 22, fontWeight: 'bold', letterSpacing: 1 }}>Consultando fontes...</Text><Text style={{ marginTop: 10, color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>Buscando em GEI.IA, Bluesoft e OpenFoodFacts</Text></View></View>)}
+      {/* PATCH: Modal "IA pensando" — digita prompts inteligentes ao vivo */}
+      <Modal visible={smartCadastro.visible} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setSmartCadastro(s => ({ ...s, visible: false }))}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.78)', justifyContent: 'center', alignItems: 'center', padding: 18 }}>
+          <View style={{ width: '100%', maxWidth: 420, backgroundColor: T.bgCard, borderRadius: 28, padding: 22, borderWidth: 2, borderColor: T.purple + '70', shadowColor: T.purple, shadowOpacity: 0.5, shadowRadius: 30, elevation: 20 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: T.purpleGlow, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: T.purple + '60' }}>
+                <MaterialCommunityIcons name="brain" size={20} color={T.purple} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.purple, letterSpacing: 1.2, textTransform: 'uppercase' }}>GEI.IA · Pensando</Text>
+                <Text style={{ fontSize: 14 * fontScale, fontWeight: '800', color: T.text }}>Digitando prompts inteligentes...</Text>
+              </View>
+              {!smartCadastro.done && <ActivityIndicator size="small" color={T.purple} />}
+            </View>
+            <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
+              {(smartCadastro.typedSteps || []).map((step, i) => (
+                <View key={i} style={{ flexDirection: 'row', gap: 8, paddingVertical: 8, paddingHorizontal: 10, marginBottom: 6, backgroundColor: T.bgInput, borderRadius: 12, borderLeftWidth: 3, borderLeftColor: T.purple + '90' }}>
+                  <Text style={{ fontSize: 13 * fontScale, color: T.text, fontWeight: '600', flex: 1 }}>{step}</Text>
+                </View>
+              ))}
+              {smartCadastro.typedSteps.length < (smartCadastro.steps || []).length && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10 }}>
+                  <Text style={{ fontSize: 13 * fontScale, color: T.textMuted, fontStyle: 'italic' }}>▍</Text>
+                </View>
+              )}
+            </ScrollView>
+            {smartCadastro.done && smartCadastro.produto && (
+              <View style={{ marginTop: 10, padding: 12, backgroundColor: T.blueGlow, borderRadius: 14, borderWidth: 1, borderColor: T.blue + '50' }}>
+                <Text style={{ fontSize: 11 * fontScale, fontWeight: '900', color: T.blue, marginBottom: 4, letterSpacing: 0.8 }}>RESUMO IA</Text>
+                <Text style={{ fontSize: 13 * fontScale, color: T.text, fontWeight: '800' }}>{smartCadastro.produto.nome || '—'}</Text>
+                <Text style={{ fontSize: 11 * fontScale, color: T.textSub, marginTop: 2 }}>
+                  {(smartCadastro.produto.marca || '?')} · {(smartCadastro.produto.gramatura || '?')} · EAN {(smartCadastro.produto.ean || '— pendente')}
+                </Text>
+                {smartCadastro.pergunta ? (
+                  <Text style={{ fontSize: 12 * fontScale, color: T.amber, marginTop: 8, fontWeight: '700' }}>❓ {smartCadastro.pergunta}</Text>
+                ) : null}
+              </View>
+            )}
+            <TouchableOpacity onPress={() => setSmartCadastro(s => ({ ...s, visible: false }))} style={{ marginTop: 14, paddingVertical: 10, borderRadius: 14, backgroundColor: T.bgInput, alignItems: 'center', borderWidth: 1, borderColor: T.border }}>
+              <Text style={{ fontSize: 13 * fontScale, fontWeight: '800', color: T.textSub }}>Fechar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showRoboGif} transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}><View style={{ flex: 1, backgroundColor: 'rgba(0,10,40,0.92)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}><View style={{ backgroundColor: '#FFFFFF', borderRadius: 36, padding: 28, width: '90%', alignItems: 'center', shadowColor: '#3B5BFF', shadowOpacity: 0.5, shadowRadius: 40, elevation: 20, borderWidth: 2, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(59,91,255,0.1)', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(59,91,255,0.25)' }}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#3B5BFF' }} /><Text style={{ fontSize: 11, fontWeight: '900', color: '#3B5BFF', letterSpacing: 1.5, textTransform: 'uppercase' }}>IA Vision · GEI.AI</Text></View><View style={{ width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(59,91,255,0.06)', borderWidth: 3, borderColor: 'rgba(59,91,255,0.3)', justifyContent: 'center', alignItems: 'center', marginBottom: 20, shadowColor: '#3B5BFF', shadowOpacity: 0.3, shadowRadius: 20, elevation: 8 }}><Image source={RoboGif} style={{ width: 170, height: 170, borderRadius: 85 }} resizeMode="cover" fadeDuration={0} /></View><View style={{ width: '80%', height: 1, backgroundColor: 'rgba(59,91,255,0.12)', marginBottom: 16 }} /><Text style={{ fontSize: 13, fontWeight: '800', color: '#3B5BFF', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Produto Identificado!</Text><Text style={{ fontSize: 16, fontWeight: '900', color: '#0F172A', textAlign: 'center', lineHeight: 22, paddingHorizontal: 8 }} numberOfLines={3}>{roboMsg.split('\n')[1]}</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 18, backgroundColor: 'rgba(22,163,74,0.08)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(22,163,74,0.25)' }}><Feather name="check-circle" size={14} color="#16A34A" /><Text style={{ fontSize: 12, fontWeight: '800', color: '#16A34A' }}>Cadastro sendo aberto...</Text></View></View></View></Modal>
       {!scanning && (<View style={{ height: TAB_SAFE, backgroundColor: T.bgCard, borderTopWidth: 1, borderColor: T.border, flexDirection: 'row', paddingBottom: NAV_BAR_H, paddingHorizontal: 10 }}><TabBtn icon="home" label="Início" active={currentTab === 'home'} onPress={() => navTo('home')} T={T} fontScale={fontScale} /><TabBtn icon="layers" label="Estoque" active={currentTab === 'estoque'} onPress={() => navTo('estoque')} T={T} fontScale={fontScale} /><View style={{ flex: 1.2, alignItems: 'center', justifyContent: 'center' }}><TouchableOpacity activeOpacity={0.9} style={{ width: 58, height: 58, borderRadius: 22, backgroundColor: T.blue, marginTop: -34, justifyContent: 'center', alignItems: 'center', elevation: 10, shadowColor: T.blue, shadowOpacity: 0.4, shadowRadius: 12, borderWidth: 4, borderColor: T.bgCard }} onPress={() => { resetWiz(); setProdName(''); setGiro(''); navTo('cadastro'); }}><Feather name="plus" size={28} color="#FFF" /></TouchableOpacity></View><TabBtn icon="message-circle" label="IA Chat" active={currentTab === 'chat'} onPress={() => navTo('chat')} T={T} fontScale={fontScale} /><TabBtn icon="settings" label="Ajustes" active={currentTab === 'config'} onPress={() => navTo('config')} T={T} fontScale={fontScale} /></View>)}
       {/* ── Botão flutuante JARVIS — qualquer tela ─────────────────────────── */}
@@ -10253,11 +11352,20 @@ export default function App() {
         jarvisVoiceMode={jarvisVoiceMode}
         jarvisRecording={jarvisRecording}
         jarvisProcessing={jarvisProcessing}
+        onProgressDone={closeJarvisProgress}
         stockData={stockData}
         userData={userData}
         fifoMode={fifoMode}
       />
       <AppAlertManager ref={ref => { if (ref) AppAlertService._flush(ref); }} T={T} />
+      {jarvisVoiceMode && (
+        <>
+          <_SafeSpeechEventWrapper eventName="start"  onEvent={onJarvisNativeStart} />
+          <_SafeSpeechEventWrapper eventName="result" onEvent={onJarvisNativeResult} />
+          <_SafeSpeechEventWrapper eventName="end"    onEvent={onJarvisNativeEnd} />
+          <_SafeSpeechEventWrapper eventName="error"  onEvent={onJarvisNativeError} />
+        </>
+      )}
     </View>
   );
 }
